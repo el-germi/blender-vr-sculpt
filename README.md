@@ -1,6 +1,6 @@
 # VR Sculpt for Blender (prototype)
 
-Sculpt meshes with VR controllers inside Blender's own VR session. Pure Python
+Sculpt and model with VR controllers inside Blender's own VR session. Pure Python
 extension, no Blender fork. Built and tested on **Blender 5.4.0 Alpha** with a
 Meta Quest over OpenXR.
 
@@ -23,18 +23,28 @@ Meta Quest over OpenXR.
   one-line description for a few seconds after switching.
 - **Haptics** on contact with the surface.
 - One undo step per stroke (Python engine).
+- **Model mode**: drag out cubes and cylinders in empty space, grab objects
+  to move and rotate them, and edit a primitive's size, subdivisions, radius,
+  height or segments afterwards. Primitives stay editable until you sculpt
+  them.
+- **Hand panel** above the left controller: Sculpt / Model tabs, engine and
+  brush buttons, radius and strength sliders, primitive settings, Duplicate
+  and Delete. Point at it with the right controller and pull the trigger.
 
 ![Brush cards](docs/brush_cards.png)
 
 ## Controls
 
-| Input | Action |
-|---|---|
-| Right trigger | Sculpt |
-| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) |
-| B / Y | Next brush |
-| Thumbstick click | Next radius (1, 2, 4, 8, 16 cm) |
-| Grip, thumbsticks, A / X | Blender's stock VR navigation (unchanged) |
+| Input | Sculpt mode | Model mode |
+|---|---|---|
+| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab |
+| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right |
+| Right trigger, pointing at the hand panel | Press buttons, drag sliders | Same |
+| Y (left) | Switch to Model mode | Switch to Sculpt mode |
+| B (right) | Next brush | Next primitive (Cube / Cylinder) |
+| Left stick click | Show / hide the hand panel | Same |
+| Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same |
+| Grip, thumbsticks, A / X | Blender's stock VR navigation (unchanged) | Same |
 
 Trigger teleport is replaced while "Sculpt With Triggers" is on. The setting
 applies when the VR session starts.
@@ -79,6 +89,14 @@ offset and display options.
 - **Native engine** ([native.py](vr_sculpt/native.py)): calls
   `bpy.ops.sculpt.brush_stroke` once per dab with a stroke element at the
   controller tip.
+- **Model mode** ([interactions.py](vr_sculpt/interactions.py),
+  [primitives.py](vr_sculpt/primitives.py)): the same trigger operator picks
+  a handler per press: hand panel, grab, or create. Primitive settings are a
+  property group on the object whose update callbacks rebuild the mesh with
+  bmesh.
+- **Hand panel** ([vr_ui.py](vr_sculpt/vr_ui.py), [menus.py](vr_sculpt/menus.py)):
+  rows of buttons and sliders on a card that faces the headset; the right
+  controller's aim ray is intersected with the card's plane.
 - **Drawing in the headset** ([draw.py](vr_sculpt/draw.py),
   [hud.py](vr_sculpt/hud.py)): `SpaceView3D` draw handlers on region type
   `'XR'` (headset) and `'WINDOW'` (desktop). The session's
@@ -132,9 +150,14 @@ blender --background --factory-startup --python tests/test_brushes.py
 blender --background --factory-startup --python tests/test_modal.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_model.py
+```
+
 Windowed (opens Blender briefly, writes `tests/*_result.txt`):
 `native_engine.py`, `native_modal.py`, `native_transform.py`. The
-`overlay_preview.py` and `hud_preview.py` scripts render the overlay to PNG.
+`overlay_preview.py`, `panel_preview.py` and `hud_preview.py` scripts render
+the overlay to PNG.
 Run the overlay one with `test_scene.blend` loaded; create that file with
 `tests/make_test_scene.py`.
 
@@ -142,7 +165,8 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
 
 - Prototype. Only tested on Blender 5.4.0 Alpha with Meta Quest controllers.
 - The native engine's undo granularity in VR hasn't been checked.
-- Brush and radius cycling is button-only; there's no in-VR menu yet.
+- Model mode has two primitives so far (cube, cylinder), and creation is
+  aligned to the world axes.
 - Blender plans to move VR out of the add-on list into core (issue #161834),
   which may change how action maps are set up.
 

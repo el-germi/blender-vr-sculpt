@@ -73,7 +73,7 @@ def _patch(session_state):
             items.remove(src)
     if missing:
         return "Patched, but stock actions missing: " + ", ".join(missing)
-    return "Trigger = sculpt, B/Y = next brush, stick click = radius"
+    return "Trigger = sculpt/model, Y = mode, B = next brush, sticks: L = panel, R = radius"
 
 
 @persistent

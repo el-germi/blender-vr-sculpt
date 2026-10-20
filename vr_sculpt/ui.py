@@ -1,6 +1,6 @@
 import bpy
 
-from . import actions, native, operators
+from . import actions, native, operators, primitives
 
 
 class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
@@ -19,8 +19,21 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
             layout.label(text="Enable the 'VR Scene Inspection' add-on", icon='ERROR')
 
         layout.prop(settings, "enabled")
+        row = layout.row(align=True)
+        row.active = settings.enabled
+        for mode, text in (('SCULPT', "Sculpt"), ('MODEL', "Model")):
+            row.operator("vrsculpt.set_mode", text=text, depress=settings.mode == mode).mode = mode
+        layout.prop(settings, "show_panel")
         col = layout.column()
         col.active = settings.enabled
+        if settings.mode == 'MODEL':
+            col.prop(settings, "primitive")
+            col.prop(settings, "tip_offset")
+            col.prop(settings, "show_cursor")
+            box = layout.box()
+            box.scale_y = 0.8
+            box.label(text=actions.last_status)
+            return
         col.prop(settings, "engine")
         is_native = settings.engine == 'NATIVE'
         if is_native:
@@ -56,9 +69,39 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
             box.label(text=f"avg {s['avg_ms']:.1f} ms, max {s['max_ms']:.1f} ms (mesh update {s['write_ms']:.1f} ms)")
 
 
+class VIEW3D_PT_vr_primitive(bpy.types.Panel):
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "VR"
+    bl_label = "VR Primitive"
+
+    @classmethod
+    def poll(cls, context):
+        return primitives.is_editable(context.active_object)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        prim = context.active_object.vr_prim
+        layout.label(text=prim.bl_rna.properties["kind"].enum_items[prim.kind].name)
+        if prim.kind == 'CUBE':
+            layout.prop(prim, "size")
+            layout.prop(prim, "subdivisions")
+        else:
+            layout.prop(prim, "radius")
+            layout.prop(prim, "height")
+            layout.prop(prim, "segments")
+
+
+classes = (VIEW3D_PT_vr_sculpt, VIEW3D_PT_vr_primitive)
+
+
 def register():
-    bpy.utils.register_class(VIEW3D_PT_vr_sculpt)
+    for cls in classes:
+        bpy.utils.register_class(cls)
 
 
 def unregister():
-    bpy.utils.unregister_class(VIEW3D_PT_vr_sculpt)
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)

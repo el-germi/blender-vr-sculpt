@@ -7,7 +7,7 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-from . import hud, operators
+from . import hud, interactions, operators, primitives, vr_ui
 
 COLORS = {
     'DRAW': (1.0, 0.55, 0.2),
@@ -60,7 +60,8 @@ def draw_overlay(context, ss):
     if settings is None or not settings.enabled or not settings.show_cursor:
         return
     scale = ss.viewer_scale
-    radius = settings.radius * scale
+    model = settings.mode == 'MODEL'
+    radius = (interactions.TOUCH_MARGIN if model else settings.radius) * scale
     offset = settings.tip_offset * scale
 
     native = settings.engine == 'NATIVE'
@@ -78,7 +79,12 @@ def draw_overlay(context, ss):
                                          ss.controller_aim_rotation_get(context, idx))
         tip = operators.brush_tip(pose, offset)
         color = brush_color
-        if idx == 0 and settings.left_inverts and (native or settings.brush in {'DRAW', 'INFLATE'}):
+        if model:
+            color = hud.MODEL_COLOR
+            touched = primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale)
+            if touched is not None:
+                _draw_bounds(shader, touched, (1.0, 0.85, 0.3, 0.9))
+        elif idx == 0 and settings.left_inverts and (native or settings.brush in {'DRAW', 'INFLATE'}):
             color = INVERT_COLOR
         alpha = 1.0 if idx in operators.active_hands else 0.6
 
@@ -89,6 +95,10 @@ def draw_overlay(context, ss):
         batch = batch_for_shader(shader, 'LINES', {"pos": coords})
         shader.uniform_float("color", (*color, alpha))
         batch.draw(shader)
+    if model:
+        active = context.view_layer.objects.active
+        if active is not None and active.select_get() and active.visible_get():
+            _draw_bounds(shader, active, (1.0, 1.0, 1.0, 0.35))
     gpu.state.blend_set('NONE')
 
     if settings.show_brush_card:
@@ -96,6 +106,26 @@ def draw_overlay(context, ss):
         anchor = Vector(ss.controller_grip_location_get(context, 1)) + Vector((0.0, 0.0, 0.06 * scale))
         content = hud.card_content(settings, sculpt_brush, COLORS)
         hud.draw_card(anchor, Vector(ss.viewer_pose_location), scale, content)
+
+    if settings.show_panel:
+        right = operators.controller_pose(ss.controller_aim_location_get(context, 1),
+                                          ss.controller_aim_rotation_get(context, 1))
+        widgets, hit, matrix, height = interactions.panel_pointer(context, ss, right)
+        hover = vr_ui.hit_test(widgets, *hit) if hit else None
+        vr_ui.draw_panel(matrix, widgets, height, hover.id if hover else None, interactions.pressed_id)
+        if hit is not None:
+            vr_ui.draw_ray(right.translation, matrix @ Vector((hit[0], hit[1], 0.0)), True)
+
+
+_BOX_EDGES = ((0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7))
+
+
+def _draw_bounds(shader, obj, color):
+    corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+    coords = [corners[i] for edge in _BOX_EDGES for i in edge]
+    batch = batch_for_shader(shader, 'LINES', {"pos": coords})
+    shader.uniform_float("color", color)
+    batch.draw(shader)
 
 
 def register():

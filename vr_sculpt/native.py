@@ -45,17 +45,21 @@ def sculpt_brush(context):
     return context.tool_settings.sculpt.brush
 
 
+def activate_brush(context, name):
+    window = context.window or context.window_manager.windows[0]
+    view = largest_view3d(window)
+    with context.temp_override(window=window, area=view[0], region=view[1]):
+        bpy.ops.brush.asset_activate(
+            asset_library_type='ESSENTIALS', relative_asset_identifier=_ESSENTIALS + name)
+    return name
+
+
 def cycle_brush(context):
     brush = sculpt_brush(context)
     current = brush.name if brush else ""
     names = list(NATIVE_BRUSHES)
     nxt = names[(names.index(current) + 1) % len(names)] if current in names else names[0]
-    window = context.window
-    view = largest_view3d(window)
-    with context.temp_override(window=window, area=view[0], region=view[1]):
-        bpy.ops.brush.asset_activate(
-            asset_library_type='ESSENTIALS', relative_asset_identifier=_ESSENTIALS + nxt)
-    return nxt
+    return activate_brush(context, nxt)
 
 
 class _SceneSize:

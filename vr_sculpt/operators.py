@@ -1,9 +1,10 @@
 ﻿import time
 
 import bpy
+from bpy.props import BoolProperty, EnumProperty
 from mathutils import Matrix, Quaternion, Vector
 
-from . import actions, brushes, native
+from . import actions, brushes, interactions, menus, native, primitives, vr_ui
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
 # Shared geometry cache, so both hands sculpt the same arrays.
@@ -68,30 +69,58 @@ def sculpt_target(context):
     return None
 
 
+def _pick_handler(context, settings, hand, pose, tip_pose, scale):
+    """Panel press, grab or create for this trigger press; None means sculpt."""
+    ss = context.window_manager.xr_session_state
+    if settings.show_panel and hand == actions.HANDS[1] and ss is not None:
+        widgets, hit, _m, _h = interactions.panel_pointer(context, ss, pose)
+        if hit is not None:
+            # A press anywhere on the panel belongs to the panel, even between widgets.
+            return interactions.UIPress(context, ss, vr_ui.hit_test(widgets, *hit), hit)
+    if settings.mode == 'MODEL':
+        obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale)
+        if obj is not None:
+            return interactions.MoveObject(context, obj, tip_pose)
+        return interactions.CreatePrimitive(context, settings.primitive, tip_pose.translation, scale)
+    return None
+
+
 class VRSCULPT_OT_stroke(bpy.types.Operator):
-    """Sculpt with a VR controller while the trigger is held"""
+    """Sculpt, model or use the hand panel with a VR controller while the trigger is held"""
     bl_idname = "vrsculpt.stroke"
-    bl_label = "VR Sculpt Stroke"
+    bl_label = "VR Trigger"
     bl_options = {'UNDO', 'INTERNAL'}
 
     @classmethod
     def poll(cls, context):
-        return (session_running(context)
-                and context.scene.vr_sculpt.enabled
-                and sculpt_target(context) is not None)
+        return session_running(context) and context.scene.vr_sculpt.enabled
 
     def invoke(self, context, event):
         xr = event.xr
         if xr is None:
             return {'CANCELLED'}
         settings = context.scene.vr_sculpt
-        obj = sculpt_target(context)
         self.hand = xr.user_path
         self.hand_idx = actions.hand_index(self.hand)
         self.threshold = xr.float_threshold
+        self.timer = None
+        self.stroke = None
 
         scale = viewer_scale(context)
         self.offset = settings.tip_offset * scale
+        pose = controller_pose(xr.controller_location, xr.controller_rotation)
+        tip_pose = pose.copy()
+        tip_pose.translation = brush_tip(pose, self.offset)
+        self.handler = _pick_handler(context, settings, self.hand, pose, tip_pose, scale)
+        if self.handler is not None:
+            haptic(context, self.hand, 0.5, 0.03)
+            return self._start_modal(context)
+
+        obj = sculpt_target(context)
+        if obj is None:
+            return {'CANCELLED'}
+        # Sculpting turns an editable primitive into a plain mesh.
+        primitives.forget(obj)
         left = self.hand == actions.HANDS[0]
         if settings.engine == 'NATIVE':
             try:
@@ -109,11 +138,14 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         self.times = []
         self.write_ms = []
         self.last_update = 0.0
+        self._apply(context, xr.controller_location, xr.controller_rotation, xr.state[0])
+        return self._start_modal(context)
+
+    def _start_modal(self, context):
+        self.last_update = time.perf_counter()
         # How updates arrive, for tuning: XR modal events vs. timer polling.
         self.n_xr = 0
         self.n_timer = 0
-        self._apply(context, xr.controller_location, xr.controller_rotation, xr.state[0])
-
         # XR modal events drive the stroke; the timer is a fallback that polls the
         # controller in case the runtime only sends events when values change.
         self.timer = context.window_manager.event_timer_add(1.0 / 90.0, window=context.window)
@@ -124,6 +156,12 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
     def _apply(self, context, loc, rot, pressure):
         pose = controller_pose(loc, rot)
         tip = brush_tip(pose, self.offset)
+        if self.handler is not None:
+            tip_pose = pose.copy()
+            tip_pose.translation = tip
+            self.handler.update(context, pose, tip_pose, pressure)
+            self.last_update = time.perf_counter()
+            return
         # Grab moves vertices with the tip, so use the tip as the pose origin.
         pose_tip = pose.copy()
         pose_tip.translation = tip
@@ -180,6 +218,13 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
             context.window_manager.event_timer_remove(self.timer)
             self.timer = None
         active_hands.discard(self.hand_idx)
+        if self.handler is not None:
+            self.handler.finish(context)
+            print(f"VR Sculpt {type(self.handler).__name__}: changed={self.handler.changed} | hand {self.hand}, "
+                  f"updates: {self.n_xr} xr events, {self.n_timer} timer polls", flush=True)
+            for area in context.screen.areas if context.screen else ():
+                area.tag_redraw()
+            return {'FINISHED'} if self.handler.changed else {'CANCELLED'}
         if hasattr(self.stroke, "finish"):
             self.stroke.finish()
         if self.times:
@@ -209,50 +254,79 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
 
 
 class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
-    """Switch to the next VR sculpt brush"""
+    """Right hand (B): next brush in Sculpt mode, next primitive in Model mode.
+    Left hand (Y): switch between Sculpt and Model mode"""
     bl_idname = "vrsculpt.cycle_brush"
-    bl_label = "Next VR Brush"
+    bl_label = "VR Next Brush / Switch Mode"
     bl_options = {'INTERNAL'}
+
+    left_hand: BoolProperty(name="Left Hand", options={'SKIP_SAVE'})
 
     def execute(self, context):
         settings = context.scene.vr_sculpt
-        if settings.engine == 'NATIVE':
+        if self.left_hand:
+            menus.set_mode(context, 'MODEL' if settings.mode == 'SCULPT' else 'SCULPT')
+        elif settings.mode == 'MODEL':
+            settings.primitive = 'CYLINDER' if settings.primitive == 'CUBE' else 'CUBE'
+        elif settings.engine == 'NATIVE':
             try:
                 native.cycle_brush(context)
             except (RuntimeError, TypeError) as ex:
                 self.report({'WARNING'}, f"Could not switch brush: {ex}")
-            return {'FINISHED'}
-        ids = [b[0] for b in BRUSH_ITEMS]
-        settings.brush = ids[(ids.index(settings.brush) + 1) % len(ids)]
+        else:
+            ids = [b[0] for b in BRUSH_ITEMS]
+            settings.brush = ids[(ids.index(settings.brush) + 1) % len(ids)]
         return {'FINISHED'}
 
     def invoke(self, context, event):
+        if event.xr:
+            self.left_hand = event.xr.user_path == actions.HANDS[0]
         self.execute(context)
         if event.xr:
-            haptic(context, event.xr.user_path, 0.6, 0.05)
+            haptic(context, event.xr.user_path, 0.8 if self.left_hand else 0.6, 0.08 if self.left_hand else 0.05)
         return {'FINISHED'}
 
 
 class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
-    """Switch to the next VR brush radius"""
+    """Right stick click: next brush radius. Left stick click: show or hide the hand panel"""
     bl_idname = "vrsculpt.cycle_radius"
-    bl_label = "Next VR Brush Radius"
+    bl_label = "VR Next Radius / Toggle Panel"
     bl_options = {'INTERNAL'}
+
+    left_hand: BoolProperty(name="Left Hand", options={'SKIP_SAVE'})
 
     def execute(self, context):
         settings = context.scene.vr_sculpt
+        if self.left_hand:
+            settings.show_panel = not settings.show_panel
+            return {'FINISHED'}
         bigger = [r for r in RADIUS_STEPS if r > settings.radius + 1e-6]
         settings.radius = bigger[0] if bigger else RADIUS_STEPS[0]
         return {'FINISHED'}
 
     def invoke(self, context, event):
+        if event.xr:
+            self.left_hand = event.xr.user_path == actions.HANDS[0]
         self.execute(context)
         if event.xr:
             haptic(context, event.xr.user_path, 0.4, 0.03)
         return {'FINISHED'}
 
 
-classes = (VRSCULPT_OT_stroke, VRSCULPT_OT_cycle_brush, VRSCULPT_OT_cycle_radius)
+class VRSCULPT_OT_set_mode(bpy.types.Operator):
+    """Switch the VR tools between Sculpt and Model mode"""
+    bl_idname = "vrsculpt.set_mode"
+    bl_label = "Set VR Mode"
+    bl_options = {'INTERNAL'}
+
+    mode: EnumProperty(items=(('SCULPT', "Sculpt", ""), ('MODEL', "Model", "")))
+
+    def execute(self, context):
+        menus.set_mode(context, self.mode)
+        return {'FINISHED'}
+
+
+classes = (VRSCULPT_OT_stroke, VRSCULPT_OT_cycle_brush, VRSCULPT_OT_cycle_radius, VRSCULPT_OT_set_mode)
 
 
 def register():

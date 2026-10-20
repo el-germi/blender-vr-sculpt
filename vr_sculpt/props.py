@@ -20,6 +20,21 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         ),
         default=True,
     )
+    mode: EnumProperty(
+        name="Mode",
+        items=(
+            ('SCULPT', "Sculpt", "Trigger sculpts the active mesh"),
+            ('MODEL', "Model", "Trigger creates primitives in empty space and grabs objects it touches"),
+        ),
+        default='SCULPT',
+    )
+    primitive: EnumProperty(
+        name="Add",
+        items=(('CUBE', "Cube", ""), ('CYLINDER', "Cylinder", "")),
+        default='CUBE',
+        description="Primitive the trigger creates in Model mode",
+    )
+    show_panel: BoolProperty(name="Show Hand Panel", description="Menu panel above the left controller", default=True)
     engine: EnumProperty(
         name="Engine",
         items=(

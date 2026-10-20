@@ -1,4 +1,4 @@
-"""Brush card: a small panel above the right controller with the brush icon and name.
+﻿"""Brush card: a small panel above the right controller with the brush icon and name.
 
 After the brush changes, it also shows a one-line description for a few seconds.
 """
@@ -32,6 +32,8 @@ NATIVE_COLORS = {
     "Crease Sharp": (1.0, 0.3, 0.45),
     "Flatten/Contrast": (0.45, 0.9, 0.45),
 }
+
+MODEL_COLOR = (0.55, 0.9, 0.85)
 
 PYTHON_INFO = {
     'DRAW': ("Draw", "Pushes the surface out. Left hand: pushes in"),
@@ -85,14 +87,18 @@ def brush_texture(brush):
 
 def card_content(settings, sculpt_brush, colors):
     """(title, description, color, texture) for the current brush."""
-    if settings.engine == 'NATIVE':
+    if settings.mode == 'MODEL':
+        title = "Add " + ("Cube" if settings.primitive == 'CUBE' else "Cylinder")
+        content = (title, "Drag in empty space to create. Touch an object to grab it",
+                   MODEL_COLOR, None)
+    elif settings.engine == 'NATIVE':
         name = sculpt_brush.name if sculpt_brush else "No brush"
         content = (name, NATIVE_INFO.get(name, ""), NATIVE_COLORS.get(name, (0.9, 0.9, 0.9)),
                    brush_texture(sculpt_brush))
     else:
         title, desc = PYTHON_INFO.get(settings.brush, (settings.brush.title(), ""))
         content = (title, desc, colors.get(settings.brush, (1.0, 1.0, 1.0)), None)
-    key = (settings.engine, content[0])
+    key = (settings.mode, settings.engine, content[0])
     if key != _last["key"]:
         _last["key"] = key
         _last["time"] = time.monotonic()
@@ -119,12 +125,12 @@ def billboard(anchor, viewer, scale):
     return m @ Matrix.Scale(scale, 4)
 
 
-def _text_width(text, height):
+def text_width(text, height):
     blf.size(0, _FONT_PX)
     return blf.dimensions(0, text)[0] * height / (_FONT_PX * _CAP)
 
 
-def _draw_text(m, x, y, text, height, color):
+def draw_text(m, x, y, text, height, color):
     s = height / (_FONT_PX * _CAP)
     gpu.matrix.push()
     gpu.matrix.multiply_matrix(m @ Matrix.Translation((x, y, 0.0005)) @ Matrix.Scale(s, 4))
@@ -143,9 +149,9 @@ def draw_card(anchor, viewer, scale, content, with_description=None):
         with_description = False
     m = billboard(anchor, viewer, scale)
 
-    text_w = _text_width(title, _TITLE_H)
+    text_w = text_width(title, _TITLE_H)
     if with_description:
-        text_w = max(text_w, _text_width(desc, _DESC_H))
+        text_w = max(text_w, text_width(desc, _DESC_H))
     width = _PAD + _ICON + _PAD + text_w + _PAD
     height = _PAD * 2 + _ICON
     x0, y0 = -width / 2.0, 0.0
@@ -186,10 +192,10 @@ def draw_card(anchor, viewer, scale, content, with_description=None):
 
     tx = ix0 + _ICON + _PAD
     if with_description:
-        _draw_text(m, tx, y0 + _PAD + _ICON * 0.52, title, _TITLE_H, (1.0, 1.0, 1.0, 1.0))
-        _draw_text(m, tx, y0 + _PAD + _ICON * 0.12, desc, _DESC_H, (0.78, 0.78, 0.8, 1.0))
+        draw_text(m, tx, y0 + _PAD + _ICON * 0.52, title, _TITLE_H, (1.0, 1.0, 1.0, 1.0))
+        draw_text(m, tx, y0 + _PAD + _ICON * 0.12, desc, _DESC_H, (0.78, 0.78, 0.8, 1.0))
     else:
-        _draw_text(m, tx, y0 + _PAD + (_ICON - _TITLE_H) / 2.0, title, _TITLE_H, (1.0, 1.0, 1.0, 1.0))
+        draw_text(m, tx, y0 + _PAD + (_ICON - _TITLE_H) / 2.0, title, _TITLE_H, (1.0, 1.0, 1.0, 1.0))
     gpu.state.blend_set('NONE')
 
 

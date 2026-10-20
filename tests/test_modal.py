@@ -1,4 +1,4 @@
-"""Drive the stroke operator's invoke/modal with fake XR and timer events.
+﻿"""Drive the stroke operator's invoke/modal with fake XR and timer events.
 
 blender --background --factory-startup --python tests/test_modal.py
 
@@ -51,6 +51,7 @@ class FakeEvent:
 
 class FakeSessionState:
     viewer_scale = 1.0
+    viewer_pose_location = Vector((0.0, -1.0, 1.5))
 
     def __init__(self):
         self.trigger = 1.0
@@ -68,6 +69,9 @@ class FakeSessionState:
 
     def controller_aim_rotation_get(self, context, index):
         return Quaternion()
+
+    def controller_grip_location_get(self, context, index):
+        return Vector((-0.3, -0.5, 1.0))
 
     def haptic_action_apply(self, *args):
         self.haptics += 1
@@ -92,6 +96,11 @@ class FakeWM:
 
 
 class FakeContext:
+    """Overrides a few members; everything else comes from bpy.context."""
+
+    def __getattr__(self, name):
+        return getattr(bpy.context, name)
+
     def __init__(self, wm, obj):
         self.window_manager = wm
         self.scene = bpy.context.scene
@@ -103,7 +112,7 @@ class FakeContext:
 def harness():
     """An object with the operator's methods, without Blender's operator machinery."""
     cls = operators.VRSCULPT_OT_stroke
-    h = type("StrokeHarness", (), {k: cls.__dict__[k] for k in ("invoke", "modal", "_modal", "_apply", "_finish")})()
+    h = type("StrokeHarness", (), {k: cls.__dict__[k] for k in ("invoke", "modal", "_modal", "_apply", "_finish", "_start_modal")})()
     h.report = lambda kind, msg: print("    report:", kind, msg)
     return h
 
