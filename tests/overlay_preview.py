@@ -86,7 +86,54 @@ def scenario_model(ctx):
     fake.aim_rot[1] = (target - fake.aim_loc[1]).to_track_quat('-Z', 'Y')
 
 
-SCENARIOS = [("python", scenario_python), ("native", scenario_native), ("model", scenario_model)]
+def scenario_draw(ctx):
+    """A red tube spiral (mirrored on X around the cursor), a blue ribbon and a yellow note."""
+    import numpy as np
+    from vr_sculpt import menus, strokes
+    menus.set_mode(ctx, 'DRAW')
+    s = ctx.scene.vr_sculpt
+    s.mirror_x, s.draw_tool, s.draw_style, s.draw_color = True, 'DRAW', 'TUBE', 'RED'
+    ctx.scene.cursor.location = (0.0, -0.1, 1.25)
+    for o in [o for o in bpy.data.objects if o.name.startswith(("Cube", "Cylinder"))]:
+        bpy.data.objects.remove(o)
+    for name in ("SculptBall", "HeavyBall_164k"):
+        if name in bpy.data.objects:
+            bpy.data.objects[name].hide_set(True)
+    # Look from a bit to the side so the X mirror plane shows as a grid, not a line.
+    from vr_sculpt import native
+    area, _region = native.largest_view3d(ctx.window_manager.windows[0])
+    rv3d = area.spaces.active.region_3d
+    rv3d.view_rotation = Quaternion((0, 0, 1), -0.6) @ Quaternion((1, 0, 0), 1.35)
+    rv3d.view_location = (0.0, -0.1, 1.25)
+    rv3d.view_distance = 0.7
+
+    def make(style, color, pts, widths, sides, sym=0):
+        origin = pts[0]
+        obj = strokes.new_object(ctx, style, color, origin)
+        samples = {"style": style, "sym": sym, "c": np.array(ctx.scene.cursor.location[:]) - origin,
+                   "p": pts - origin, "w": widths, "s": sides}
+        strokes.rebuild(obj, samples)
+        strokes.save(obj, samples)
+
+    t = np.linspace(0, 3 * np.pi, 120)
+    spiral = np.stack([0.05 + 0.04 * np.cos(t) + t * 0.01, -0.12 + 0.04 * np.sin(t), 1.18 + t * 0.012], axis=1)
+    make('TUBE', 'RED', spiral, 0.004 + 0.008 * np.sin(np.linspace(0, np.pi, 120)), np.tile([0, 0, 1.0], (120, 1)), 1)
+    u = np.linspace(0, 1, 60)
+    band = np.stack([-0.12 + 0.24 * u, -0.05 + 0 * u, 1.36 + 0.03 * np.sin(u * 6)], axis=1)
+    sides = np.stack([0 * u, np.cos(u * 3), np.sin(u * 3)], axis=1)
+    make('RIBBON', 'BLUE', band, np.full(60, 0.03), sides)
+    layer, frame = strokes.notes_frame(ctx, 'YELLOW')
+    note = frame.strokes.new()
+    note.display_mode = '3DSPACE'
+    pts = [(0.1 + 0.08 * np.cos(a), -0.15, 1.08 + 0.03 * np.sin(a)) for a in np.linspace(0, 2 * np.pi, 40)]
+    note.points.add(len(pts))
+    for p, c in zip(note.points, pts):
+        p.co = c
+    s.show_panel = True
+
+
+SCENARIOS = [("python", scenario_python), ("native", scenario_native), ("model", scenario_model),
+             ("draw", scenario_draw)]
 
 
 def setup():

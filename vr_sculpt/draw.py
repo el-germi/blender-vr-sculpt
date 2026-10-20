@@ -7,7 +7,7 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-from . import hud, interactions, operators, primitives, vr_ui
+from . import drawing, hud, interactions, operators, primitives, strokes, vr_ui
 
 COLORS = {
     'DRAW': (1.0, 0.55, 0.2),
@@ -61,7 +61,12 @@ def draw_overlay(context, ss):
         return
     scale = ss.viewer_scale
     model = settings.mode == 'MODEL'
-    radius = (interactions.TOUCH_MARGIN if model else settings.radius) * scale
+    sketch = settings.mode == 'DRAW'
+    if sketch:
+        radius = {'EDIT': drawing.EDIT_RADIUS, 'ERASE': drawing.ERASE_MARGIN}.get(
+            settings.draw_tool, settings.draw_width / 2) * scale
+    else:
+        radius = (interactions.TOUCH_MARGIN if model else settings.radius) * scale
     offset = settings.tip_offset * scale
 
     native = settings.engine == 'NATIVE'
@@ -79,7 +84,15 @@ def draw_overlay(context, ss):
                                          ss.controller_aim_rotation_get(context, idx))
         tip = operators.brush_tip(pose, offset)
         color = brush_color
-        if model:
+        if sketch:
+            color = {'ERASE': ERASE_COLOR, 'EDIT': EDIT_COLOR}.get(
+                settings.draw_tool, strokes.COLORS.get(settings.draw_color, (1.0, 1.0, 1.0)))
+            if settings.draw_tool in {'EDIT', 'ERASE'}:
+                reach = (drawing.EDIT_RADIUS if settings.draw_tool == 'EDIT' else drawing.ERASE_MARGIN) * scale
+                near = strokes.nearest(context, tip, reach)
+                if near is not None:
+                    _draw_bounds(shader, near, (*color, 0.9))
+        elif model:
             color = hud.MODEL_COLOR
             touched = primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale)
             if touched is not None:
@@ -99,6 +112,8 @@ def draw_overlay(context, ss):
         active = context.view_layer.objects.active
         if active is not None and active.select_get() and active.visible_get():
             _draw_bounds(shader, active, (1.0, 1.0, 1.0, 0.35))
+    if sketch:
+        _draw_mirror_planes(shader, settings, context.scene.cursor.location, scale)
     gpu.state.blend_set('NONE')
 
     if settings.show_brush_card:
@@ -115,6 +130,33 @@ def draw_overlay(context, ss):
         vr_ui.draw_panel(matrix, widgets, height, hover.id if hover else None, interactions.pressed_id)
         if hit is not None:
             vr_ui.draw_ray(right.translation, matrix @ Vector((hit[0], hit[1], 0.0)), True)
+
+
+ERASE_COLOR = (1.0, 0.3, 0.3)
+EDIT_COLOR = (1.0, 0.85, 0.3)
+MIRROR_COLORS = ((1.0, 0.35, 0.35), (0.45, 0.9, 0.35), (0.35, 0.55, 1.0))  # X, Y, Z like Blender's axes
+
+
+def _draw_mirror_planes(shader, settings, center, scale, half=0.3, lines=6):
+    """A light grid on each active mirror plane, through the 3D cursor."""
+    for axis, on in enumerate((settings.mirror_x, settings.mirror_y, settings.mirror_z)):
+        if not on:
+            continue
+        u, v = [(a, b) for a, b in ((1, 2), (0, 2), (0, 1))][axis]
+        h = half * scale
+        coords = []
+        for i in range(lines + 1):
+            f = -h + 2 * h * i / lines
+            for a, b in ((f, -h), (f, h)), ((-h, f), (h, f)):
+                p1, p2 = Vector(center), Vector(center)
+                p1[u] += a[0]
+                p1[v] += a[1]
+                p2[u] += b[0]
+                p2[v] += b[1]
+                coords += [p1, p2]
+        batch = batch_for_shader(shader, 'LINES', {"pos": coords})
+        shader.uniform_float("color", (*MIRROR_COLORS[axis], 0.35))
+        batch.draw(shader)
 
 
 _BOX_EDGES = ((0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7))

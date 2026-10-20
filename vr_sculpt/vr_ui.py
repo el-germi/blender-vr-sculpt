@@ -37,9 +37,11 @@ class Widget:
     """
 
     def __init__(self, kind, id="", text="", *, active=False, danger=False, on_press=None,
-                 value=0.0, min=0.0, max=1.0, integer=False, fmt=None, on_change=None, value_text=""):
+                 value=0.0, min=0.0, max=1.0, integer=False, fmt=None, on_change=None, value_text="",
+                 swatch=None):
         self.kind, self.id, self.text = kind, id, text
         self.value_text = value_text
+        self.swatch = swatch  # (r, g, b): a color button
         self.active, self.danger, self.on_press = active, danger, on_press
         self.value, self.min, self.max, self.integer = value, min, max, integer
         self.fmt = fmt or ((lambda v: str(int(v))) if integer else (lambda v: f"{v:.3f}"))
@@ -67,8 +69,8 @@ def label(text):
     return Widget('label', text=text)
 
 
-def button(id, text, on_press, active=False, danger=False):
-    return Widget('button', id, text, active=active, danger=danger, on_press=on_press)
+def button(id, text, on_press, active=False, danger=False, swatch=None):
+    return Widget('button', id, text, active=active, danger=danger, on_press=on_press, swatch=swatch)
 
 
 def select(id, text, value_text, on_press):
@@ -193,7 +195,15 @@ def draw_panel(matrix, widgets, height, hover_id=None, pressed_id=None, title=No
     for w in widgets:
         x0, y0, x1, y1 = w.rect
         hot = w.id and (w.id == hover_id or w.id == pressed_id)
-        if w.kind in {'button', 'select'}:
+        if w.kind in {'button', 'select'} and w.swatch is not None:
+            _quad(shader, x0, y0, x1, y1, (*w.swatch, 1.0), 0.0002)
+            if w.active:
+                # The chosen color: a thick light frame inside the swatch.
+                t = 0.003
+                for qx0, qy0, qx1, qy1 in ((x0, y0, x1, y0 + t), (x0, y1 - t, x1, y1),
+                                           (x0, y0, x0 + t, y1), (x1 - t, y0, x1, y1)):
+                    _quad(shader, qx0, qy0, qx1, qy1, (1.0, 1.0, 1.0, 1.0), 0.0003)
+        elif w.kind in {'button', 'select'}:
             c = COL_DANGER if w.danger else (COL_ACTIVE if w.active else COL_BUTTON)
             _quad(shader, x0, y0, x1, y1, _lighter(c, 0.14 if w.id == pressed_id else 0.08) if hot else c, 0.0002)
         elif w.kind == 'slider':

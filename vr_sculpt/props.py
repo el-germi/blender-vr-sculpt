@@ -1,6 +1,8 @@
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, PointerProperty, StringProperty
 
+from .strokes import PALETTE
+
 BRUSH_ITEMS = (
     ('DRAW', "Draw", "Push the surface out along its normal (left hand pushes in)"),
     ('SMOOTH', "Smooth", "Relax the surface"),
@@ -25,9 +27,60 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         items=(
             ('SCULPT', "Sculpt", "Trigger sculpts the active mesh"),
             ('MODEL', "Model", "Trigger creates primitives in empty space and grabs objects it touches"),
+            ('DRAW', "Draw", "Trigger draws freehand 3D strokes"),
         ),
         default='SCULPT',
     )
+    # Draw mode.
+    draw_tool: EnumProperty(
+        name="Tool",
+        items=(
+            ('DRAW', "Draw", "Draw strokes"),
+            ('EDIT', "Edit", "Pull part of a stroke into a new shape"),
+            ('ERASE', "Erase", "Erase the strokes and notes the tip touches"),
+        ),
+        default='DRAW',
+    )
+    draw_style: EnumProperty(
+        name="Stroke",
+        items=(
+            ('TUBE', "Tube", "Round tube mesh; trigger pressure sets the thickness"),
+            ('RIBBON', "Ribbon", "Flat band mesh that follows your wrist's roll"),
+            ('NOTE', "Note", "Annotation line (not geometry), shown in the headset and on the desktop"),
+        ),
+        default='TUBE',
+    )
+    draw_color: EnumProperty(
+        name="Color",
+        items=[(ident, name, "") for ident, name, _rgb in PALETTE],
+        default='WHITE',
+    )
+    draw_width: FloatProperty(
+        name="Width", description="Stroke width in your hand's space (meters)",
+        default=0.008, min=0.0005, soft_max=0.1, subtype='DISTANCE', unit='LENGTH')
+    draw_smoothing: FloatProperty(
+        name="Smoothing", description="Stabilizer: how much hand jitter is filtered out",
+        default=0.5, min=0.0, max=0.95, subtype='FACTOR')
+    draw_thickness: EnumProperty(
+        name="Thickness",
+        description="What varies the stroke's width along its length",
+        items=(
+            ('PRESSURE', "Pressure", "Squeeze the trigger harder for a thicker stroke"),
+            ('SPEED_THIN', "Speed: fast = thin", "Faster hand movement draws thinner, like a calligraphy brush"),
+            ('SPEED_THICK', "Speed: fast = thick", "Faster hand movement draws thicker"),
+            ('TAPER', "Taper", "Thin at both ends, ramping smoothly to full width; "
+                               "the ramps are a share of the stroke's length"),
+            ('FIXED', "Fixed", "Always the Width setting"),
+        ),
+        default='PRESSURE',
+    )
+    draw_taper: FloatProperty(
+        name="Taper Length",
+        description="Share of the stroke's length each end takes to ramp up to full width",
+        default=0.3, min=0.05, max=0.5, subtype='FACTOR')
+    mirror_x: BoolProperty(name="Mirror X", description="Mirror strokes across the 3D cursor's X plane")
+    mirror_y: BoolProperty(name="Mirror Y", description="Mirror strokes across the 3D cursor's Y plane")
+    mirror_z: BoolProperty(name="Mirror Z", description="Mirror strokes across the 3D cursor's Z plane")
     primitive: StringProperty(
         name="Add",
         default="mesh.primitive_cube_add",

@@ -4,7 +4,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty
 from mathutils import Matrix, Quaternion, Vector
 
-from . import actions, brushes, catalog, interactions, menus, native, primitives, vr_ui
+from . import actions, brushes, catalog, drawing, interactions, menus, native, primitives, strokes, vr_ui
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
 # Shared geometry cache, so both hands sculpt the same arrays.
@@ -69,8 +69,8 @@ def sculpt_target(context):
     return None
 
 
-def _pick_handler(context, settings, hand, pose, tip_pose, scale):
-    """Panel press, grab or create for this trigger press; None means sculpt."""
+def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
+    """Panel press, grab, create or draw for this trigger press; None means sculpt (or nothing)."""
     ss = context.window_manager.xr_session_state
     if settings.show_panel and hand == actions.HANDS[1] and ss is not None:
         widgets, hit, _m, _h = interactions.panel_pointer(context, ss, pose)
@@ -82,6 +82,8 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale):
         if obj is not None:
             return interactions.MoveObject(context, obj, tip_pose)
         return interactions.CreatePrimitive(context, settings.primitive, tip_pose.translation, scale)
+    if settings.mode == 'DRAW':
+        return drawing.pick(context, settings, tip_pose, value, scale)
     return None
 
 
@@ -112,7 +114,7 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         tip_pose = pose.copy()
         tip_pose.translation = brush_tip(pose, self.offset)
         try:
-            self.handler = _pick_handler(context, settings, self.hand, pose, tip_pose, scale)
+            self.handler = _pick_handler(context, settings, self.hand, pose, tip_pose, scale, xr.state[0])
         except Exception as ex:
             # E.g. an extension's operator failing to create its primitive.
             import traceback
@@ -122,12 +124,15 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         if self.handler is not None:
             haptic(context, self.hand, 0.5, 0.03)
             return self._start_modal(context)
+        if settings.mode != 'SCULPT':
+            return {'CANCELLED'}  # E.g. the Edit tool with no stroke in reach.
 
         obj = sculpt_target(context)
         if obj is None:
             return {'CANCELLED'}
-        # Sculpting turns an editable primitive into a plain mesh.
+        # Sculpting turns an editable primitive or stroke into a plain mesh.
         primitives.forget(obj)
+        strokes.forget(obj)
         left = self.hand == actions.HANDS[0]
         if settings.engine == 'NATIVE':
             try:
@@ -260,9 +265,23 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         return {'FINISHED'} if self.times else {'CANCELLED'}
 
 
+MODE_CYCLE = ('SCULPT', 'MODEL', 'DRAW')
+
+
+def undo_last_stroke(context):
+    """Quick undo for Draw mode: delete the latest stroke or note, as one regular undo step."""
+    what = strokes.undo_last(context)
+    if what is not None:
+        try:
+            bpy.ops.ed.undo_push(message=f"Undo VR {what}")
+        except RuntimeError:
+            pass  # No undo stack (background); the stroke is gone either way.
+    return what
+
+
 class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
-    """Right hand (B): next brush in Sculpt mode, next primitive in Model mode.
-    Left hand (Y): switch between Sculpt and Model mode"""
+    """Right hand (B): next brush (Sculpt), next primitive (Model), undo last stroke (Draw).
+    Left hand (Y): next mode (Sculpt, Model, Draw)"""
     bl_idname = "vrsculpt.cycle_brush"
     bl_label = "VR Next Brush / Switch Mode"
     bl_options = {'INTERNAL'}
@@ -272,7 +291,10 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
     def execute(self, context):
         settings = context.scene.vr_sculpt
         if self.left_hand:
-            menus.set_mode(context, 'MODEL' if settings.mode == 'SCULPT' else 'SCULPT')
+            i = MODE_CYCLE.index(settings.mode) if settings.mode in MODE_CYCLE else -1
+            menus.set_mode(context, MODE_CYCLE[(i + 1) % len(MODE_CYCLE)])
+        elif settings.mode == 'DRAW':
+            undo_last_stroke(context)
         elif settings.mode == 'MODEL':
             keys = [e.key for e in catalog.entries()]
             if keys:
@@ -323,20 +345,34 @@ class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class VRSCULPT_OT_undo_stroke(bpy.types.Operator):
+    """Delete the last stroke or note drawn in VR"""
+    bl_idname = "vrsculpt.undo_stroke"
+    bl_label = "Undo Last Stroke"
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        if undo_last_stroke(context) is None:
+            self.report({'INFO'}, "No VR stroke to undo")
+            return {'CANCELLED'}
+        return {'FINISHED'}
+
+
 class VRSCULPT_OT_set_mode(bpy.types.Operator):
     """Switch the VR tools between Sculpt and Model mode"""
     bl_idname = "vrsculpt.set_mode"
     bl_label = "Set VR Mode"
     bl_options = {'INTERNAL'}
 
-    mode: EnumProperty(items=(('SCULPT', "Sculpt", ""), ('MODEL', "Model", "")))
+    mode: EnumProperty(items=(('SCULPT', "Sculpt", ""), ('MODEL', "Model", ""), ('DRAW', "Draw", "")))
 
     def execute(self, context):
         menus.set_mode(context, self.mode)
         return {'FINISHED'}
 
 
-classes = (VRSCULPT_OT_stroke, VRSCULPT_OT_cycle_brush, VRSCULPT_OT_cycle_radius, VRSCULPT_OT_set_mode)
+classes = (VRSCULPT_OT_stroke, VRSCULPT_OT_cycle_brush, VRSCULPT_OT_cycle_radius, VRSCULPT_OT_undo_stroke,
+           VRSCULPT_OT_set_mode)
 
 
 def register():
