@@ -105,32 +105,85 @@ def test_surface():
 
 
 def test_undo(obj, img):
-    print("== stroke undo")
+    print("== stroke undo (changed tiles)")
     ctx = bpy.context
     paint.forget_history()
-    before = np.empty(64 * 64 * 4, dtype=np.float32)
-    img.pixels.foreach_get(before)
-    paint._snapshot(img)
-    img.pixels.foreach_set(np.ones(64 * 64 * 4, dtype=np.float32))
-    check(paint.undo_last(ctx), "undo restores a stroke")
-    after = np.empty(64 * 64 * 4, dtype=np.float32)
-    img.pixels.foreach_get(after)
-    check(np.allclose(before, after), "pixels are back")
+    big = bpy.data.images.new("UndoTest", 512, 512, alpha=True)
+    w = h = 512
+
+    def pixels():
+        px = np.empty(w * h * 4, dtype=np.float32)
+        big.pixels.foreach_get(px)
+        return px.reshape(h, w, 4)
+
+    def fake_stroke(y0, y1, x0, x1, rgb):
+        """What a VR stroke does: baseline before, paint, commit after."""
+        paint.ensure_base(big)
+        px = pixels()
+        px[y0:y1, x0:x1, :3] = rgb
+        big.pixels.foreach_set(px.ravel())
+        return paint.commit(big)
+
+    start = pixels().copy()
+    check(fake_stroke(10, 40, 10, 100, (1, 0, 0)), "a stroke is recorded")
+    entry = paint._history[-1]
+    check(len(entry["tiles"]) == 2, f"only the changed tiles are kept ({len(entry['tiles'])} of 64)")
+    check(entry["nbytes"] == 2 * 64 * 64 * 4, f"8-bit tiles: {entry['nbytes']} bytes, not a whole float image")
+    after1 = pixels().copy()
+    fake_stroke(30, 200, 60, 70, (0, 0, 1))  # Overlaps the first stroke.
+    fake_stroke(300, 310, 300, 500, (0, 1, 0))
+    check(len(paint._history) == 3, "three strokes")
+    check(paint.undo_last(ctx) and paint.undo_last(ctx), "undo twice")
+    check(np.allclose(pixels(), after1, atol=1 / 255 + 1e-6), "back to after the first stroke (overlap included)")
+    check(paint.undo_last(ctx), "undo the first")
+    check(np.allclose(pixels(), start, atol=1 / 255 + 1e-6), "back to the start")
     check(not paint.undo_last(ctx), "nothing more to undo")
-    # The memory cap drops the oldest snapshots (but always keeps the last one).
+    check(not fake_stroke(0, 0, 0, 0, (1, 1, 1)) and not paint._history, "a stroke that changed nothing adds nothing")
+
+    # Many strokes fit: the memory cap only drops the oldest when it's reached.
     old = paint.HISTORY_BYTES
-    paint.HISTORY_BYTES = before.nbytes * 2
-    for _ in range(5):
-        paint._snapshot(img)
-    check(len(paint._history) == 2, f"history is capped by memory ({len(paint._history)} kept)")
+    paint.HISTORY_BYTES = 3 * 64 * 64 * 4
+    for i in range(6):
+        fake_stroke(64 * i + 1, 64 * i + 5, 1, 5, (i / 6, 0.5, 0.5))
+    check(len(paint._history) == 3, f"the cap keeps the newest strokes ({len(paint._history)})")
     paint.HISTORY_BYTES = old
+
+    # Blender undo/redo invalidates the baseline; undo still works from the image as it is.
     paint.forget_history()
-    # A stroke that painted nothing drops its snapshot.
+    fake_stroke(100, 120, 100, 120, (1, 1, 0))
+    for handler in bpy.app.handlers.undo_post:
+        if getattr(handler, "__name__", "") == "_on_blender_undo":
+            handler(ctx.scene)
+    check(paint._base["pixels"] is None, "a Blender undo drops the baseline")
+    check(paint.undo_last(ctx) and np.allclose(pixels()[100:120, 100:120], start[100:120, 100:120],
+                                               atol=1 / 255 + 1e-6), "and VR undo re-reads it")
+    # Float images: whole-pixel comparison works on float32 too.
+    a = np.zeros((70, 130, 4), dtype=np.float32)
+    b = a.copy()
+    b[65, 129, 3] = 0.5
+    check(paint.changed_tiles(a, b) == [(1, 2)], f"float images: the changed tile is found ({paint.changed_tiles(a, b)})")
+    # The temporary view backs off until the face under the dab fits: a 1 m quad from close up.
+    bpy.ops.mesh.primitive_plane_add(size=1.0, location=(0.0, 5.0, 0.0))
+    plane = ctx.active_object
+    s = paint.PaintStroke(ctx, ctx.scene.vr_sculpt, plane, False, 1.0)
+    d = s.eye_distance(0, Vector((0.0, 5.0, 0.0)), 0.36)
+    check(d >= (math.sqrt(0.5) + s.radius) / 0.36 - 1e-6, f"a 1 m quad is painted from {d:.2f} m, not 0.25 m")
+    check(abs(s.eye_distance(None, Vector((0.0, 5.0, 0.0)), 0.0) - paint.EYE_DISTANCE) < 1e-6,
+          "without a field of view it keeps the default")
+    bpy.data.objects.remove(plane)
+    # Updates within one VR frame are skipped (one paint call per frame), but the last one is kept
+    # for release.
     s = paint.PaintStroke(ctx, ctx.scene.vr_sculpt, obj, False, 1.0)
-    s.snapshotted = True
-    paint._snapshot(img)
+    s.last = (Vector((0.0, 0.0, 0.0)), Vector((0.0, 0.0, 1.0)))
+    s.last_call = __import__("time").perf_counter()
+    s.update(ctx, Matrix(), Matrix.Translation((1.0, -0.6, 0.0)), 1.0)
+    check(s.pending is not None and s.dabs == 0, "a second update in the same frame waits")
+    # A paint stroke handler that painted nothing doesn't commit.
+    paint.forget_history()
+    s = paint.PaintStroke(ctx, ctx.scene.vr_sculpt, obj, False, 1.0)
     s.finish(ctx)
-    check(not paint._history, "an empty stroke leaves no undo entry")
+    check(not paint._history, "an empty VR stroke leaves no undo entry")
+    bpy.data.images.remove(big)
 
 
 def test_panel(obj):

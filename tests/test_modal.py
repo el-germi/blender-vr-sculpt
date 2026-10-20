@@ -82,6 +82,7 @@ class FakeWM:
     def __init__(self, ss):
         self.xr_session_state = ss
         self.timers = set()
+        self.windows = bpy.context.window_manager.windows
 
     def event_timer_add(self, step, window=None):
         t = object()

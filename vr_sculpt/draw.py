@@ -8,8 +8,8 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-from . import (camera, desktop, drawing, grid, hud, interactions, measure, operators, paint, primitives,
-               strokes, symmetry, vr_ui)
+from . import (camera, desktop, drawing, grid, hud, interactions, measure, onion, operators, paint, paths,
+               primitives, strokes, symmetry, vr_ui)
 
 COLORS = {
     'DRAW': (1.0, 0.55, 0.2),
@@ -72,6 +72,9 @@ def draw_overlay(context, ss, xr=True):
         grid.draw(settings, tips, scale)
         gpu.state.blend_set('NONE')
     measure.draw(context, ss, scale)
+    onion.draw(context)
+    if settings.show_paths and xr:  # The desktop view draws Blender's own paths.
+        paths.draw(context, scale)
     if xr and settings.show_desktop:
         desktop.draw(context, ss, poses[1])
     if settings.show_cursor:
@@ -166,11 +169,13 @@ def _draw_cursors(context, ss, settings, xr):
     if settings.show_panel:
         right = operators.controller_pose(ss.controller_aim_location_get(context, 1),
                                           ss.controller_aim_rotation_get(context, 1))
-        widgets, hit, matrix, height = interactions.panel_pointer(context, ss, right)
+        widgets, hit, hit_matrix, _h = interactions.panel_pointer(context, ss, right)
         hover = vr_ui.hit_test(widgets, *hit) if hit else None
-        vr_ui.draw_panel(matrix, widgets, height, hover.id if hover else None, interactions.pressed_id)
+        for matrix, panel_widgets, height, width in interactions.panel_frames(context, ss):
+            vr_ui.draw_panel(matrix, panel_widgets, height, hover.id if hover else None, interactions.pressed_id,
+                             width=width)
         if hit is not None:
-            vr_ui.draw_ray(right.translation, matrix @ Vector((hit[0], hit[1], 0.0)), True)
+            vr_ui.draw_ray(right.translation, hit_matrix @ Vector((hit[0], hit[1], 0.0)), True)
     if xr and settings.camera_preview and not camera_tool and context.scene.camera is not None:
         # Pinned to the left of the hand panel.
         matrix, _widgets, _height = interactions.panel_frame(context, ss)

@@ -65,6 +65,8 @@ class AimCamera:
 
     def finish(self, context):
         context.view_layer.update()
+        from . import anim
+        anim.auto_key(context, self.cam)
 
 
 # --- preview ---------------------------------------------------------------

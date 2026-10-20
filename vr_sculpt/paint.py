@@ -9,8 +9,9 @@ Findings from tests/probe_texpaint*.py on 5.4.0 Alpha:
   from hand space with the view's own projection. The locked scene size isn't used.
 - mode='INVERT' paints with the secondary color.
 - The colors used are the unified paint settings' ones, even with Unified Color off.
-- Each call is its own undo step (about 1.5 ms per dab). The add-on keeps its own snapshot
-  of the image per VR stroke, so B (or Undo stroke) takes back a whole stroke.
+- Each call is its own undo step. Most of a call's cost is setting up the projection for the whole
+  mesh, so all the dabs of a frame go into one call (one stroke element each). The add-on keeps its own per-stroke
+  undo (changed tiles only, see below), so B (or Undo stroke) takes back a whole stroke.
 """
 
 import colorsys
@@ -36,11 +37,14 @@ INFO = {
     "Smear": "Drags the texture's colors along your stroke",
     "Erase Soft": "Erases to transparent (needs an image with alpha)",
 }
-EYE_DISTANCE = 0.25  # hand-space meters between the temporary view and the dab
+EYE_DISTANCE = 0.25  # hand-space meters between the temporary view and the dab, at least
+# Projection painting skips faces that reach far outside the view (a big quad painted from close up
+# only took paint near its corners), so the view backs off until the face under the dab fits.
 SPACING = 0.2  # dab spacing as a fraction of the radius
-MAX_DABS_PER_UPDATE = 24
+MAX_DABS_PER_UPDATE = 48  # per frame; they share one paint call
+MIN_CALL_INTERVAL = 0.009  # seconds: at most one paint call per VR frame (90 Hz)
 TRIGGER_THRESHOLD = 0.3
-HISTORY_BYTES = 512 * 1024 * 1024  # memory kept for undoing strokes
+HISTORY_BYTES = 256 * 1024 * 1024  # memory kept for undoing strokes (changed tiles only)
 
 
 # --- brush and colors --------------------------------------------------------
@@ -150,8 +154,13 @@ def _override(context):
 
 
 def setup(context, obj, size=2048):
-    """Give obj what texture painting needs: UVs (Smart UV Project) and an image in a paint slot."""
-    from . import menus
+    """Give obj what texture painting needs: UVs (Smart UV Project) and an image in a paint slot.
+
+    An editable VR primitive or stroke becomes a plain mesh first: rebuilding it from its settings
+    would throw the UVs (and so the painting) away, like sculpting does."""
+    from . import menus, primitives, strokes
+    primitives.forget(obj)
+    strokes.forget(obj)
     ov = _override(context)
     if not len(obj.data.uv_layers):
         menus.set_object_mode(context, obj, 'EDIT')
@@ -240,37 +249,130 @@ def sample_color(obj, world_point, face):
 
 
 # --- undo per VR stroke ----------------------------------------------------
+#
+# A baseline copy of the paint image (8-bit for byte images) is kept between strokes. When a
+# stroke ends, the 64 x 64 tiles that changed are compared against it, and only their "before"
+# pixels go into the history; then the baseline moves on. A stroke typically costs well under a
+# megabyte of history, so many strokes can be undone. Undo writes those tiles back.
+#
+# This undo is separate from Blender's: it never pushes Blender undo steps (doing that from VR
+# operators in Texture Paint mode is a likely way to upset Blender's own image undo). After a
+# Blender undo or redo the baseline is re-read on the next stroke.
 
-_history = []  # [(image name, pixels float32 array)], oldest first
+TILE = 64
+_history = []  # [{"image", "size", "tiles": [(ty, tx, before array)], "nbytes"}], oldest first
+_base = {"image": None, "size": None, "pixels": None}
 
 
-def _snapshot(img):
-    px = np.empty(img.size[0] * img.size[1] * 4, dtype=np.float32)
+def _read(img):
+    """The image's pixels as (h, w, 4): uint8 for byte images, float32 for float images."""
+    w, h = img.size
+    px = np.empty(w * h * 4, dtype=np.float32)
     img.pixels.foreach_get(px)
-    _history.append((img.name, px))
-    while len(_history) > 1 and sum(p.nbytes for _n, p in _history) > HISTORY_BYTES:
+    px = px.reshape(h, w, 4)
+    if img.is_float:
+        return px
+    px *= 255.0
+    px += 0.5  # Rounds on the truncating cast below (values are 0..1 for byte images).
+    return px.astype(np.uint8)
+
+
+def _write(img, arr):
+    px = arr.astype(np.float32)
+    if arr.dtype == np.uint8:
+        px *= 1.0 / 255.0
+    img.pixels.foreach_set(px.ravel())
+    img.update()
+
+
+def _base_matches(img):
+    return (_base["pixels"] is not None and _base["image"] == img.name and _base["size"] == tuple(img.size)
+            and (_base["pixels"].dtype == np.float32) == bool(img.is_float))
+
+
+def ensure_base(img):
+    """Make sure the baseline is the image as it is now (before a stroke paints on it)."""
+    if not _base_matches(img):
+        _base.update(image=img.name, size=tuple(img.size), pixels=_read(img))
+
+
+def changed_tiles(before, after, tile=TILE):
+    """[(ty, tx)] of the tiles where two (h, w, 4) arrays differ."""
+    h, w = before.shape[:2]
+    # Compare whole pixels as integers: much faster than comparing channels and reducing.
+    if before.dtype == np.uint8:
+        diff = before.view(np.uint32).reshape(h, w) != after.view(np.uint32).reshape(h, w)
+    else:
+        diff = (before.view(np.uint64).reshape(h, w, 2) != after.view(np.uint64).reshape(h, w, 2)).any(axis=2)
+    ny, nx = -(-h // tile), -(-w // tile)
+    padded = np.zeros((ny * tile, nx * tile), dtype=bool)
+    padded[:h, :w] = diff
+    mask = padded.reshape(ny, tile, nx, tile).any(axis=(1, 3))
+    return [tuple(t) for t in np.argwhere(mask)]
+
+
+def commit(img):
+    """After a stroke: record the changed tiles' old pixels, and move the baseline on."""
+    if not _base_matches(img):
+        return False
+    before = _base["pixels"]
+    after = _read(img)
+    tiles = [(ty, tx, before[ty * TILE:(ty + 1) * TILE, tx * TILE:(tx + 1) * TILE].copy())
+             for ty, tx in changed_tiles(before, after)]
+    _base["pixels"] = after
+    if not tiles:
+        return False
+    _history.append({"image": img.name, "size": tuple(img.size), "tiles": tiles,
+                     "nbytes": sum(t[2].nbytes for t in tiles)})
+    while len(_history) > 1 and sum(e["nbytes"] for e in _history) > HISTORY_BYTES:
         _history.pop(0)
+    return True
+
+
+def history_bytes():
+    return sum(e["nbytes"] for e in _history)
 
 
 def undo_last(context):
-    """Restore the paint image as it was before the last VR paint stroke."""
+    """Put back the tiles the last VR paint stroke changed."""
     while _history:
-        name, px = _history.pop()
-        img = bpy.data.images.get(name)
-        if img is None or img.size[0] * img.size[1] * 4 != len(px):
+        entry = _history.pop()
+        img = bpy.data.images.get(entry["image"])
+        if img is None or tuple(img.size) != entry["size"]:
             continue
-        img.pixels.foreach_set(px)
-        img.update()
-        try:
-            bpy.ops.ed.undo_push(message="Undo VR paint stroke")
-        except RuntimeError:
-            pass
+        ensure_base(img)
+        base = _base["pixels"]
+        for ty, tx, before in entry["tiles"]:
+            base[ty * TILE:ty * TILE + before.shape[0], tx * TILE:tx * TILE + before.shape[1]] = before
+        _write(img, base)
+        print(f"VR Paint undo: {len(entry['tiles'])} tiles restored on {img.name}, "
+              f"{len(_history)} strokes left", flush=True)
         return True
     return False
 
 
 def forget_history():
     _history.clear()
+    _base.update(image=None, size=None, pixels=None)
+
+
+@bpy.app.handlers.persistent
+def _on_blender_undo(*_args):
+    # Blender's undo / redo changed the image behind the baseline's back.
+    _base.update(image=None, size=None, pixels=None)
+
+
+def register():
+    for handlers in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
+        if _on_blender_undo not in handlers:
+            handlers.append(_on_blender_undo)
+
+
+def unregister():
+    for handlers in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
+        if _on_blender_undo in handlers:
+            handlers.remove(_on_blender_undo)
+    forget_history()
 
 
 # --- painting --------------------------------------------------------------
@@ -329,7 +431,10 @@ class PaintStroke:
         self.window = context.window or context.window_manager.windows[0]
         self.last = None  # (point, normal) of the last dab
         self.last_mouse_point = None
-        self.snapshotted = False
+        self.started = False
+        self.tan_half = None
+        self.last_call = 0.0
+        self.pending = None
         self.dabs = 0
         self.ms = []
         self.changed = False
@@ -342,12 +447,18 @@ class PaintStroke:
         return surface_near(self.obj, tip, self.radius)
 
     def update(self, context, pose, tip_pose, value):
+        # Updates come from XR events and a fallback timer, often both in one frame. One paint call
+        # per frame is enough: the next update fills the gap with interpolated dabs.
+        if self.last is not None and time.perf_counter() - self.last_call < MIN_CALL_INTERVAL:
+            self.pending = (pose, tip_pose, value)  # Painted on release if nothing comes after it.
+            return
+        self.pending = None
         h = self.hit(pose, tip_pose.translation)
         if h is None:
             self.last = None
             return
-        point, normal, _face = h
-        targets = [(point, normal)]
+        point, normal, face = h
+        targets = [(point, normal, face)]
         if self.last is not None:
             gap = (point - self.last[0]).length
             step = max(self.radius * SPACING, 1e-6)
@@ -360,53 +471,91 @@ class PaintStroke:
                 if self.reach == 'CONTACT':
                     near = surface_near(self.obj, p, self.radius * 2)
                     if near is not None:
-                        targets.append(near[:2])
+                        targets.append(near)
                         continue
-                targets.append((p, self.last[1].lerp(normal, i / n).normalized()))
+                targets.append((p, self.last[1].lerp(normal, i / n).normalized(), face))
         direction = None
         if self.reach == 'SPRAY':
             from . import interactions
             direction = interactions.aim_direction(pose)
-        for p, n in targets:
-            self._dab(p, n, direction, pressure_from(value))
+        self._paint(targets, direction, pressure_from(value))
 
-    def _dab(self, point, normal, direction, pressure):
+    def eye_distance(self, face, point, tan_half):
+        """How far the temporary view has to be for the face under the dab to fit in it."""
+        d = EYE_DISTANCE * self.scale
+        if tan_half <= 0.0:
+            return d
+        mesh = self.obj.data
+        mw = self.obj.matrix_world
+        if face is not None and 0 <= face < len(mesh.polygons):
+            extent = max((mw @ mesh.vertices[v].co - point).length for v in mesh.polygons[face].vertices)
+        else:
+            extent = max(self.obj.dimensions)  # E.g. a modifier changed the faces: be safe.
+        return max(d, (extent + self.radius) / tan_half)
+
+    @staticmethod
+    def _element(point, mouse, pressure, size, is_start):
+        return {"name": "", "location": tuple(point), "mouse": mouse, "mouse_event": mouse, "pressure": pressure,
+                "size": max(size, 1.0), "x_tilt": 0.0, "y_tilt": 0.0, "time": 0.0, "is_start": is_start}
+
+    def _paint(self, targets, direction, pressure):
+        """Paint one update's dabs with a single image_paint call, from one view that sees them all.
+
+        Each call sets up projection painting for the whole mesh first, which is most of its cost
+        (about 2 ms on a 10k-vertex mesh, 4.6 ms on 41k), so one call per frame instead of one per
+        dab is up to ~10x cheaper when the hand moves fast."""
+        if not targets:
+            return
         t0 = time.perf_counter()
+        self.last_call = t0
         view = native.largest_view3d(self.window)
         if view is None:
             return
         area, region = view
-        if not self.snapshotted:
-            # Before the first dab: the stroke can be undone as a whole.
-            self.snapshotted = True
+        if not self.started:
+            # Before the first dab: the baseline the stroke's undo is made from.
+            self.started = True
             if self.image is not None:
-                _snapshot(self.image)
+                ensure_base(self.image)
+        center = sum((p for p, _n, _f in targets), Vector()) / len(targets)
+        if direction is not None:
+            back = -direction
+        else:
+            back = sum((n for _p, n, _f in targets), Vector())
+            back = back.normalized() if back.length > 1e-9 else targets[-1][1]
         v = _View(area, region)
         try:
-            eye = point - direction * EYE_DISTANCE * self.scale if direction is not None else \
-                point + normal * EYE_DISTANCE * self.scale
-            v.look(eye, point)
-            size = v.pixels(point, self.radius)
-            mouse = v.mouse(point)
-            if size is None or mouse is None:
+            v.look(center + back * EYE_DISTANCE * self.scale, center)
+            if self.tan_half is None:
+                # Half the narrower field of view, from the view's projection (lens and region shape).
+                wm = v.rv3d.window_matrix
+                self.tan_half = min(1.0 / wm[0][0], 1.0 / wm[1][1]) if wm[0][0] and wm[1][1] else 0.0
+            dist = max(self.eye_distance(f, center, self.tan_half) for _p, _n, f in targets)
+            if self.tan_half > 0.0:
+                spread = max((p - center).length for p, _n, _f in targets)
+                dist = max(dist, (spread + self.radius) / self.tan_half)
+            if dist > EYE_DISTANCE * self.scale + 1e-6:
+                v.look(center + back * dist, center)
+            elems = []
+            for p, _n, _f in targets:
+                mouse, size = v.mouse(p), v.pixels(p, self.radius)
+                if mouse is not None and size is not None:
+                    elems.append(self._element(p, mouse, pressure, size, not elems))
+            if not elems:
                 return
-            elem = {"name": "", "location": tuple(point), "mouse": mouse, "mouse_event": mouse,
-                    "pressure": pressure, "size": max(size, 1.0), "x_tilt": 0.0, "y_tilt": 0.0, "time": 0.0,
-                    "is_start": True}
-            elems = [elem]
             if self.last is not None:
                 # The previous dab as a lead-in, so Smear knows the stroke's direction.
                 prev = v.mouse(self.last[0])
                 if prev is not None:
-                    elems = [dict(elem, mouse=prev, mouse_event=prev, pressure=0.0, location=tuple(self.last[0])),
-                             dict(elem, is_start=False)]
+                    elems[0]["is_start"] = False
+                    elems.insert(0, self._element(self.last[0], prev, 0.0, elems[0]["size"], True))
             with bpy.context.temp_override(window=self.window, area=area, region=region):
                 if not self._can_paint():
                     return
                 bpy.ops.paint.image_paint(stroke=elems, mode='INVERT' if self.invert else 'NORMAL')
-            self.dabs += 1
+            self.dabs += len(targets)
             self.changed = True
-            self.last = (point, normal)
+            self.last = (targets[-1][0], targets[-1][1])
         finally:
             v.restore()
             self.ms.append((time.perf_counter() - t0) * 1000.0)
@@ -424,11 +573,15 @@ class PaintStroke:
         return False
 
     def finish(self, context):
+        if self.pending is not None:
+            pose, tip_pose, value = self.pending
+            self.last_call = 0.0
+            self.update(context, pose, tip_pose, value)
         if self.ms:
-            print(f"VR Paint stroke: {self.dabs} dabs, avg {sum(self.ms) / len(self.ms):.1f} ms, "
-                  f"max {max(self.ms):.1f} ms", flush=True)
-        if self.snapshotted and not self.changed and _history:
-            _history.pop()  # Nothing was painted after all.
+            print(f"VR Paint stroke: {self.dabs} dabs in {len(self.ms)} calls, avg {sum(self.ms) / len(self.ms):.1f} ms "
+                  f"per call, max {max(self.ms):.1f} ms", flush=True)
+        if self.changed and self.image is not None:
+            commit(self.image)
 
 
 class PickColor:

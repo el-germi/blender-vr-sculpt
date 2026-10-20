@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, PointerProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty, StringProperty
 
 from .strokes import PALETTE
 
@@ -81,6 +81,27 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         description="Show what the scene camera sees next to the hand panel, in every mode",
         default=False,
     )
+    # Animation.
+    show_timeline: BoolProperty(
+        name="Timeline", description="Timeline, keying and playback controls at the bottom of the hand panel",
+        default=True,
+    )
+    show_paths: BoolProperty(
+        name="Motion Paths",
+        description="Show the selected objects' motion paths in VR; grab a key marker to move that key",
+    )
+    onion: BoolProperty(name="Onion Skin", description="Show see-through copies of the selection at other frames")
+    onion_mode: EnumProperty(
+        name="Onion Frames",
+        items=(
+            ('KEYS', "Keyframes", "Ghosts at the previous and next keyframes"),
+            ('FRAMES', "Frame Step", "Ghosts every few frames before and after the current one"),
+        ),
+        default='KEYS',
+    )
+    onion_count: IntProperty(name="Onion Count", description="Ghosts on each side", default=1, min=1, max=4)
+    onion_step: IntProperty(name="Onion Step", description="Frames between ghosts (Frame Step)", default=5, min=1,
+                            soft_max=24)
     # 3D grid.
     grid_show: BoolProperty(name="Show Grid", description="Show a 3D grid of points around the controller tips")
     grid_snap: BoolProperty(
