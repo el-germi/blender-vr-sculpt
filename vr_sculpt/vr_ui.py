@@ -82,7 +82,7 @@ def slider(id, text, value, lo, hi, on_change, integer=False, fmt=None):
                   on_change=on_change)
 
 
-def layout(rows):
+def layout(rows, width=WIDTH):
     """Assign rects to the widgets in rows (list of lists). Returns (widgets, height)."""
     heights = [LABEL_H if all(w.kind == 'label' for w in row) else ROW_H for row in rows]
     height = PAD * 2 + sum(heights) + GAP * max(len(rows) - 1, 0)
@@ -90,8 +90,8 @@ def layout(rows):
     widgets = []
     for row, h in zip(rows, heights):
         n = len(row)
-        cell = (WIDTH - 2 * PAD - GAP * (n - 1)) / max(n, 1)
-        x = -WIDTH / 2 + PAD
+        cell = (width - 2 * PAD - GAP * (n - 1)) / max(n, 1)
+        x = -width / 2 + PAD
         for w in row:
             w.rect = (x, y - h, x + cell, y)
             widgets.append(w)
@@ -115,7 +115,7 @@ def panel_matrix(anchor, viewer, scale):
     return hud.billboard(anchor, viewer, scale)
 
 
-def ray_hit(matrix, origin, direction, height, scale):
+def ray_hit(matrix, origin, direction, height, scale, width=WIDTH):
     """Panel-space (x, y) where the ray hits the panel, or None."""
     inv = matrix.inverted_safe()
     o = inv @ Vector(origin)
@@ -129,7 +129,7 @@ def ray_hit(matrix, origin, direction, height, scale):
     if (d * t).length > RAY_LENGTH:
         return None
     p = o + d * t
-    if -WIDTH / 2 <= p.x <= WIDTH / 2 and 0.0 <= p.y <= height:
+    if -width / 2 <= p.x <= width / 2 and 0.0 <= p.y <= height:
         return (p.x, p.y)
     return None
 
@@ -185,13 +185,13 @@ def _draw_fitted(matrix, x, y_mid, text, max_width, color, align='LEFT'):
     return w
 
 
-def draw_panel(matrix, widgets, height, hover_id=None, pressed_id=None, title=None):
+def draw_panel(matrix, widgets, height, hover_id=None, pressed_id=None, title=None, width=WIDTH):
     shader = gpu.shader.from_builtin('UNIFORM_COLOR')
     gpu.state.blend_set('ALPHA')
     gpu.state.depth_test_set('NONE')
     gpu.matrix.push()
     gpu.matrix.multiply_matrix(matrix)
-    _quad(shader, -WIDTH / 2, 0.0, WIDTH / 2, height, COL_BG)
+    _quad(shader, -width / 2, 0.0, width / 2, height, COL_BG)
     for w in widgets:
         x0, y0, x1, y1 = w.rect
         hot = w.id and (w.id == hover_id or w.id == pressed_id)

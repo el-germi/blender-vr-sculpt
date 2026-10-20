@@ -4,7 +4,8 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty
 from mathutils import Matrix, Quaternion, Vector
 
-from . import actions, brushes, catalog, drawing, interactions, menus, native, primitives, strokes, vr_ui
+from . import (actions, brushes, camera, catalog, desktop, drawing, interactions, measure, menus, native,
+               primitives, strokes, symmetry, vr_ui)
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
 # Shared geometry cache, so both hands sculpt the same arrays.
@@ -69,6 +70,17 @@ def sculpt_target(context):
     return None
 
 
+def _tip_engaged(context, settings, tip, scale):
+    """Whether the tip is at work on something, so a desktop screen behind it doesn't take the trigger."""
+    if settings.mode == 'SCULPT':
+        return primitives.touching(context, tip, settings.radius * scale) is not None
+    if settings.mode == 'MODEL':
+        return primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale) is not None
+    if settings.mode == 'DRAW' and settings.draw_tool in {'EDIT', 'ERASE'}:
+        return strokes.nearest(context, tip, drawing.EDIT_RADIUS * scale) is not None
+    return False
+
+
 def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
     """Panel press, grab, create or draw for this trigger press; None means sculpt (or nothing)."""
     ss = context.window_manager.xr_session_state
@@ -77,6 +89,10 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         if hit is not None:
             # A press anywhere on the panel belongs to the panel, even between widgets.
             return interactions.UIPress(context, ss, vr_ui.hit_test(widgets, *hit), hit)
+    if settings.show_desktop and ss is not None and not _tip_engaged(context, settings, tip_pose.translation, scale):
+        handler = desktop.pick(context, ss, hand, pose)
+        if handler is not None:
+            return handler
     if settings.mode == 'MODEL':
         obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale)
         if obj is not None:
@@ -84,6 +100,10 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         return interactions.CreatePrimitive(context, settings.primitive, tip_pose.translation, scale)
     if settings.mode == 'DRAW':
         return drawing.pick(context, settings, tip_pose, value, scale)
+    if settings.mode == 'TOOLS':
+        if settings.tool == 'CAMERA':
+            return camera.AimCamera(context, pose)
+        return measure.Measure(context, settings, tip_pose.translation, scale)
     return None
 
 
@@ -145,7 +165,7 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
             invert = settings.left_inverts and left and settings.brush in {'DRAW', 'INFLATE'}
             self.stroke = brushes.Stroke(
                 get_state(obj), settings.brush, settings.radius * scale, settings.strength,
-                invert=invert, symmetry_x=settings.symmetry_x, grab_rotate=settings.grab_rotate,
+                invert=invert, symmetry=symmetry.sculpt_bits(settings), grab_rotate=settings.grab_rotate,
             )
         self.times = []
         self.write_ms = []
@@ -265,7 +285,7 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         return {'FINISHED'} if self.times else {'CANCELLED'}
 
 
-MODE_CYCLE = ('SCULPT', 'MODEL', 'DRAW')
+MODE_CYCLE = ('SCULPT', 'MODEL', 'DRAW', 'TOOLS')
 
 
 def undo_last_stroke(context):
@@ -280,8 +300,8 @@ def undo_last_stroke(context):
 
 
 class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
-    """Right hand (B): next brush (Sculpt), next primitive (Model), undo last stroke (Draw).
-    Left hand (Y): next mode (Sculpt, Model, Draw)"""
+    """Right hand (B): next brush (Sculpt), next primitive (Model), undo last stroke (Draw),
+    remove the last measurement or switch camera (Tools). Left hand (Y): next mode"""
     bl_idname = "vrsculpt.cycle_brush"
     bl_label = "VR Next Brush / Switch Mode"
     bl_options = {'INTERNAL'}
@@ -290,11 +310,20 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
 
     def execute(self, context):
         settings = context.scene.vr_sculpt
+        ss = context.window_manager.xr_session_state
+        if not self.left_hand and ss is not None and desktop.pointing_at_content(context, ss):
+            desktop.right_click(context, ss)
+            return {'FINISHED'}
         if self.left_hand:
             i = MODE_CYCLE.index(settings.mode) if settings.mode in MODE_CYCLE else -1
             menus.set_mode(context, MODE_CYCLE[(i + 1) % len(MODE_CYCLE)])
         elif settings.mode == 'DRAW':
             undo_last_stroke(context)
+        elif settings.mode == 'TOOLS':
+            if settings.tool == 'CAMERA':
+                camera.next_camera(context)
+            else:
+                measure.undo_last(context.scene)
         elif settings.mode == 'MODEL':
             keys = [e.key for e in catalog.entries()]
             if keys:
@@ -358,13 +387,24 @@ class VRSCULPT_OT_undo_stroke(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class VRSCULPT_OT_clear_measures(bpy.types.Operator):
+    """Remove all tape measurements made in VR"""
+    bl_idname = "vrsculpt.clear_measures"
+    bl_label = "Clear VR Measurements"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        return {'FINISHED'} if measure.clear(context.scene) else {'CANCELLED'}
+
+
 class VRSCULPT_OT_set_mode(bpy.types.Operator):
-    """Switch the VR tools between Sculpt and Model mode"""
+    """Switch the VR tools between Sculpt, Model, Draw and Tools mode"""
     bl_idname = "vrsculpt.set_mode"
     bl_label = "Set VR Mode"
     bl_options = {'INTERNAL'}
 
-    mode: EnumProperty(items=(('SCULPT', "Sculpt", ""), ('MODEL', "Model", ""), ('DRAW', "Draw", "")))
+    mode: EnumProperty(items=(('SCULPT', "Sculpt", ""), ('MODEL', "Model", ""), ('DRAW', "Draw", ""),
+                              ('TOOLS', "Tools", "")))
 
     def execute(self, context):
         menus.set_mode(context, self.mode)
@@ -372,7 +412,7 @@ class VRSCULPT_OT_set_mode(bpy.types.Operator):
 
 
 classes = (VRSCULPT_OT_stroke, VRSCULPT_OT_cycle_brush, VRSCULPT_OT_cycle_radius, VRSCULPT_OT_undo_stroke,
-           VRSCULPT_OT_set_mode)
+           VRSCULPT_OT_clear_measures, VRSCULPT_OT_set_mode)
 
 
 def register():

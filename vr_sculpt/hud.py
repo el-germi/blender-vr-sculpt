@@ -34,6 +34,13 @@ NATIVE_COLORS = {
 }
 
 MODEL_COLOR = (0.55, 0.9, 0.85)
+CAMERA_COLOR = (0.6, 0.75, 1.0)
+MEASURE_COLOR = (1.0, 0.82, 0.25)
+
+TOOLS_INFO = {
+    'MEASURE': ("Tape Measure", "Drag to measure; ends snap to vertices. B removes the last one"),
+    'CAMERA': ("Scene Camera", "Hold the trigger to aim the camera. B: next camera"),
+}
 
 DRAW_INFO = {
     'TUBE': ("Draw Tube", "Round stroke mesh. B undoes the last stroke"),
@@ -104,6 +111,9 @@ def card_content(settings, sculpt_brush, colors):
             title, desc = DRAW_INFO[tool]
         color = strokes.COLORS.get(settings.draw_color, (1.0, 1.0, 1.0)) if tool == 'DRAW' else MODEL_COLOR
         content = (title, desc, color, None)
+    elif settings.mode == 'TOOLS':
+        title, desc = TOOLS_INFO[settings.tool]
+        content = (title, desc, CAMERA_COLOR if settings.tool == 'CAMERA' else MEASURE_COLOR, None)
     elif settings.mode == 'MODEL':
         from . import primitives
         title = "Add " + primitives.label(settings.primitive)

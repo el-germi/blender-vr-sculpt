@@ -1,20 +1,22 @@
-"""VR Sculpt prototype: sculpt and model with VR controllers.
+"""VR Sculpt prototype: sculpt, model, draw and measure with VR controllers.
 
 Needs the bundled "VR Scene Inspection" add-on, which starts the VR session.
 """
 
 if "bpy" in locals():
     import importlib
-    for _m in (brushes, native, strokes, props, catalog, primitives, generic, actions, vr_ui, menus,
-               interactions, drawing, operators, hud, draw, ui):
+    for _m in (brushes, native, strokes, props, catalog, primitives, generic, actions, hud, grid, symmetry,
+               measure, camera, desktop, tracking, navigation, vr_ui, menus, interactions, drawing, operators,
+               live, draw, ui):
         importlib.reload(_m)
 else:
-    from . import (brushes, native, strokes, props, catalog, primitives, generic, actions, vr_ui, menus,
-                   interactions, drawing, operators, hud, draw, ui)
+    from . import (brushes, native, strokes, props, catalog, primitives, generic, actions, hud, grid, symmetry,
+                   measure, camera, desktop, tracking, navigation, vr_ui, menus, interactions, drawing, operators,
+                   live, draw, ui)
 
 import bpy
 
-_modules = (props, primitives, actions, operators, draw, ui)
+_modules = (props, primitives, actions, operators, navigation, camera, desktop, live, draw, ui)
 
 
 def register():

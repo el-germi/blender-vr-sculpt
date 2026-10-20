@@ -1,13 +1,13 @@
 import bpy
 
-from . import actions, catalog, native, operators, primitives
+from . import actions, catalog, measure, native, operators, primitives
 
 
 class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = "VR"
-    bl_label = "VR Sculpt"
+    bl_label = "VR Authoring"
 
     def draw(self, context):
         layout = self.layout
@@ -21,7 +21,7 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
         layout.prop(settings, "enabled")
         row = layout.row(align=True)
         row.active = settings.enabled
-        for mode, text in (('SCULPT', "Sculpt"), ('MODEL', "Model"), ('DRAW', "Draw")):
+        for mode, text in (('SCULPT', "Sculpt"), ('MODEL', "Model"), ('DRAW', "Draw"), ('TOOLS', "Tools")):
             row.operator("vrsculpt.set_mode", text=text, depress=settings.mode == mode).mode = mode
         layout.prop(settings, "show_panel")
         col = layout.column()
@@ -45,6 +45,21 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
             box.scale_y = 0.8
             box.label(text=actions.last_status)
             return
+        if settings.mode == 'TOOLS':
+            col.prop(settings, "tool")
+            if settings.tool == 'MEASURE':
+                col.prop(settings, "show_measures")
+                row = col.row(align=True)
+                row.label(text=f"{len(measure.stored(context.scene))} measurements")
+                row.operator("vrsculpt.clear_measures", text="Clear", icon='TRASH')
+            else:
+                col.prop(context.scene, "camera")
+            col.prop(settings, "camera_preview")
+            col.prop(settings, "tip_offset")
+            box = layout.box()
+            box.scale_y = 0.8
+            box.label(text=actions.last_status)
+            return
         if settings.mode == 'MODEL':
             row = col.row(align=True)
             row.label(text="Add: " + primitives.label(settings.primitive))
@@ -57,6 +72,7 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
             return
         col.prop(settings, "engine")
         is_native = settings.engine == 'NATIVE'
+        obj = context.active_object
         if is_native:
             brush = native.sculpt_brush(context)
             col.label(text=f"Brush: {brush.name if brush else 'none'} (active sculpt brush)")
@@ -66,8 +82,15 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
         if not is_native:
             col.prop(settings, "strength")
         col.prop(settings, "tip_offset")
+        row = col.row(align=True, heading="Symmetry")
+        if is_native:
+            if obj is not None and obj.type == 'MESH':
+                for axis in "xyz":
+                    row.prop(obj.data, "use_mirror_" + axis, text=axis.upper(), toggle=True)
+        else:
+            for axis in "xyz":
+                row.prop(settings, "symmetry_" + axis, text=axis.upper(), toggle=True)
         if not is_native:
-            col.prop(settings, "symmetry_x")
             col.prop(settings, "grab_rotate")
         col.prop(settings, "left_inverts")
         col.prop(settings, "show_cursor")
@@ -75,7 +98,6 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
         sub.active = settings.show_cursor
         sub.prop(settings, "show_brush_card")
 
-        obj = context.active_object
         box = layout.box()
         box.scale_y = 0.8
         if operators.sculpt_target(context) is None:
@@ -88,6 +110,50 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
         if s["dabs"]:
             box.label(text=f"Last {s['brush'].lower()} stroke: {s['dabs']} dabs")
             box.label(text=f"avg {s['avg_ms']:.1f} ms, max {s['max_ms']:.1f} ms (mesh update {s['write_ms']:.1f} ms)")
+
+
+class VIEW3D_PT_vr_extras(bpy.types.Panel):
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "VR"
+    bl_label = "VR Extras"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        settings = context.scene.vr_sculpt
+
+        col = layout.column(heading="Grid")
+        col.prop(settings, "grid_show", text="Show")
+        col.prop(settings, "grid_snap", text="Snap")
+        col.prop(settings, "grid_size", text="Size")
+
+        col = layout.column(heading="Navigation")
+        col.prop(settings, "nav_mode", text="Thumbsticks")
+        col.prop(settings, "nav_speed")
+        sub = col.column()
+        sub.active = settings.nav_mode == 'WALK'
+        sub.prop(settings, "nav_turn")
+
+        col = layout.column(heading="Camera")
+        col.prop(settings, "show_new_camera", text="New Camera Button")
+
+        col = layout.column(heading="View")
+        col.prop(settings, "show_desktop")
+        sub = col.column()
+        sub.active = settings.show_desktop
+        sub.prop(settings, "desktop_size")
+        sub.prop(settings, "desktop_interactive")
+        sub.prop(settings, "desktop_keyboard")
+        col.prop(context.window_manager.xr_session_settings, "show_passthrough", text="Passthrough")
+
+        col = layout.column(heading="Tracking")
+        col.prop(settings, "tracking", text="Objects")
+        sub = col.column()
+        sub.active = settings.tracking
+        sub.prop(settings, "tracking_record", text="Record")
 
 
 class VIEW3D_PT_vr_primitive(bpy.types.Panel):
@@ -145,7 +211,7 @@ class VRSCULPT_OT_choose_primitive(bpy.types.Operator):
         return {'RUNNING_MODAL'}
 
 
-classes = (VIEW3D_PT_vr_sculpt, VIEW3D_PT_vr_primitive, VRSCULPT_OT_choose_primitive)
+classes = (VIEW3D_PT_vr_sculpt, VIEW3D_PT_vr_extras, VIEW3D_PT_vr_primitive, VRSCULPT_OT_choose_primitive)
 
 
 def register():

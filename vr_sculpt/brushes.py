@@ -211,17 +211,22 @@ def _adjacency(state):
 MIRROR_X = np.diag([-1.0, 1.0, 1.0])
 
 
+def _mirror_diag(mask):
+    return np.array([-1.0 if mask & (1 << a) else 1.0 for a in range(3)])
+
+
 class Stroke:
     """One trigger press of one hand."""
 
     def __init__(self, state, brush, radius_world, strength, invert=False,
-                 symmetry_x=False, grab_rotate=True, spacing=0.15):
+                 symmetry_x=False, grab_rotate=True, spacing=0.15, symmetry=0):
         self.state = state
         self.brush = brush
         self.radius_world = radius_world
         self.strength = strength
         self.invert = invert
-        self.symmetry_x = symmetry_x
+        # Bitmask of mirrored axes in object space: 1 = X, 2 = Y, 4 = Z.
+        self.symmetry = symmetry | (1 if symmetry_x else 0)
         self.grab_rotate = grab_rotate
         self.spacing = spacing
         self.last_local = None
@@ -233,11 +238,16 @@ class Stroke:
         state.update_world()
         state.refresh_normals()
 
-    # Centers in local space, including mirrored ones.
+    # Centers in local space, including mirrored ones: (center, mirror mask).
     def _centers(self, c):
-        out = [(c, False)]
-        if self.symmetry_x and abs(c[0]) > 1e-9:
-            out.append((c * np.array([-1.0, 1.0, 1.0]), True))
+        out = [(c, 0)]
+        for mask in range(1, 8):
+            if mask & ~self.symmetry:
+                continue
+            # A dab on a mirror plane would just hit itself again.
+            if any(mask & (1 << a) and abs(c[a]) <= 1e-9 for a in range(3)):
+                continue
+            out.append((c * _mirror_diag(mask), mask))
         return out
 
     def update(self, tip_world, pose_world=None, pressure=1.0):
@@ -326,7 +336,7 @@ class Stroke:
             m = local
             if mirrored:
                 s = np.eye(4)
-                s[:3, :3] = MIRROR_X
+                s[:3, :3] = np.diag(_mirror_diag(mirrored))
                 m = s @ local @ s
             moved = _apply_mat(m, orig)
             st.co[idx] = orig + (moved - orig) * w[:, None]

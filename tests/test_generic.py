@@ -207,7 +207,7 @@ def test_slow_generator():
     generic.fit(ctx, wall, (0, 0, 0), (0.1, 0.1, 0.1), 0.005)
     check(wall.get("vrs_slow", False), "Wall Factory is detected as slow")
     widgets, _ = vr_ui.layout(menus.rows(ctx))
-    slider = next(w for w in widgets if w.kind == 'slider')
+    slider = next(w for w in widgets if w.kind == 'slider' and w.id.startswith("param_"))
     mesh_before = wall.data
     t0 = time.perf_counter()
     slider.on_change(slider.min + (slider.max - slider.min) * 0.7)

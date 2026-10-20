@@ -3,8 +3,9 @@
 Blender syncs one active action set, and OpenXR action sets can only be created
 before the session attaches them. So instead of a separate set, we edit the
 stock "blender_default" map right before the stock add-on turns it into
-OpenXR actions: the trigger teleport becomes our stroke action, and two
-buttons get brush/radius cycling.
+OpenXR actions: the trigger teleport becomes our stroke action, two buttons
+get brush/radius cycling, and the thumbstick fly actions get our Walk/Fly
+navigation.
 """
 
 import sys
@@ -71,9 +72,18 @@ def _patch(session_state):
         ami.haptic_name = ""
         if remove_source:
             items.remove(src)
+    # Thumbstick navigation: our operator reads Walk/Fly live (navigation.py).
+    from . import navigation
+    for name in navigation.ACTIONS:
+        ami = items.find(name)
+        if not ami:
+            missing.append(name)
+            continue
+        ami.op = "vrsculpt.navigate"
+        ami.op_mode = 'MODAL'
     if missing:
         return "Patched, but stock actions missing: " + ", ".join(missing)
-    return "Trigger = sculpt/model/draw, Y = mode, B = next brush / undo stroke, sticks: L = panel, R = radius"
+    return "Trigger = sculpt/model/draw/tools, Y = mode, B = next brush / undo, stick clicks: L = panel, R = radius"
 
 
 @persistent

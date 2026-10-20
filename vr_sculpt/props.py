@@ -28,9 +28,83 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('SCULPT', "Sculpt", "Trigger sculpts the active mesh"),
             ('MODEL', "Model", "Trigger creates primitives in empty space and grabs objects it touches"),
             ('DRAW', "Draw", "Trigger draws freehand 3D strokes"),
+            ('TOOLS', "Tools", "Tape measure and scene camera, plus grid, desktop window and navigation options"),
         ),
         default='SCULPT',
     )
+    # Tools mode.
+    tool: EnumProperty(
+        name="Tool",
+        items=(
+            ('MEASURE', "Measure", "Drag with the trigger to measure distances"),
+            ('CAMERA', "Camera", "Hold the trigger to aim the scene camera with your controller"),
+        ),
+        default='MEASURE',
+    )
+    show_measures: BoolProperty(name="Show Measurements", description="Show tape measurements in VR", default=True)
+    show_new_camera: BoolProperty(
+        name="New Camera Button",
+        description="Show the \"New here\" button on the hand panel's Camera tool, which adds a camera at your right hand",
+        default=True,
+    )
+    camera_preview: BoolProperty(
+        name="Camera Preview",
+        description="Show what the scene camera sees next to the hand panel, in every mode",
+        default=False,
+    )
+    # 3D grid.
+    grid_show: BoolProperty(name="Show Grid", description="Show a 3D grid of points around the controller tips")
+    grid_snap: BoolProperty(
+        name="Snap to Grid",
+        description="Snap new primitives, grabbed objects and tape measure ends to the 3D grid",
+    )
+    grid_size: FloatProperty(
+        name="Grid Size", description="Spacing of the 3D grid (scene units)",
+        default=0.05, min=0.001, soft_max=1.0, subtype='DISTANCE', unit='LENGTH')
+    # Navigation (thumbsticks).
+    nav_mode: EnumProperty(
+        name="Navigation",
+        items=(
+            ('WALK', "Walk", "Left stick walks on the ground (follows floors and stairs), right stick snap-turns"),
+            ('FLY', "Fly", "Left stick flies where you look, right stick goes up/down and turns smoothly"),
+        ),
+        default='WALK',
+    )
+    nav_speed: FloatProperty(
+        name="Move Speed", description="Thumbstick movement speed at full tilt (meters per second, hand space)",
+        default=1.5, min=0.1, soft_max=10.0, unit='VELOCITY')
+    nav_turn: FloatProperty(
+        name="Snap Turn", description="Angle of one snap turn in Walk mode",
+        default=0.5235988, min=0.0872665, max=1.5707963, subtype='ANGLE')
+    # Tracking objects.
+    tracking: BoolProperty(
+        name="Tracking Objects",
+        description=(
+            "Keep the empties 'VR Headset', 'VR Hand Left' and 'VR Hand Right' at the tracked poses "
+            "(with trigger, grip and stick values as custom properties), for parenting and drivers"
+        ),
+    )
+    tracking_record: BoolProperty(
+        name="Record Tracking",
+        description="While the timeline plays, keyframe the tracking objects on every frame",
+    )
+    # Floating desktop window.
+    show_desktop: BoolProperty(
+        name="Desktop Window",
+        description="Show the Blender window on a floating screen in VR (view only)",
+    )
+    desktop_interactive: BoolProperty(
+        name="Use From VR",
+        description=(
+            "Windows: the right controller drives the real mouse while it points at the desktop screen "
+            "(trigger = left button, left trigger = middle button, B = right click, right stick = wheel)"
+        ),
+        default=True,
+    )
+    desktop_keyboard: BoolProperty(name="Keyboard", description="Show a virtual keyboard under the desktop screen")
+    desktop_size: FloatProperty(
+        name="Desktop Size", description="Width of the floating desktop screen (meters, hand space)",
+        default=0.9, min=0.2, soft_max=3.0, subtype='DISTANCE', unit='LENGTH')
     # Draw mode.
     draw_tool: EnumProperty(
         name="Tool",
@@ -105,6 +179,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     )
     strength: FloatProperty(name="Strength", default=0.5, min=0.0, max=2.0, subtype='FACTOR')
     symmetry_x: BoolProperty(name="X Symmetry", description="Mirror strokes across the object's local X axis")
+    symmetry_y: BoolProperty(name="Y Symmetry", description="Mirror strokes across the object's local Y axis")
+    symmetry_z: BoolProperty(name="Z Symmetry", description="Mirror strokes across the object's local Z axis")
     grab_rotate: BoolProperty(name="Grab Rotates", description="Grab follows controller rotation, not only position", default=True)
     left_inverts: BoolProperty(name="Left Hand Inverts", description="Left trigger subtracts with Draw and Inflate", default=True)
     tip_offset: FloatProperty(
