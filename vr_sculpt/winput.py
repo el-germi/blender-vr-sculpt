@@ -230,8 +230,8 @@ def strip_float(data, y0, y1):
     out[..., 0] = part[..., 2]
     out[..., 1] = part[..., 1]
     out[..., 2] = part[..., 0]
+    out[..., 3] = 255.0  # Set before scaling: np.empty leaves garbage (even NaNs) there.
     out *= 1.0 / 255.0
-    out[..., 3] = 1.0
     return out.ravel()
 
 

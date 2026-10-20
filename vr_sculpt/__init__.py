@@ -16,7 +16,7 @@ else:
 
 import bpy
 
-_modules = (props, primitives, actions, operators, navigation, camera, desktop, onion, live, draw, ui)
+_modules = (props, primitives, actions, operators, navigation, camera, desktop, onion, paint, live, draw, ui)
 
 
 def register():
