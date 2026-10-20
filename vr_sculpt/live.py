@@ -5,7 +5,7 @@ import time
 
 import bpy
 
-from . import camera, desktop, operators, tracking
+from . import camera, desktop, onion, operators, paths, tracking
 
 FAST = 1.0 / 90.0
 IDLE = 0.25
@@ -27,6 +27,8 @@ def _tick():
         ss = context.window_manager.xr_session_state
         if settings.tracking:
             tracking.update(context, ss)
+        paths.ensure(context)
+        onion.update(context)
         if camera.wanted(context):
             # The preview renders in the desktop 3D view's draw callback, so keep it drawing.
             now = time.monotonic()
@@ -35,7 +37,8 @@ def _tick():
                 region = camera.host_region(context)
                 if region is not None:
                     region.tag_redraw()
-        busy = settings.tracking or camera.wanted(context) or desktop.interactive(context)
+        busy = (settings.tracking or camera.wanted(context) or desktop.interactive(context)
+                or settings.onion or settings.show_paths)
         return FAST if busy else IDLE
     except Exception:
         if not _errors:

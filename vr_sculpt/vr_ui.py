@@ -28,6 +28,7 @@ COL_DANGER = (0.6, 0.2, 0.22, 1.0)
 COL_TRACK = (0.14, 0.14, 0.16, 1.0)
 COL_TEXT = (1.0, 1.0, 1.0, 1.0)
 COL_DIM = (0.7, 0.7, 0.74, 1.0)
+COL_KEY = (1.0, 0.82, 0.25, 1.0)
 
 
 class Widget:
@@ -38,8 +39,9 @@ class Widget:
 
     def __init__(self, kind, id="", text="", *, active=False, danger=False, on_press=None,
                  value=0.0, min=0.0, max=1.0, integer=False, fmt=None, on_change=None, value_text="",
-                 swatch=None):
+                 swatch=None, ticks=None):
         self.kind, self.id, self.text = kind, id, text
+        self.ticks = ticks or ()  # slider: marks at these fractions of the track (keyframes)
         self.value_text = value_text
         self.swatch = swatch  # (r, g, b): a color button
         self.active, self.danger, self.on_press = active, danger, on_press
@@ -77,9 +79,9 @@ def select(id, text, value_text, on_press):
     return Widget('select', id, text, on_press=on_press, value_text=value_text)
 
 
-def slider(id, text, value, lo, hi, on_change, integer=False, fmt=None):
+def slider(id, text, value, lo, hi, on_change, integer=False, fmt=None, ticks=None):
     return Widget('slider', id, text, value=value, min=lo, max=hi, integer=integer, fmt=fmt,
-                  on_change=on_change)
+                  on_change=on_change, ticks=ticks)
 
 
 def layout(rows, width=WIDTH):
@@ -209,6 +211,14 @@ def draw_panel(matrix, widgets, height, hover_id=None, pressed_id=None, title=No
         elif w.kind == 'slider':
             _quad(shader, x0, y0, x1, y1, _lighter(COL_TRACK) if hot else COL_TRACK, 0.0002)
             _quad(shader, x0, y0, x0 + (x1 - x0) * w.fraction(), y0 + 0.003, COL_ACTIVE, 0.0003)
+            inner_w = x1 - x0 - 2 * PAD
+            for t in w.ticks:
+                tx = x0 + PAD + inner_w * min(max(t, 0.0), 1.0)
+                _quad(shader, tx - 0.0006, y0, tx + 0.0006, y0 + 0.007, COL_KEY, 0.00035)
+            if w.ticks:
+                # Where the current value is on the track (value_at maps the same inner span).
+                cx = x0 + PAD + inner_w * w.fraction()
+                _quad(shader, cx - 0.0008, y0, cx + 0.0008, y1, COL_ACTIVE, 0.0004)
         if hot:
             # A clear outline: subtle color changes are hard to see in a headset.
             pts = [(x0, y0, 0.0004), (x1, y0, 0.0004), (x1, y1, 0.0004), (x0, y1, 0.0004)]

@@ -4,7 +4,7 @@ Each handler gets update(context, aim_pose, tip_pose, value) every frame while t
 held and finish(context) on release; `changed` decides whether an undo step is pushed.
 """
 
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 from . import generic, grid, menus, primitives, vr_ui
 
@@ -20,6 +20,10 @@ def aim_direction(pose):
     return (pose.to_3x3() @ Vector((0.0, 0.0, -1.0))).normalized()
 
 
+TIMELINE_WIDTH = 0.22  # hand-space meters
+TIMELINE_GAP = 0.008
+
+
 def panel_frame(context, ss):
     """(matrix, widgets, height) of the hand panel above the left controller."""
     scale = ss.viewer_scale
@@ -29,11 +33,28 @@ def panel_frame(context, ss):
     return matrix, widgets, height
 
 
-def panel_pointer(context, ss, pose):
-    """(widgets, hit_xy, matrix, height) for a ray from pose; hit_xy is None when it misses."""
+def panel_frames(context, ss):
+    """[(matrix, widgets, height, width)]: the hand panel, plus the timeline strip on its right."""
     matrix, widgets, height = panel_frame(context, ss)
-    hit = vr_ui.ray_hit(matrix, pose.translation, aim_direction(pose), height, ss.viewer_scale)
-    return widgets, hit, matrix, height
+    out = [(matrix, widgets, height, vr_ui.WIDTH)]
+    settings = context.scene.vr_sculpt
+    if settings.show_timeline and not menus.picker_open():
+        tw, th = vr_ui.layout(menus.timeline_rows(context, settings), TIMELINE_WIDTH)
+        offset = vr_ui.WIDTH / 2 + TIMELINE_GAP + TIMELINE_WIDTH / 2
+        out.append((matrix @ Matrix.Translation((offset, 0.0, 0.0)), tw, th, TIMELINE_WIDTH))
+    return out
+
+
+def panel_pointer(context, ss, pose):
+    """(widgets, hit_xy, matrix, height) for a ray from pose at the hand panel or the timeline strip;
+    hit_xy is None when it misses both (then the hand panel's frame is returned)."""
+    frames = panel_frames(context, ss)
+    for matrix, widgets, height, width in frames:
+        hit = vr_ui.ray_hit(matrix, pose.translation, aim_direction(pose), height, ss.viewer_scale, width)
+        if hit is not None:
+            return widgets, hit, matrix, height
+    matrix, widgets, height, _width = frames[0]
+    return widgets, None, matrix, height
 
 
 class UIPress:
@@ -63,9 +84,13 @@ class UIPress:
     def update(self, context, pose, tip_pose, value):
         if self.kind != 'slider':
             return
-        # Rebuild the panel: it follows the left hand, and values may have changed.
-        matrix, widgets, height = panel_frame(context, self.ss)
-        widget = vr_ui.find(widgets, self.widget_id)
+        # Rebuild the panels: they follow the left hand, and values may have changed.
+        widget = matrix = None
+        for m, widgets, _height, _width in panel_frames(context, self.ss):
+            widget = vr_ui.find(widgets, self.widget_id)
+            if widget is not None:
+                matrix = m
+                break
         if widget is None:
             return
         # Keep dragging even if the ray slides off the panel: use the panel plane.
@@ -99,7 +124,9 @@ class MoveObject:
             self.changed = True
 
     def finish(self, context):
-        pass
+        if self.changed:
+            from . import anim
+            anim.auto_key(context, self.obj)
 
 
 class CreatePrimitive:

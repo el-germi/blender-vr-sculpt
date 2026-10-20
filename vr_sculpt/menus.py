@@ -4,7 +4,7 @@ import math
 
 import bpy
 
-from . import camera, catalog, desktop, generic, measure, native, paint, primitives, strokes, symmetry, vr_ui
+from . import anim, camera, catalog, desktop, generic, measure, native, paint, primitives, strokes, symmetry, vr_ui
 from .props import BRUSH_ITEMS
 
 NATIVE_SHORT = {
@@ -552,3 +552,44 @@ def _paint_rows(context, settings):
                                  lambda x: setattr(b, "strength", x), fmt=lambda x: f"{x:.2f}")])
     out.append([vr_ui.button("paint_undo", "Undo stroke", lambda: paint.undo_last(context), danger=True)])
     return out
+
+
+def timeline_rows(context, settings):
+    """Frame scrubber with key ticks, transport, keying and range buttons (at the panel's bottom)."""
+    scene = context.scene
+    start, end = scene.frame_start, scene.frame_end
+    span = max(end - start, 1)
+    keys = anim.key_frames(anim.selection(context))
+    ticks = [(f - start) / span for f in keys if start <= f <= end]
+    playing = anim.is_playing(context)
+    interp = anim.interpolation_at(context)
+    names = dict(anim.INTERPOLATIONS)
+    tool = scene.tool_settings
+    return [
+        [vr_ui.slider("frame", "Frame", scene.frame_current, start, end,
+                      lambda v: anim.set_frame(context, v), integer=True,
+                      fmt=lambda v: f"{int(v)} / {end}", ticks=ticks)],
+        [
+            vr_ui.button("key_prev", "|<", lambda: anim.jump_key(context, -1)),
+            vr_ui.button("frame_prev", "<", lambda: anim.step(context, -1)),
+            vr_ui.button("play", "Stop" if playing else "Play", lambda: anim.toggle_play(context), active=playing),
+            vr_ui.button("frame_next", ">", lambda: anim.step(context, 1)),
+            vr_ui.button("key_next", ">|", lambda: anim.jump_key(context, 1)),
+        ],
+        [
+            vr_ui.button("key_insert", "Key", lambda: anim.key_selection(context)),
+            vr_ui.button("key_delete", "Del key", lambda: anim.delete_selection_keys(context), danger=True),
+            vr_ui.button("autokey", "Auto", lambda: setattr(tool, "use_keyframe_insert_auto",
+                                                              not tool.use_keyframe_insert_auto),
+                         active=tool.use_keyframe_insert_auto),
+            vr_ui.select("interp", "Ease", names.get(interp, "-") if interp != 'MIXED' else "Mixed",
+                         lambda: open_picker("Key interpolation", [Option(i, n) for i, n in anim.INTERPOLATIONS],
+                                             interp, lambda v: anim.set_interpolation(context, v))),
+        ],
+        [
+            vr_ui.button("range_start", "Start", lambda: anim.set_start(context)),
+            vr_ui.button("range_end", "End", lambda: anim.set_end(context)),
+            vr_ui.button("show_paths", "Paths", _toggle(settings, "show_paths"), active=settings.show_paths),
+            vr_ui.button("onion", "Onion", _toggle(settings, "onion"), active=settings.onion),
+        ],
+    ]

@@ -5,7 +5,7 @@ from bpy.props import BoolProperty, EnumProperty
 from mathutils import Matrix, Quaternion, Vector
 
 from . import (actions, brushes, camera, catalog, desktop, drawing, interactions, measure, menus, native,
-               paint, primitives, strokes, symmetry, vr_ui)
+               paint, paths, primitives, strokes, symmetry, vr_ui)
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
 # Shared geometry cache, so both hands sculpt the same arrays.
@@ -97,6 +97,10 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         handler = desktop.pick(context, ss, hand, pose)
         if handler is not None:
             return handler
+    if settings.show_paths:
+        key = paths.nearest_key(context, tip_pose.translation, scale)
+        if key is not None:
+            return paths.KeyDrag(context, key[0], key[1], tip_pose.translation)
     if settings.mode == 'MODEL':
         obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale)
         if obj is not None:

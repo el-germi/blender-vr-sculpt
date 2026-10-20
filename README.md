@@ -81,6 +81,20 @@ Meta Quest over OpenXR.
   stick = scroll wheel. A virtual keyboard (sticky Shift / Ctrl / Alt) opens
   from the screen's title bar; drag the title bar to move the screen. It
   travels with you when you move. On other systems the screen is view only.
+- **Animation**: a timeline strip next to the hand panel, in every mode:
+  a frame scrubber with the selection's keys marked, play / stop, frame
+  and key stepping, Key / Delete key, **Auto** (Blender's Auto Keying, which
+  also keys objects and the camera when you let go of a VR grab), the
+  interpolation of the keys on this frame, and Start / End to set the range
+  here.
+  - **Motion paths in 3D**: the selection's paths with a tick per frame
+    (so spacing shows) and a marker on every location key. Grab a marker
+    and drag to move that key; the path follows.
+  - **Onion skin for meshes** (Blender only has it for Grease Pencil):
+    see-through copies of the selection at the previous / next keyframes or
+    every N frames, red before and green after, fainter further away. For a
+    selected armature, the meshes it deforms are ghosted. Computed in a
+    timer and cached (a few ms for a small rig), hidden while playing.
 - **Passthrough** toggle (Blender's own; needs a runtime that supports it).
 - **Hand panel** above the left controller: Sculpt / Model / Draw / Paint /
   Tools tabs, engine and brush buttons, radius and strength sliders, primitive
@@ -102,6 +116,7 @@ Meta Quest over OpenXR.
 | Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same |
 | Left stick click | Show / hide the hand panel | Same | Same | Same | Same |
 | Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Same |
+| Right trigger on a motion path key | Drag the key | Same | Same | Same | Same |
 | Grip, A / X | Blender's stock VR navigation (unchanged) | Same | Same | Same | Same |
 
 Pointing at the desktop screen (in any mode, unless the tip is touching
@@ -190,6 +205,18 @@ window, passthrough and tracking settings (including hiding the hand panel's
   then corrects with a uniform object scale so the shape fills the box
   exactly. Generators slower than 40 ms (e.g. Wall Factory) regenerate on
   slider release instead of every frame.
+- **Animation** ([anim.py](vr_sculpt/anim.py), [paths.py](vr_sculpt/paths.py),
+  [onion.py](vr_sculpt/onion.py)): 5.x actions are slotted, so F-curves come
+  from the action slot's channelbag (`bpy_extras.anim_utils`). Motion paths
+  are Blender's own (`object.paths_calculate`, about 30 ms for 60 frames),
+  recalculated at most 10 times a second while keys change, and drawn in
+  the headset from `motion_path.points`. Dragging a marker shifts that
+  frame's location keys (and handles) by the hand's motion in the parent's
+  space. Onion ghosts are computed in the app timer: `frame_set` to each
+  ghost frame, the evaluated mesh's triangles to world space with numpy,
+  then the frame is put back; they're cached until the frame, the keys or
+  a watched object change (a depsgraph handler), and drawn as translucent
+  batches with depth test.
 - **Paint mode** ([paint.py](vr_sculpt/paint.py)): `paint.image_paint`
   projects each dab along the 3D view, so for every dab the largest desktop
   3D view is pointed at the dab (from along the surface normal for Contact,
@@ -318,6 +345,10 @@ blender --background --factory-startup --python tests/test_tools.py
 blender --background --factory-startup --python tests/test_paint.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_anim.py
+```
+
 `test_generic.py` enables Extra Mesh Objects for its own run (factory
 settings, so your preferences aren't touched) and checks all 42 entries.
 
@@ -325,7 +356,9 @@ Windowed (opens Blender briefly, writes `tests/*_result.txt`):
 `native_engine.py`, `native_modal.py`, `native_transform.py`. The
 `overlay_preview.py`, `panel_preview.py`, `hud_preview.py` and
 `tools_preview.py` scripts render the overlay to PNG; `probe_capture.py`
-checks region capture and offscreen camera rendering. `paint_preview.py`
+checks region capture and offscreen camera rendering. `anim_preview.py`
+checks motion paths, key dragging, onion ghosts on a rig and playback.
+`paint_preview.py`
 paints real Contact and Spray strokes with simulated controllers and checks
 color, size, undo and picking (`probe_texpaint*.py` found how).
 Run the overlay one with `test_scene.blend` loaded; create that file with
@@ -347,6 +380,10 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   digits, a few symbols). The camera preview needs a visible desktop 3D view.
 - Passthrough is Blender's own `show_passthrough`; whether it shows depends
   on the OpenXR runtime.
+- Animation keys object transforms; posing bones in VR comes next. Onion
+  ghosts on heavy rigs cost one scene evaluation per ghost each time the
+  frame or keys change, and dragging motion path keys only moves location
+  keys.
 - Paint mode needs a desktop 3D view (it paints through it) and briefly moves
   that view for each dab. In Blender's own undo history every dab is a step;
   B in VR undoes whole strokes. Clone, Fill and Mask brushes aren't on the

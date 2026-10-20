@@ -151,6 +151,18 @@ class VIEW3D_PT_vr_extras(bpy.types.Panel):
         layout.use_property_decorate = False
         settings = context.scene.vr_sculpt
 
+        col = layout.column(heading="Animation")
+        col.prop(settings, "show_timeline")
+        col.prop(settings, "show_paths")
+        col.prop(settings, "onion")
+        sub = col.column()
+        sub.active = settings.onion
+        sub.prop(settings, "onion_mode")
+        sub.prop(settings, "onion_count")
+        row = sub.row()
+        row.active = settings.onion_mode == 'FRAMES'
+        row.prop(settings, "onion_step")
+
         col = layout.column(heading="Grid")
         col.prop(settings, "grid_show", text="Show")
         col.prop(settings, "grid_snap", text="Snap")
