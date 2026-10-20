@@ -454,11 +454,11 @@ def _tools_rows(context, settings):
         cam = scene.camera
         out.append([vr_ui.select("camera", "Camera", cam.name if cam else "none",
                                  lambda: open_camera_picker(context))])
-        out.append([
-            vr_ui.button("camera_new", "New here", lambda: _new_camera_here(context)),
-            vr_ui.button("camera_preview", "Pin preview", _toggle(settings, "camera_preview"),
-                         active=settings.camera_preview),
-        ])
+        row = [vr_ui.button("camera_preview", "Pin preview", _toggle(settings, "camera_preview"),
+                            active=settings.camera_preview)]
+        if settings.show_new_camera:
+            row.insert(0, vr_ui.button("camera_new", "New here", lambda: _new_camera_here(context)))
+        out.append(row)
         if cam is not None and cam.data.type == 'PERSP':
             out.append([vr_ui.slider("camera_lens", "Lens", cam.data.lens, 10.0, 200.0,
                                      lambda v: setattr(cam.data, "lens", v), fmt=lambda v: f"{v:.0f} mm")])

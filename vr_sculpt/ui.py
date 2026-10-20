@@ -7,7 +7,7 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = "VR"
-    bl_label = "VR Sculpt"
+    bl_label = "VR Authoring"
 
     def draw(self, context):
         layout = self.layout
@@ -136,6 +136,9 @@ class VIEW3D_PT_vr_extras(bpy.types.Panel):
         sub = col.column()
         sub.active = settings.nav_mode == 'WALK'
         sub.prop(settings, "nav_turn")
+
+        col = layout.column(heading="Camera")
+        col.prop(settings, "show_new_camera", text="New Camera Button")
 
         col = layout.column(heading="View")
         col.prop(settings, "show_desktop")

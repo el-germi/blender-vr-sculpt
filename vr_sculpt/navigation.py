@@ -130,7 +130,7 @@ class FloorFollower:
 
 
 class VRSCULPT_OT_navigate(bpy.types.Operator):
-    """Thumbstick navigation (Walk or Fly, from the VR Sculpt settings)"""
+    """Thumbstick navigation (Walk or Fly, from the VR Authoring panel)"""
     bl_idname = "vrsculpt.navigate"
     bl_label = "VR Navigate"
     bl_options = {'INTERNAL'}

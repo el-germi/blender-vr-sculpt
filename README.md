@@ -107,9 +107,10 @@ blender --background --command extension install-file -r user_default -e dist/vr
 ```
 
 Then in the 3D View: **Sidebar (N) > VR > Start VR Session**. The **VR
-Sculpt** panel in the same tab has the engine, brush, radius, strength, tip
-offset and display options; **VR Extras** has the grid, navigation, desktop
-window, passthrough and tracking settings.
+Authoring** panel in the same tab has the engine, brush, radius, strength, tip
+offset and display options; **VR Extras** has the grid, navigation, camera, desktop
+window, passthrough and tracking settings (including hiding the hand panel's
+"New here" camera button).
 
 - Python engine: select a mesh in **Object Mode**.
 - Native engine: select a mesh in **Sculpt Mode** and keep it visible in the

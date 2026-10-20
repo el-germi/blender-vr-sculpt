@@ -42,6 +42,11 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         default='MEASURE',
     )
     show_measures: BoolProperty(name="Show Measurements", description="Show tape measurements in VR", default=True)
+    show_new_camera: BoolProperty(
+        name="New Camera Button",
+        description="Show the \"New here\" button on the hand panel's Camera tool, which adds a camera at your right hand",
+        default=True,
+    )
     camera_preview: BoolProperty(
         name="Camera Preview",
         description="Show what the scene camera sees next to the hand panel, in every mode",

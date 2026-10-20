@@ -394,6 +394,13 @@ def test_tools_page():
                 "tracking", "nav_walk", "nav_fly", "nav_speed"}
         check(need <= ids, f"{tool}: page has its buttons (missing {sorted(need - ids)})")
         check(height < 0.4, f"{tool}: panel height {height:.3f} m")
+    settings.tool = 'CAMERA'
+    check(vr_ui.find(vr_ui.layout(menus.rows(ctx))[0], "camera_new") is not None, "New here shows by default")
+    settings.show_new_camera = False
+    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    check(vr_ui.find(widgets, "camera_new") is None and vr_ui.find(widgets, "camera_preview") is not None,
+          "VR Extras can hide New here (Pin preview stays)")
+    settings.show_new_camera = True
     settings.tool = 'MEASURE'
     widgets, _ = vr_ui.layout(menus.rows(ctx))
     vr_ui.find(widgets, "nav_fly").on_press()
