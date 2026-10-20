@@ -97,6 +97,7 @@ def stroke(ctx, settings, obj, poses, left=False, value=1.0):
             if s is None:
                 return None
         else:
+            time.sleep(0.011)  # Updates arrive about once per VR frame.
             s.update(ctx, pose, tip, value)
     s.finish(ctx)
     return s
@@ -182,6 +183,10 @@ def run():
             dt = (time.perf_counter() - t0) * 1000
             check(s is not None and s.dabs > 10, f"contact stroke painted {s.dabs if s else 0} dabs "
                   f"({dt / max(s.dabs, 1):.1f} ms per dab incl. overhead)")
+            calls = len(s.ms) if s else 0
+            check(s is not None and calls < s.dabs,
+                  f"dabs are batched: {s.dabs if s else 0} dabs in {calls} paint calls, "
+                  f"avg {sum(s.ms) / max(calls, 1):.1f} ms per call")
             after = pixels(img)
             changed = np.any(np.abs(after[..., :3] - base[..., :3]) > 0.2, axis=2)
             check(changed.sum() > 200, f"{int(changed.sum())} texels painted")

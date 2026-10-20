@@ -9,7 +9,8 @@ Findings from tests/probe_texpaint*.py on 5.4.0 Alpha:
   from hand space with the view's own projection. The locked scene size isn't used.
 - mode='INVERT' paints with the secondary color.
 - The colors used are the unified paint settings' ones, even with Unified Color off.
-- Each call is its own undo step (about 1.5 ms per dab). The add-on keeps its own per-stroke
+- Each call is its own undo step. Most of a call's cost is setting up the projection for the whole
+  mesh, so all the dabs of a frame go into one call (one stroke element each). The add-on keeps its own per-stroke
   undo (changed tiles only, see below), so B (or Undo stroke) takes back a whole stroke.
 """
 
@@ -40,7 +41,8 @@ EYE_DISTANCE = 0.25  # hand-space meters between the temporary view and the dab,
 # Projection painting skips faces that reach far outside the view (a big quad painted from close up
 # only took paint near its corners), so the view backs off until the face under the dab fits.
 SPACING = 0.2  # dab spacing as a fraction of the radius
-MAX_DABS_PER_UPDATE = 24
+MAX_DABS_PER_UPDATE = 48  # per frame; they share one paint call
+MIN_CALL_INTERVAL = 0.009  # seconds: at most one paint call per VR frame (90 Hz)
 TRIGGER_THRESHOLD = 0.3
 HISTORY_BYTES = 256 * 1024 * 1024  # memory kept for undoing strokes (changed tiles only)
 
@@ -431,6 +433,8 @@ class PaintStroke:
         self.last_mouse_point = None
         self.started = False
         self.tan_half = None
+        self.last_call = 0.0
+        self.pending = None
         self.dabs = 0
         self.ms = []
         self.changed = False
@@ -443,6 +447,12 @@ class PaintStroke:
         return surface_near(self.obj, tip, self.radius)
 
     def update(self, context, pose, tip_pose, value):
+        # Updates come from XR events and a fallback timer, often both in one frame. One paint call
+        # per frame is enough: the next update fills the gap with interpolated dabs.
+        if self.last is not None and time.perf_counter() - self.last_call < MIN_CALL_INTERVAL:
+            self.pending = (pose, tip_pose, value)  # Painted on release if nothing comes after it.
+            return
+        self.pending = None
         h = self.hit(pose, tip_pose.translation)
         if h is None:
             self.last = None
@@ -468,8 +478,7 @@ class PaintStroke:
         if self.reach == 'SPRAY':
             from . import interactions
             direction = interactions.aim_direction(pose)
-        for p, n, f in targets:
-            self._dab(p, n, f, direction, pressure_from(value))
+        self._paint(targets, direction, pressure_from(value))
 
     def eye_distance(self, face, point, tan_half):
         """How far the temporary view has to be for the face under the dab to fit in it."""
@@ -484,8 +493,21 @@ class PaintStroke:
             extent = max(self.obj.dimensions)  # E.g. a modifier changed the faces: be safe.
         return max(d, (extent + self.radius) / tan_half)
 
-    def _dab(self, point, normal, face, direction, pressure):
+    @staticmethod
+    def _element(point, mouse, pressure, size, is_start):
+        return {"name": "", "location": tuple(point), "mouse": mouse, "mouse_event": mouse, "pressure": pressure,
+                "size": max(size, 1.0), "x_tilt": 0.0, "y_tilt": 0.0, "time": 0.0, "is_start": is_start}
+
+    def _paint(self, targets, direction, pressure):
+        """Paint one update's dabs with a single image_paint call, from one view that sees them all.
+
+        Each call sets up projection painting for the whole mesh first, which is most of its cost
+        (about 2 ms on a 10k-vertex mesh, 4.6 ms on 41k), so one call per frame instead of one per
+        dab is up to ~10x cheaper when the hand moves fast."""
+        if not targets:
+            return
         t0 = time.perf_counter()
+        self.last_call = t0
         view = native.largest_view3d(self.window)
         if view is None:
             return
@@ -495,39 +517,45 @@ class PaintStroke:
             self.started = True
             if self.image is not None:
                 ensure_base(self.image)
+        center = sum((p for p, _n, _f in targets), Vector()) / len(targets)
+        if direction is not None:
+            back = -direction
+        else:
+            back = sum((n for _p, n, _f in targets), Vector())
+            back = back.normalized() if back.length > 1e-9 else targets[-1][1]
         v = _View(area, region)
         try:
-            back = -direction if direction is not None else normal
-            v.look(point + back * EYE_DISTANCE * self.scale, point)
+            v.look(center + back * EYE_DISTANCE * self.scale, center)
             if self.tan_half is None:
                 # Half the narrower field of view, from the view's projection (lens and region shape).
                 wm = v.rv3d.window_matrix
                 self.tan_half = min(1.0 / wm[0][0], 1.0 / wm[1][1]) if wm[0][0] and wm[1][1] else 0.0
-            dist = self.eye_distance(face, point, self.tan_half)
+            dist = max(self.eye_distance(f, center, self.tan_half) for _p, _n, f in targets)
+            if self.tan_half > 0.0:
+                spread = max((p - center).length for p, _n, _f in targets)
+                dist = max(dist, (spread + self.radius) / self.tan_half)
             if dist > EYE_DISTANCE * self.scale + 1e-6:
-                v.look(point + back * dist, point)
-            size = v.pixels(point, self.radius)
-            mouse = v.mouse(point)
-            if size is None or mouse is None:
+                v.look(center + back * dist, center)
+            elems = []
+            for p, _n, _f in targets:
+                mouse, size = v.mouse(p), v.pixels(p, self.radius)
+                if mouse is not None and size is not None:
+                    elems.append(self._element(p, mouse, pressure, size, not elems))
+            if not elems:
                 return
-            elem = {"name": "", "location": tuple(point), "mouse": mouse, "mouse_event": mouse,
-                    "pressure": pressure, "size": max(size, 1.0), "x_tilt": 0.0, "y_tilt": 0.0, "time": 0.0,
-                    "is_start": True}
-            elems = [elem]
             if self.last is not None:
                 # The previous dab as a lead-in, so Smear knows the stroke's direction.
                 prev = v.mouse(self.last[0])
                 if prev is not None:
-                    elems = [dict(elem, mouse=prev, mouse_event=prev, pressure=0.0,
-                                  location=tuple(self.last[0])),
-                             dict(elem, is_start=False)]
+                    elems[0]["is_start"] = False
+                    elems.insert(0, self._element(self.last[0], prev, 0.0, elems[0]["size"], True))
             with bpy.context.temp_override(window=self.window, area=area, region=region):
                 if not self._can_paint():
                     return
                 bpy.ops.paint.image_paint(stroke=elems, mode='INVERT' if self.invert else 'NORMAL')
-            self.dabs += 1
+            self.dabs += len(targets)
             self.changed = True
-            self.last = (point, normal)
+            self.last = (targets[-1][0], targets[-1][1])
         finally:
             v.restore()
             self.ms.append((time.perf_counter() - t0) * 1000.0)
@@ -545,9 +573,13 @@ class PaintStroke:
         return False
 
     def finish(self, context):
+        if self.pending is not None:
+            pose, tip_pose, value = self.pending
+            self.last_call = 0.0
+            self.update(context, pose, tip_pose, value)
         if self.ms:
-            print(f"VR Paint stroke: {self.dabs} dabs, avg {sum(self.ms) / len(self.ms):.1f} ms, "
-                  f"max {max(self.ms):.1f} ms", flush=True)
+            print(f"VR Paint stroke: {self.dabs} dabs in {len(self.ms)} calls, avg {sum(self.ms) / len(self.ms):.1f} ms "
+                  f"per call, max {max(self.ms):.1f} ms", flush=True)
         if self.changed and self.image is not None:
             commit(self.image)
 

@@ -171,6 +171,13 @@ def test_undo(obj, img):
     check(abs(s.eye_distance(None, Vector((0.0, 5.0, 0.0)), 0.0) - paint.EYE_DISTANCE) < 1e-6,
           "without a field of view it keeps the default")
     bpy.data.objects.remove(plane)
+    # Updates within one VR frame are skipped (one paint call per frame), but the last one is kept
+    # for release.
+    s = paint.PaintStroke(ctx, ctx.scene.vr_sculpt, obj, False, 1.0)
+    s.last = (Vector((0.0, 0.0, 0.0)), Vector((0.0, 0.0, 1.0)))
+    s.last_call = __import__("time").perf_counter()
+    s.update(ctx, Matrix(), Matrix.Translation((1.0, -0.6, 0.0)), 1.0)
+    check(s.pending is not None and s.dabs == 0, "a second update in the same frame waits")
     # A paint stroke handler that painted nothing doesn't commit.
     paint.forget_history()
     s = paint.PaintStroke(ctx, ctx.scene.vr_sculpt, obj, False, 1.0)
