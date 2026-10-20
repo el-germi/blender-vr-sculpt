@@ -36,7 +36,9 @@ INFO = {
     "Smear": "Drags the texture's colors along your stroke",
     "Erase Soft": "Erases to transparent (needs an image with alpha)",
 }
-EYE_DISTANCE = 0.25  # hand-space meters between the temporary view and the dab
+EYE_DISTANCE = 0.25  # hand-space meters between the temporary view and the dab, at least
+# Projection painting skips faces that reach far outside the view (a big quad painted from close up
+# only took paint near its corners), so the view backs off until the face under the dab fits.
 SPACING = 0.2  # dab spacing as a fraction of the radius
 MAX_DABS_PER_UPDATE = 24
 TRIGGER_THRESHOLD = 0.3
@@ -150,8 +152,13 @@ def _override(context):
 
 
 def setup(context, obj, size=2048):
-    """Give obj what texture painting needs: UVs (Smart UV Project) and an image in a paint slot."""
-    from . import menus
+    """Give obj what texture painting needs: UVs (Smart UV Project) and an image in a paint slot.
+
+    An editable VR primitive or stroke becomes a plain mesh first: rebuilding it from its settings
+    would throw the UVs (and so the painting) away, like sculpting does."""
+    from . import menus, primitives, strokes
+    primitives.forget(obj)
+    strokes.forget(obj)
     ov = _override(context)
     if not len(obj.data.uv_layers):
         menus.set_object_mode(context, obj, 'EDIT')
@@ -264,7 +271,7 @@ def _read(img):
     if img.is_float:
         return px
     px *= 255.0
-    np.rint(px, out=px)
+    px += 0.5  # Rounds on the truncating cast below (values are 0..1 for byte images).
     return px.astype(np.uint8)
 
 
@@ -290,7 +297,11 @@ def ensure_base(img):
 def changed_tiles(before, after, tile=TILE):
     """[(ty, tx)] of the tiles where two (h, w, 4) arrays differ."""
     h, w = before.shape[:2]
-    diff = np.any(before != after, axis=2)
+    # Compare whole pixels as integers: much faster than comparing channels and reducing.
+    if before.dtype == np.uint8:
+        diff = before.view(np.uint32).reshape(h, w) != after.view(np.uint32).reshape(h, w)
+    else:
+        diff = (before.view(np.uint64).reshape(h, w, 2) != after.view(np.uint64).reshape(h, w, 2)).any(axis=2)
     ny, nx = -(-h // tile), -(-w // tile)
     padded = np.zeros((ny * tile, nx * tile), dtype=bool)
     padded[:h, :w] = diff
@@ -419,6 +430,7 @@ class PaintStroke:
         self.last = None  # (point, normal) of the last dab
         self.last_mouse_point = None
         self.started = False
+        self.tan_half = None
         self.dabs = 0
         self.ms = []
         self.changed = False
@@ -435,8 +447,8 @@ class PaintStroke:
         if h is None:
             self.last = None
             return
-        point, normal, _face = h
-        targets = [(point, normal)]
+        point, normal, face = h
+        targets = [(point, normal, face)]
         if self.last is not None:
             gap = (point - self.last[0]).length
             step = max(self.radius * SPACING, 1e-6)
@@ -449,17 +461,30 @@ class PaintStroke:
                 if self.reach == 'CONTACT':
                     near = surface_near(self.obj, p, self.radius * 2)
                     if near is not None:
-                        targets.append(near[:2])
+                        targets.append(near)
                         continue
-                targets.append((p, self.last[1].lerp(normal, i / n).normalized()))
+                targets.append((p, self.last[1].lerp(normal, i / n).normalized(), face))
         direction = None
         if self.reach == 'SPRAY':
             from . import interactions
             direction = interactions.aim_direction(pose)
-        for p, n in targets:
-            self._dab(p, n, direction, pressure_from(value))
+        for p, n, f in targets:
+            self._dab(p, n, f, direction, pressure_from(value))
 
-    def _dab(self, point, normal, direction, pressure):
+    def eye_distance(self, face, point, tan_half):
+        """How far the temporary view has to be for the face under the dab to fit in it."""
+        d = EYE_DISTANCE * self.scale
+        if tan_half <= 0.0:
+            return d
+        mesh = self.obj.data
+        mw = self.obj.matrix_world
+        if face is not None and 0 <= face < len(mesh.polygons):
+            extent = max((mw @ mesh.vertices[v].co - point).length for v in mesh.polygons[face].vertices)
+        else:
+            extent = max(self.obj.dimensions)  # E.g. a modifier changed the faces: be safe.
+        return max(d, (extent + self.radius) / tan_half)
+
+    def _dab(self, point, normal, face, direction, pressure):
         t0 = time.perf_counter()
         view = native.largest_view3d(self.window)
         if view is None:
@@ -472,9 +497,15 @@ class PaintStroke:
                 ensure_base(self.image)
         v = _View(area, region)
         try:
-            eye = point - direction * EYE_DISTANCE * self.scale if direction is not None else \
-                point + normal * EYE_DISTANCE * self.scale
-            v.look(eye, point)
+            back = -direction if direction is not None else normal
+            v.look(point + back * EYE_DISTANCE * self.scale, point)
+            if self.tan_half is None:
+                # Half the narrower field of view, from the view's projection (lens and region shape).
+                wm = v.rv3d.window_matrix
+                self.tan_half = min(1.0 / wm[0][0], 1.0 / wm[1][1]) if wm[0][0] and wm[1][1] else 0.0
+            dist = self.eye_distance(face, point, self.tan_half)
+            if dist > EYE_DISTANCE * self.scale + 1e-6:
+                v.look(point + back * dist, point)
             size = v.pixels(point, self.radius)
             mouse = v.mouse(point)
             if size is None or mouse is None:
@@ -487,7 +518,8 @@ class PaintStroke:
                 # The previous dab as a lead-in, so Smear knows the stroke's direction.
                 prev = v.mouse(self.last[0])
                 if prev is not None:
-                    elems = [dict(elem, mouse=prev, mouse_event=prev, pressure=0.0, location=tuple(self.last[0])),
+                    elems = [dict(elem, mouse=prev, mouse_event=prev, pressure=0.0,
+                                  location=tuple(self.last[0])),
                              dict(elem, is_start=False)]
             with bpy.context.temp_override(window=self.window, area=area, region=region):
                 if not self._can_paint():

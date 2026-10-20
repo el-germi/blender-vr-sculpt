@@ -113,14 +113,30 @@ def run():
         settings = ctx.scene.vr_sculpt
         settings.paint_texture_size = '1024'
         with ctx.temp_override(window=win, area=area, region=region):
-            # 1. Set up a cube (no UVs, no material).
+            # 1. Set up a big thin box, a wall (no UVs, no material).
             menus.set_mode(bpy.context, 'MODEL')
             cube = primitives.create(bpy.context, 'CUBE', (0.6, 0.0, 1.0))
+            cube.vr_prim.size = (1.0, 0.04, 1.0)
+            bpy.context.view_layer.update()
             check(len(cube.data.uv_layers) == 0 and not paint.ready(cube), "new cube isn't paintable yet")
             ok = paint.setup(bpy.context, cube, 1024)
             check(ok and len(cube.data.uv_layers) > 0 and paint.paint_image(cube).size[0] == 1024,
                   "Set up: UVs and a 1K image")
             check(cube.mode == 'TEXTURE_PAINT', f"and Texture Paint mode ({cube.mode})")
+            check(cube.vr_prim.kind == 'NONE', "it's a plain mesh now (resizing it would wipe the UVs)")
+            # Contact stroke across the middle of the 1 m face: big quads used to take paint only
+            # near their corners, because the view was too close for the face to fit in it.
+            menus.set_mode(bpy.context, 'PAINT')
+            cimg = paint.paint_image(cube)
+            cbase = pixels(cimg).copy()
+            settings.paint_reach, settings.paint_radius, settings.tip_offset = 'CONTACT', 0.03, 0.04
+            paint.set_color(bpy.context, (0.9, 0.1, 0.6))
+            n = Vector((0.0, -1.0, 0.0))
+            wall = [pose_at(Vector((x, -0.02, 1.0)) + n * (0.003 + settings.tip_offset), -n)
+                    for x in np.linspace(0.3, 0.9, 20)]
+            stroke(bpy.context, settings, cube, wall)
+            painted = int(np.any(np.abs(pixels(cimg)[..., :3] - cbase[..., :3]) > 0.05, axis=2).sum())
+            check(painted > 2000, f"a stroke across the middle of a 1 m face paints ({painted} texels)")
             menus.set_object_mode(bpy.context, cube, 'OBJECT')
             cube.hide_set(True)
 

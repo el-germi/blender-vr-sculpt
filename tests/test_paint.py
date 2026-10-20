@@ -157,6 +157,20 @@ def test_undo(obj, img):
     check(paint._base["pixels"] is None, "a Blender undo drops the baseline")
     check(paint.undo_last(ctx) and np.allclose(pixels()[100:120, 100:120], start[100:120, 100:120],
                                                atol=1 / 255 + 1e-6), "and VR undo re-reads it")
+    # Float images: whole-pixel comparison works on float32 too.
+    a = np.zeros((70, 130, 4), dtype=np.float32)
+    b = a.copy()
+    b[65, 129, 3] = 0.5
+    check(paint.changed_tiles(a, b) == [(1, 2)], f"float images: the changed tile is found ({paint.changed_tiles(a, b)})")
+    # The temporary view backs off until the face under the dab fits: a 1 m quad from close up.
+    bpy.ops.mesh.primitive_plane_add(size=1.0, location=(0.0, 5.0, 0.0))
+    plane = ctx.active_object
+    s = paint.PaintStroke(ctx, ctx.scene.vr_sculpt, plane, False, 1.0)
+    d = s.eye_distance(0, Vector((0.0, 5.0, 0.0)), 0.36)
+    check(d >= (math.sqrt(0.5) + s.radius) / 0.36 - 1e-6, f"a 1 m quad is painted from {d:.2f} m, not 0.25 m")
+    check(abs(s.eye_distance(None, Vector((0.0, 5.0, 0.0)), 0.0) - paint.EYE_DISTANCE) < 1e-6,
+          "without a field of view it keeps the default")
+    bpy.data.objects.remove(plane)
     # A paint stroke handler that painted nothing doesn't commit.
     paint.forget_history()
     s = paint.PaintStroke(ctx, ctx.scene.vr_sculpt, obj, False, 1.0)
