@@ -5,6 +5,9 @@ Blender 5.x actions are slotted: an object's F-curves live in the channelbag of 
 
 Auto-key is Blender's own setting (Timeline > Auto Keying). Our VR handlers set transforms
 directly, which Blender's auto-key doesn't see, so they call auto_key() when you let go.
+
+For an armature in Pose Mode, keys go on its selected bones, and the timeline, key jumps and
+interpolation only look at those bones' channels.
 """
 
 import bpy
@@ -34,11 +37,37 @@ def fcurves(obj):
     return list(bag.fcurves) if bag is not None else []
 
 
+def posing(obj):
+    return obj is not None and obj.type == 'ARMATURE' and obj.mode == 'POSE'
+
+
+def selected_bones(obj):
+    """The armature's selected pose bones, the active one first."""
+    active = obj.data.bones.active
+    bones = [pb for pb in obj.pose.bones if pb.select]
+    first = [pb for pb in bones if active is not None and pb.name == active.name]
+    return first + [pb for pb in bones if pb not in first]
+
+
+def bone_prefix(name):
+    return f'pose.bones["{bpy.utils.escape_identifier(name)}"].'
+
+
+def channels(obj):
+    """F-curves the timeline works on: for an armature in Pose Mode with selected bones, only theirs."""
+    curves = fcurves(obj)
+    if posing(obj):
+        prefixes = tuple(bone_prefix(pb.name) for pb in selected_bones(obj))
+        if prefixes:
+            return [fc for fc in curves if fc.data_path.startswith(prefixes)]
+    return curves
+
+
 def key_frames(objs, data_paths=None):
     """Sorted frames that have a key on any of objs (optionally only on these data paths)."""
     frames = set()
     for obj in objs:
-        for fc in fcurves(obj):
+        for fc in channels(obj):
             if data_paths is None or fc.data_path in data_paths:
                 frames.update(round(k.co[0], 3) for k in fc.keyframe_points)
     return sorted(frames)
@@ -59,17 +88,41 @@ def insert_key(obj, frame):
 
 
 def delete_key(obj, frame):
+    return _delete(obj, transform_paths(obj), frame)
+
+
+def _delete(owner, data_paths, frame):
     deleted = False
-    for path in transform_paths(obj):
+    for path in data_paths:
         try:
-            deleted = obj.keyframe_delete(path, frame=frame) or deleted
+            deleted = owner.keyframe_delete(path, frame=frame) or deleted
         except RuntimeError:
             pass  # No key on this channel at this frame.
     return deleted
 
 
+def bone_paths(pb, location=True):
+    rot = {'QUATERNION': "rotation_quaternion", 'AXIS_ANGLE': "rotation_axis_angle"}.get(
+        pb.rotation_mode, "rotation_euler")
+    return ("location", rot, "scale") if location else (rot,)
+
+
+def insert_bone_key(pb, frame, location=True):
+    """Key a pose bone's rotation (and location and scale), in a group named after the bone."""
+    for path in bone_paths(pb, location):
+        pb.keyframe_insert(path, frame=frame, group=pb.name)
+
+
 def key_selection(context):
     frame = context.scene.frame_current
+    active = context.view_layer.objects.active
+    if posing(active):
+        bones = selected_bones(active)
+        for pb in bones:
+            insert_bone_key(pb, frame)
+        if bones:
+            changed(context)
+        return len(bones)
     objs = selection(context)
     for obj in objs:
         insert_key(obj, frame)
@@ -80,7 +133,11 @@ def key_selection(context):
 
 def delete_selection_keys(context):
     frame = context.scene.frame_current
-    n = sum(1 for obj in selection(context) if delete_key(obj, frame))
+    active = context.view_layer.objects.active
+    if posing(active):
+        n = sum(1 for pb in selected_bones(active) if _delete(pb, bone_paths(pb), frame))
+    else:
+        n = sum(1 for obj in selection(context) if delete_key(obj, frame))
     if n:
         changed(context)
     return n
@@ -91,6 +148,17 @@ def auto_key(context, obj):
     if obj is None or not context.scene.tool_settings.use_keyframe_insert_auto:
         return False
     insert_key(obj, context.scene.frame_current)
+    changed(context)
+    return True
+
+
+def auto_key_bones(context, bones):
+    """Key these pose bones if Auto Keying is on. bones: {pose bone: also key location}."""
+    if not bones or not context.scene.tool_settings.use_keyframe_insert_auto:
+        return False
+    frame = context.scene.frame_current
+    for pb, location in bones.items():
+        insert_bone_key(pb, frame, location)
     changed(context)
     return True
 
@@ -106,7 +174,7 @@ def changed(context):
 
 def keys_at(objs, frame):
     """Keyframe points on objs at frame."""
-    return [k for obj in objs for fc in fcurves(obj) for k in fc.keyframe_points if abs(k.co[0] - frame) < 0.5]
+    return [k for obj in objs for fc in channels(obj) for k in fc.keyframe_points if abs(k.co[0] - frame) < 0.5]
 
 
 def interpolation_at(context):
@@ -124,7 +192,7 @@ def set_interpolation(context, interpolation):
         k.interpolation = interpolation
     if keys:
         for obj in selection(context):
-            for fc in fcurves(obj):
+            for fc in channels(obj):
                 fc.update()
         changed(context)
     return len(keys)

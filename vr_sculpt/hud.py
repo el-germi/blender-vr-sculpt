@@ -36,6 +36,12 @@ NATIVE_COLORS = {
 MODEL_COLOR = (0.55, 0.9, 0.85)
 CAMERA_COLOR = (0.6, 0.75, 1.0)
 MEASURE_COLOR = (1.0, 0.82, 0.25)
+POSE_COLORS = {'FK': (0.55, 0.85, 1.0), 'IK': (1.0, 0.6, 0.85)}
+RECORD_COLOR = (1.0, 0.3, 0.3)
+POSE_INFO = {
+    'FK': ("FK Pose", "Grab a bone: it turns to follow, twist to roll. Free bones move from the head"),
+    'IK': ("IK Pose", "Grab a bone: it follows your hand and its parent bones bend to reach"),
+}
 
 TOOLS_INFO = {
     'MEASURE': ("Tape Measure", "Drag to measure; ends snap to vertices. B removes the last one"),
@@ -120,6 +126,17 @@ def card_content(settings, sculpt_brush, colors):
                        paint.get_color(bpy_context()), None)
         else:
             content = (name, paint.INFO.get(name, ""), paint.get_color(bpy_context()), brush_texture(b))
+    elif settings.mode == 'POSE':
+        from . import puppet
+        take = puppet.state()
+        if take == 'COUNTDOWN':
+            content = (f"Recording in {int(puppet.countdown_left()) + 1}", "Get in position", RECORD_COLOR, None)
+        elif take is not None:
+            content = ("Recording", f"Frame {bpy_context().scene.frame_current}. Press Stop rec to end",
+                       RECORD_COLOR, None)
+        else:
+            title, desc = POSE_INFO[settings.pose_tool]
+            content = (title, desc, POSE_COLORS[settings.pose_tool], None)
     elif settings.mode == 'TOOLS':
         title, desc = TOOLS_INFO[settings.tool]
         content = (title, desc, CAMERA_COLOR if settings.tool == 'CAMERA' else MEASURE_COLOR, None)

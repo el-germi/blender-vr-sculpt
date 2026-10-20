@@ -1,6 +1,6 @@
 # VR Sculpt for Blender (prototype)
 
-Sculpt, model, draw, paint and measure with VR controllers inside Blender's own VR session. Pure Python
+Sculpt, model, draw, paint, pose, puppeteer and measure with VR controllers inside Blender's own VR session. Pure Python
 extension, no Blender fork. Built and tested on **Blender 5.4.0 Alpha** with a
 Meta Quest over OpenXR.
 
@@ -95,9 +95,34 @@ Meta Quest over OpenXR.
     every N frames, red before and green after, fainter further away. For a
     selected armature, the meshes it deforms are ghosted. Computed in a
     timer and cached (a few ms for a small rig), hidden while playing.
+- **Pose mode**: pose any armature with the controllers, no constraints
+  added to the rig. Choosing Pose puts the active mesh's rig (or the active
+  armature) in Pose Mode; the bones are drawn on top of everything, and the
+  one in reach of a tip lights up.
+  - **FK**: grab a bone and it turns about its head so the grabbed point
+    follows your hand; twist the controller to roll it. A free bone (the
+    root, or one not connected to its parent) grabbed near its head moves
+    with your hand instead.
+  - **IK**: grab a bone (a hand, a foot) and it follows your hand, position
+    and rotation, while 1-6 parent bones bend to reach.
+  - **Mirror X** poses the .L/.R counterpart the same way. Bone rotation
+    modes and rotation/location locks are respected. Reset bone / Reset pose.
+  - With Auto on, letting go keys the bones you moved. Key / Delete key, the
+    timeline's key ticks, key jumps and interpolation work on the selected
+    bones, and the selected keyed bones get motion paths.
+  - Without a rig (Rig: Objects), the trigger moves the objects it touches,
+    so props can be animated the same way.
+- **Puppeteering**: **Bind L / Bind R / Bind head** ties the active bone (or
+  object) to that controller or the headset: it keeps its offset and follows
+  you live, with IK if the IK tool is on (bind a hand and the arm comes
+  along). **Rec** counts down 3 seconds (with haptic beeps), then plays the
+  timeline from the start and keys every bound bone, its IK chain and
+  whatever the triggers are posing, on each frame, until Stop or the end of
+  the range. A take only replaces what it records, so takes layer: the head
+  first, then each hand.
 - **Passthrough** toggle (Blender's own; needs a runtime that supports it).
 - **Hand panel** above the left controller: Sculpt / Model / Draw / Paint /
-  Tools tabs, engine and brush buttons, radius and strength sliders, primitive
+  Pose / Tools tabs, engine and brush buttons, radius and strength sliders, primitive
   settings, Duplicate and Delete. Point at it with the right controller and
   pull the trigger.
 
@@ -105,19 +130,19 @@ Meta Quest over OpenXR.
 
 ## Controls
 
-| Input | Sculpt mode | Model mode | Draw mode | Paint mode | Tools mode |
-|---|---|---|---|---|---|
-| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab | Draw / Edit / Erase | Paint / pick color | Measure / aim the camera |
-| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Same as right |
-| Right trigger, pointing at the hand panel | Press buttons, drag sliders | Same | Same | Same | Same |
-| Y (left) | Next mode (Sculpt, Model, Draw, Paint, Tools) | Same | Same | Same | Same |
-| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Remove the last measurement / next camera |
-| Left stick | Walk / fly (move) | Same | Same | Same | Same |
-| Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same |
-| Left stick click | Show / hide the hand panel | Same | Same | Same | Same |
-| Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Same |
-| Right trigger on a motion path key | Drag the key | Same | Same | Same | Same |
-| Grip, A / X | Blender's stock VR navigation (unchanged) | Same | Same | Same | Same |
+| Input | Sculpt mode | Model mode | Draw mode | Paint mode | Pose mode | Tools mode |
+|---|---|---|---|---|---|---|
+| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab | Draw / Edit / Erase | Paint / pick color | Grab a bone (FK / IK), or an object without a rig | Measure / aim the camera |
+| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Same as right | Same as right |
+| Right trigger, pointing at the hand panel | Press buttons, drag sliders | Same | Same | Same | Same | Same |
+| Y (left) | Next mode (Sculpt, Model, Draw, Paint, Pose, Tools) | Same | Same | Same | Same | Same |
+| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Switch FK / IK | Remove the last measurement / next camera |
+| Left stick | Walk / fly (move) | Same | Same | Same | Same | Same |
+| Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same | Same |
+| Left stick click | Show / hide the hand panel | Same | Same | Same | Same | Same |
+| Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Next IK chain length (1-4) | Same |
+| Right trigger on a motion path key | Drag the key | Same | Same | Same | Same | Same |
+| Grip, A / X | Blender's stock VR navigation (unchanged) | Same | Same | Same | Same | Same |
 
 Pointing at the desktop screen (in any mode, unless the tip is touching
 something you're working on): right trigger = left mouse button, left
@@ -217,6 +242,30 @@ window, passthrough and tracking settings (including hiding the hand panel's
   then the frame is put back; they're cached until the frame, the keys or
   a watched object change (a depsgraph handler), and drawn as translucent
   batches with depth test.
+- **Pose mode** ([pose.py](vr_sculpt/pose.py)): a `Follow` object holds what
+  a grab started from (the bone's world matrix, the grabbed point, the
+  controller pose) and each frame works out the bone's new armature-space
+  matrix: a swing from the grabbed point's old direction to the tip's, plus
+  the controller's twist about the bone (FK); the controller's motion applied
+  rigidly (free bones, bindings); or, for IK, the rigid target for the
+  bone's head with Cyclic Coordinate Descent bending the parent chain (from
+  last frame's pose, so it doesn't jump between solutions). The matrices go
+  back through `Bone.convert_local_to_pose(invert=True)` with each bone's
+  new parent matrix, so a whole chain is written in one pass without
+  waiting for Blender to re-evaluate the pose, and only the rotation (plus
+  location for free bones) is set, in the bone's own rotation mode and locks.
+  Mirror X writes the counterpart's local rotation as `(w, x, -y, -z)` and
+  location as `(-x, y, z)`, like Blender's pose flip. In 5.x bone selection
+  is `PoseBone.select`. Onion ghosts change frames, which re-applies keys,
+  so the pose (and objects' transforms) are saved first and put back.
+- **Puppeteering** ([puppet.py](vr_sculpt/puppet.py)): a binding is a
+  `Follow` that never lets go, driven by a grip pose or the headset from the
+  app timer. A take is keyed from a `frame_change_post` handler (playback
+  has just applied the action for the new frame; the bindings are put back
+  on top, then keyed) and from the timer, once per frame. Playback wrapping
+  around ends the take; the handler only marks it, and the timer stops
+  playback, since changing frames or playback from inside a frame change
+  handler isn't safe.
 - **Paint mode** ([paint.py](vr_sculpt/paint.py)): `paint.image_paint`
   projects each dab along the 3D view, so for every dab the largest desktop
   3D view is pointed at the dab (from along the surface normal for Contact,
@@ -261,6 +310,19 @@ window, passthrough and tracking settings (including hiding the hand panel's
   ([live.py](vr_sculpt/live.py)) sets the empties' matrices from the session
   state at 90 Hz and reads the input values with `action_state_get`; custom
   property changes are followed by `update_tag()` so drivers re-run.
+- **Undo.** Every trigger action that changed something (a stroke, a grab,
+  a panel press, a measurement, a pose) is one step in Blender's own undo
+  history: the trigger operator is an undo operator. B's quick undos in Draw
+  mode (a regular undo step that deletes the last stroke) and Paint mode (the
+  add-on's own per-stroke image history, which a Blender undo or redo
+  resets) work on top of it. A puppet take is one step, as are the panel
+  presses around it. Undo, redo and loading a file replace Blender's data
+  with new copies, so anything a held trigger action kept from before (the
+  scene's settings, objects, meshes, F-curves) would point at freed memory:
+  `undo_pre` / `undo_post` / `redo_*` / `load_post` handlers count those
+  swaps, and a trigger operator that sees the count change lets go at once
+  without touching what it kept (a held desktop mouse button is still
+  released). The handlers also clear the caches that hold Blender data.
 - **Drawing in the headset** ([draw.py](vr_sculpt/draw.py),
   [hud.py](vr_sculpt/hud.py)): `SpaceView3D` draw handlers on region type
   `'XR'` (headset) and `'WINDOW'` (desktop). The session's
@@ -349,6 +411,10 @@ blender --background --factory-startup --python tests/test_paint.py
 blender --background --factory-startup --python tests/test_anim.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_pose.py
+```
+
 `test_generic.py` enables Extra Mesh Objects for its own run (factory
 settings, so your preferences aren't touched) and checks all 42 entries.
 
@@ -358,6 +424,11 @@ Windowed (opens Blender briefly, writes `tests/*_result.txt`):
 `tools_preview.py` scripts render the overlay to PNG; `probe_capture.py`
 checks region capture and offscreen camera rendering. `anim_preview.py`
 checks motion paths, key dragging, onion ghosts on a rig and playback.
+`undo_preview.py` runs real undos while a tape measure and a pose grab are
+held (that crashed Blender before the undo guard).
+`pose_preview.py` enters Pose Mode the way VR does (no area), records a
+puppet take while the timeline really plays, and draws the Pose page and
+bones (`probe_pose.py` checked the pose API).
 `paint_preview.py`
 paints real Contact and Spray strokes with simulated controllers and checks
 color, size, undo and picking (`probe_texpaint*.py` found how).
@@ -380,10 +451,17 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   digits, a few symbols). The camera preview needs a visible desktop 3D view.
 - Passthrough is Blender's own `show_passthrough`; whether it shows depends
   on the OpenXR runtime.
-- Animation keys object transforms; posing bones in VR comes next. Onion
-  ghosts on heavy rigs cost one scene evaluation per ghost each time the
-  frame or keys change, and dragging motion path keys only moves location
-  keys.
+- Onion ghosts on heavy rigs cost one scene evaluation per ghost each time
+  the frame or keys change (they wait while you pose live or puppeteer),
+  and dragging motion path keys only moves object location keys; bone path
+  markers are view only.
+- Posing writes the bones' own transforms: constraints on the rig (its own
+  IK, Copy Rotation, ...) still apply on top, so posing a constrained bone
+  can look like it fights back. Pick the controls a rig is meant to be
+  animated with. The VR IK ignores the bones' IK limits and stretch, and
+  Mirror X needs .L/.R names with mirrored rest poses (as Symmetrize makes).
+  Bindings last until Unbind or the end of the VR session. Takes key every
+  frame (dense keys), with no smoothing yet.
 - Paint mode needs a desktop 3D view (it paints through it) and briefly moves
   that view for each dab. In Blender's own undo history every dab is a step;
   B in VR undoes whole strokes. Clone, Fill and Mask brushes aren't on the

@@ -230,7 +230,7 @@ def test_panel(obj):
     ob = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_brush.execute, "left_hand": True,
                         "report": lambda *a: None})()
     ob.execute(ctx)
-    check(settings.mode == 'TOOLS', "Y after Paint goes to Tools")
+    check(settings.mode == 'POSE', "Y after Paint goes to Pose")
     settings.mode = 'DRAW'
     ob.execute(ctx)
     check(settings.mode == 'PAINT', "and Paint comes after Draw")

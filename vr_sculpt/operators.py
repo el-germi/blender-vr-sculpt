@@ -6,6 +6,7 @@ from mathutils import Matrix, Quaternion, Vector
 
 from . import (actions, brushes, camera, catalog, desktop, drawing, interactions, measure, menus, native,
                paint, paths, primitives, strokes, symmetry, vr_ui)
+from . import pose as pose_mode  # "pose" is the controller pose in the handlers below
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
 # Shared geometry cache, so both hands sculpt the same arrays.
@@ -16,6 +17,22 @@ stats = {"verts": 0, "dabs": 0, "avg_ms": 0.0, "max_ms": 0.0, "write_ms": 0.0, "
 
 # Controller tips being drawn as "active" (stroking) per hand index.
 active_hands = set()
+
+# Undo, redo and loading a file replace Blender's data with new copies, so whatever a trigger
+# handler kept from before (objects, meshes, the scene's settings, F-curves) points at freed
+# memory, and touching it crashes Blender. They are counted here, so a running trigger operator
+# can tell and let go without touching any of it.
+data_generation = 0
+
+
+@bpy.app.handlers.persistent
+def _on_data_swap(*_args):
+    global data_generation
+    data_generation += 1
+    drop_state()
+    brushes.forget_caches()
+    strokes.forget_caches()
+    pose_mode.forget_caches()
 
 
 def get_state(obj):
@@ -82,6 +99,8 @@ def _tip_engaged(context, settings, tip, scale):
         obj = paint.target(context)
         return obj is not None and settings.paint_reach == 'CONTACT' and \
             paint.surface_near(obj, tip, settings.paint_radius * scale) is not None
+    if settings.mode == 'POSE':
+        return pose_mode.engaged(context, tip, scale)
     return False
 
 
@@ -110,6 +129,8 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         return drawing.pick(context, settings, tip_pose, value, scale)
     if settings.mode == 'PAINT':
         return paint.pick(context, settings, hand == actions.HANDS[0], pose, tip_pose, scale, value)
+    if settings.mode == 'POSE':
+        return pose_mode.pick(context, settings, tip_pose, scale)
     if settings.mode == 'TOOLS':
         if settings.tool == 'CAMERA':
             return camera.AimCamera(context, pose)
@@ -134,6 +155,7 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         settings = context.scene.vr_sculpt
         self.hand = xr.user_path
         self.hand_idx = actions.hand_index(self.hand)
+        self.generation = data_generation
         self.threshold = xr.float_threshold
         self.timer = None
         self.stroke = None
@@ -227,6 +249,8 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
             return {'CANCELLED'}
 
     def _modal(self, context, event):
+        if self.generation != data_generation:
+            return self._abandon(context)
         if event.type == 'XR_ACTION':
             xr = event.xr
             if xr.action != actions.ACTION_STROKE or xr.user_path != self.hand:
@@ -254,6 +278,22 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
                 self.n_timer += 1
                 self._apply(context, loc, rot, value)
         return {'PASS_THROUGH'}
+
+    def _abandon(self, context):
+        """Blender's data was swapped (undo / redo) while the trigger was held: stop here, without
+        finishing (that would touch the stale references). A handler can release what isn't
+        Blender data (a held mouse button, a drawn preview) in abandon()."""
+        if self.timer is not None:
+            context.window_manager.event_timer_remove(self.timer)
+            self.timer = None
+        active_hands.discard(self.hand_idx)
+        abandon = getattr(self.handler, "abandon", None)
+        if abandon is not None:
+            abandon()
+        name = type(self.handler or self.stroke).__name__
+        self.handler = self.stroke = None
+        print(f"VR Sculpt {name}: undo or redo while the trigger was held; the action was dropped", flush=True)
+        return {'CANCELLED'}
 
     def _finish(self, context):
         if self.timer is not None:
@@ -295,7 +335,7 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         return {'FINISHED'} if self.times else {'CANCELLED'}
 
 
-MODE_CYCLE = ('SCULPT', 'MODEL', 'DRAW', 'PAINT', 'TOOLS')
+MODE_CYCLE = ('SCULPT', 'MODEL', 'DRAW', 'PAINT', 'POSE', 'TOOLS')
 
 
 def undo_last_stroke(context):
@@ -311,7 +351,7 @@ def undo_last_stroke(context):
 
 class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
     """Right hand (B): next brush (Sculpt), next primitive (Model), undo last stroke (Draw),
-    remove the last measurement or switch camera (Tools). Left hand (Y): next mode"""
+    FK / IK (Pose), remove the last measurement or switch camera (Tools). Left hand (Y): next mode"""
     bl_idname = "vrsculpt.cycle_brush"
     bl_label = "VR Next Brush / Switch Mode"
     bl_options = {'INTERNAL'}
@@ -331,6 +371,8 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
             undo_last_stroke(context)
         elif settings.mode == 'PAINT':
             paint.undo_last(context)
+        elif settings.mode == 'POSE':
+            settings.pose_tool = 'IK' if settings.pose_tool == 'FK' else 'FK'
         elif settings.mode == 'TOOLS':
             if settings.tool == 'CAMERA':
                 camera.next_camera(context)
@@ -361,7 +403,7 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
 
 
 class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
-    """Right stick click: next brush radius. Left stick click: show or hide the hand panel"""
+    """Right stick click: next brush radius (Pose: IK chain length). Left stick click: show or hide the hand panel"""
     bl_idname = "vrsculpt.cycle_radius"
     bl_label = "VR Next Radius / Toggle Panel"
     bl_options = {'INTERNAL'}
@@ -372,6 +414,9 @@ class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
         settings = context.scene.vr_sculpt
         if self.left_hand:
             settings.show_panel = not settings.show_panel
+            return {'FINISHED'}
+        if settings.mode == 'POSE':
+            settings.pose_chain = settings.pose_chain % 4 + 1
             return {'FINISHED'}
         prop = "paint_radius" if settings.mode == 'PAINT' else "radius"
         bigger = [r for r in RADIUS_STEPS if r > getattr(settings, prop) + 1e-6]
@@ -429,13 +474,13 @@ class VRSCULPT_OT_clear_measures(bpy.types.Operator):
 
 
 class VRSCULPT_OT_set_mode(bpy.types.Operator):
-    """Switch the VR tools between Sculpt, Model, Draw, Paint and Tools mode"""
+    """Switch the VR tools between Sculpt, Model, Draw, Paint, Pose and Tools mode"""
     bl_idname = "vrsculpt.set_mode"
     bl_label = "Set VR Mode"
     bl_options = {'INTERNAL'}
 
     mode: EnumProperty(items=(('SCULPT', "Sculpt", ""), ('MODEL', "Model", ""), ('DRAW', "Draw", ""),
-                              ('PAINT', "Paint", ""), ('TOOLS', "Tools", "")))
+                              ('PAINT', "Paint", ""), ('POSE', "Pose", ""), ('TOOLS', "Tools", "")))
 
     def execute(self, context):
         menus.set_mode(context, self.mode)
@@ -446,12 +491,23 @@ classes = (VRSCULPT_OT_stroke, VRSCULPT_OT_cycle_brush, VRSCULPT_OT_cycle_radius
            VRSCULPT_OT_paint_setup, VRSCULPT_OT_clear_measures, VRSCULPT_OT_set_mode)
 
 
+_SWAP_HANDLERS = ("undo_pre", "undo_post", "redo_pre", "redo_post", "load_post")
+
+
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+    for name in _SWAP_HANDLERS:
+        handlers = getattr(bpy.app.handlers, name)
+        if _on_data_swap not in handlers:
+            handlers.append(_on_data_swap)
 
 
 def unregister():
+    for name in _SWAP_HANDLERS:
+        handlers = getattr(bpy.app.handlers, name)
+        if _on_data_swap in handlers:
+            handlers.remove(_on_data_swap)
     drop_state()
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

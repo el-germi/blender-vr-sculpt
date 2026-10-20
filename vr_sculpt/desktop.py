@@ -471,6 +471,9 @@ class MouseDrag:
         if state["drag"] is self:
             release_drag()
 
+    def abandon(self):
+        self.finish(None)  # Don't leave the real mouse button held down.
+
 
 def right_click(context, ss):
     """B while pointing at the screen."""
