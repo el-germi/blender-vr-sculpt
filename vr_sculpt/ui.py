@@ -1,6 +1,6 @@
 import bpy
 
-from . import actions, catalog, measure, native, operators, primitives
+from . import actions, catalog, measure, native, operators, paint, primitives
 
 
 class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
@@ -21,7 +21,8 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
         layout.prop(settings, "enabled")
         row = layout.row(align=True)
         row.active = settings.enabled
-        for mode, text in (('SCULPT', "Sculpt"), ('MODEL', "Model"), ('DRAW', "Draw"), ('TOOLS', "Tools")):
+        for mode, text in (('SCULPT', "Sculpt"), ('MODEL', "Model"), ('DRAW', "Draw"), ('PAINT', "Paint"),
+                           ('TOOLS', "Tools")):
             row.operator("vrsculpt.set_mode", text=text, depress=settings.mode == mode).mode = mode
         layout.prop(settings, "show_panel")
         col = layout.column()
@@ -41,6 +42,31 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
             row.prop(settings, "mirror_z", text="Z", toggle=True)
             col.prop(settings, "tip_offset")
             col.operator("vrsculpt.undo_stroke", icon='LOOP_BACK')
+            box = layout.box()
+            box.scale_y = 0.8
+            box.label(text=actions.last_status)
+            return
+        if settings.mode == 'PAINT':
+            obj = paint.target(context)
+            if obj is None:
+                col.label(text="Select a mesh to paint", icon='INFO')
+            elif not paint.ready(obj):
+                col.label(text=f"{obj.name} needs UVs and an image", icon='INFO')
+                col.prop(settings, "paint_texture_size")
+                col.operator("vrsculpt.paint_setup", icon='TEXTURE')
+            else:
+                b = paint.brush(context)
+                col.label(text=f"Brush: {b.name if b else 'none'} (active texture paint brush)")
+                col.prop(settings, "paint_tool")
+                col.prop(settings, "paint_reach")
+                col.prop(settings, "paint_radius")
+                owner = paint.color_owner(context)
+                row = col.row(align=True)
+                row.prop(owner, "color", text="")
+                row.prop(owner, "secondary_color", text="")
+                if b is not None:
+                    col.prop(b, "strength")
+            col.prop(settings, "tip_offset")
             box = layout.box()
             box.scale_y = 0.8
             box.label(text=actions.last_status)

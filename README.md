@@ -1,6 +1,6 @@
 # VR Sculpt for Blender (prototype)
 
-Sculpt, model, draw and measure with VR controllers inside Blender's own VR session. Pure Python
+Sculpt, model, draw, paint and measure with VR controllers inside Blender's own VR session. Pure Python
 extension, no Blender fork. Built and tested on **Blender 5.4.0 Alpha** with a
 Meta Quest over OpenXR.
 
@@ -41,6 +41,14 @@ Meta Quest over OpenXR.
   strokes and notes away. Mirror on X / Y / Z around the 3D cursor (editing
   one side updates the other), a stabilizer, 8 colors, and B to undo the last
   stroke.
+- **Paint mode**: texture painting with Blender's own texture paint
+  brushes (Hard, Soft, Airbrush, Blur, Smear, Erase), pressure-sensitive.
+  **Contact** paints where the tip touches the surface, like a brush;
+  **Spray** paints where the controller points, at any distance. The left
+  hand paints the second color. 8 swatches, hue / saturation / value
+  sliders, Swap, and **Pick color** (an eyedropper on the texture). B takes
+  back the whole last stroke. **Set up for painting** gives a mesh UVs
+  (Smart UV Project, if it has none) and a 1K / 2K / 4K image.
 - **Tools mode**:
   - **Tape measure**: drag to measure. Ends snap to nearby mesh vertices (or
     the grid), labels use the scene's units, and measurements stay until you
@@ -74,8 +82,8 @@ Meta Quest over OpenXR.
   from the screen's title bar; drag the title bar to move the screen. It
   travels with you when you move. On other systems the screen is view only.
 - **Passthrough** toggle (Blender's own; needs a runtime that supports it).
-- **Hand panel** above the left controller: Sculpt / Model / Draw / Tools
-  tabs, engine and brush buttons, radius and strength sliders, primitive
+- **Hand panel** above the left controller: Sculpt / Model / Draw / Paint /
+  Tools tabs, engine and brush buttons, radius and strength sliders, primitive
   settings, Duplicate and Delete. Point at it with the right controller and
   pull the trigger.
 
@@ -83,18 +91,18 @@ Meta Quest over OpenXR.
 
 ## Controls
 
-| Input | Sculpt mode | Model mode | Draw mode | Tools mode |
-|---|---|---|---|---|
-| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab | Draw / Edit / Erase | Measure / aim the camera |
-| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Same as right |
-| Right trigger, pointing at the hand panel | Press buttons, drag sliders | Same | Same | Same |
-| Y (left) | Next mode (Sculpt, Model, Draw, Tools) | Same | Same | Same |
-| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Remove the last measurement / next camera |
-| Left stick | Walk / fly (move) | Same | Same | Same |
-| Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same |
-| Left stick click | Show / hide the hand panel | Same | Same | Same |
-| Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Same |
-| Grip, A / X | Blender's stock VR navigation (unchanged) | Same | Same | Same |
+| Input | Sculpt mode | Model mode | Draw mode | Paint mode | Tools mode |
+|---|---|---|---|---|---|
+| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab | Draw / Edit / Erase | Paint / pick color | Measure / aim the camera |
+| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Same as right |
+| Right trigger, pointing at the hand panel | Press buttons, drag sliders | Same | Same | Same | Same |
+| Y (left) | Next mode (Sculpt, Model, Draw, Paint, Tools) | Same | Same | Same | Same |
+| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Remove the last measurement / next camera |
+| Left stick | Walk / fly (move) | Same | Same | Same | Same |
+| Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same |
+| Left stick click | Show / hide the hand panel | Same | Same | Same | Same |
+| Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Same |
+| Grip, A / X | Blender's stock VR navigation (unchanged) | Same | Same | Same | Same |
 
 Pointing at the desktop screen (in any mode, unless the tip is touching
 something you're working on): right trigger = left mouse button, left
@@ -182,6 +190,15 @@ window, passthrough and tracking settings (including hiding the hand panel's
   then corrects with a uniform object scale so the shape fills the box
   exactly. Generators slower than 40 ms (e.g. Wall Factory) regenerate on
   slider release instead of every frame.
+- **Paint mode** ([paint.py](vr_sculpt/paint.py)): `paint.image_paint`
+  projects each dab along the 3D view, so for every dab the largest desktop
+  3D view is pointed at the dab (from along the surface normal for Contact,
+  from the controller for Spray), a one-element stroke is painted at the
+  region center, and the view is put back right away (about 1.5-2 ms per
+  dab). The brush radius is converted from hand space to pixels with that
+  view's projection. The previous dab is passed as a lead-in so Smear knows
+  the direction. Each call is its own undo step in Blender, so the add-on
+  snapshots the image when a stroke starts; B restores it.
 - **Floating desktop window** ([desktop.py](vr_sculpt/desktop.py),
   [winput.py](vr_sculpt/winput.py)): on Windows, a worker thread copies the
   window with GDI (`BitBlt` of the window DC, about 5 ms for 1920x1017,
@@ -223,6 +240,17 @@ window, passthrough and tracking settings (including hiding the hand panel's
   `show_custom_overlays` is turned on at session start. Text is drawn in 3D
   with `blf` under a `gpu.matrix` transform; brush icons come from the brush
   asset previews.
+
+### What we learned about `paint.image_paint` (5.4.0 Alpha)
+
+- The dab lands where the element's `mouse` looks in the 3D view; its
+  `location` isn't used for projection painting.
+- The element's `size` is the brush radius in pixels; the locked scene size
+  isn't used.
+- `mode='INVERT'` paints with the secondary color.
+- The colors come from the unified paint settings even when Unified Color is
+  off.
+- A material's paint-slot list is only refreshed by Texture Paint mode.
 
 ### What we learned about `sculpt.brush_stroke` (5.4.0 Alpha)
 
@@ -286,6 +314,10 @@ blender --background --factory-startup --python tests/test_draw.py
 blender --background --factory-startup --python tests/test_tools.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_paint.py
+```
+
 `test_generic.py` enables Extra Mesh Objects for its own run (factory
 settings, so your preferences aren't touched) and checks all 42 entries.
 
@@ -293,7 +325,9 @@ Windowed (opens Blender briefly, writes `tests/*_result.txt`):
 `native_engine.py`, `native_modal.py`, `native_transform.py`. The
 `overlay_preview.py`, `panel_preview.py`, `hud_preview.py` and
 `tools_preview.py` scripts render the overlay to PNG; `probe_capture.py`
-checks region capture and offscreen camera rendering.
+checks region capture and offscreen camera rendering. `paint_preview.py`
+paints real Contact and Spray strokes with simulated controllers and checks
+color, size, undo and picking (`probe_texpaint*.py` found how).
 Run the overlay one with `test_scene.blend` loaded; create that file with
 `tests/make_test_scene.py`.
 
@@ -313,6 +347,10 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   digits, a few symbols). The camera preview needs a visible desktop 3D view.
 - Passthrough is Blender's own `show_passthrough`; whether it shows depends
   on the OpenXR runtime.
+- Paint mode needs a desktop 3D view (it paints through it) and briefly moves
+  that view for each dab. In Blender's own undo history every dab is a step;
+  B in VR undoes whole strokes. Clone, Fill and Mask brushes aren't on the
+  hand panel (pick them on the desktop; they need extra setup).
 - Hand tracking isn't possible from an add-on: Blender's VR layer doesn't
   enable OpenXR's hand tracking or hand interaction extensions, so drawing
   uses controllers.
