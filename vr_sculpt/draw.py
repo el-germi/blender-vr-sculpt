@@ -72,15 +72,10 @@ def draw_overlay(context, ss, xr=True):
         grid.draw(settings, tips, scale)
         gpu.state.blend_set('NONE')
     measure.draw(context, ss, scale)
-    screen_hit = None
     if xr and settings.show_desktop:
-        if settings.mode == 'TOOLS' and settings.enabled:
-            screen_hit = desktop.ray_hit(context, ss, poses[1].translation, interactions.aim_direction(poses[1]))
-        desktop.draw(context, ss, screen_hit)
+        desktop.draw(context, ss, poses[1])
     if settings.show_cursor:
         _draw_cursors(context, ss, settings, xr)
-    if screen_hit is not None:
-        vr_ui.draw_ray(poses[1].translation, desktop.world_matrix(context, ss) @ Vector((*screen_hit, 0.0)), True)
 
 
 def _draw_cursors(context, ss, settings, xr):

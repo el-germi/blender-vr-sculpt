@@ -381,6 +381,151 @@ def test_desktop_screen():
     desktop.state["pose"] = None
 
 
+class FakeOS:
+    """Stands in for winput's Windows calls and records what would have been sent."""
+
+    def __init__(self, covered=False):
+        self.log = []
+        self.covered = covered
+        self.cursor = (0, 0)
+        self.saved = {}
+
+    def install(self):
+        from vr_sculpt import winput
+        names = ("find_window", "client_rect", "move", "button", "wheel", "ours_at", "ensure_foreground",
+                 "press_keys", "cursor_pos", "minimized")
+        self.saved = {n: getattr(winput, n) for n in names}
+        self.saved["AVAILABLE"] = winput.AVAILABLE
+        winput.AVAILABLE = True
+        winput.find_window = lambda: 1234
+        winput.client_rect = lambda hwnd: (100, 50, 1600, 900)
+        winput.minimized = lambda hwnd: False
+
+        def move(x, y):
+            self.cursor = (x, y)
+            self.log.append(("move", x, y))
+        winput.move = move
+        winput.button = lambda name, down: self.log.append(("button", name, down))
+        winput.wheel = lambda n: self.log.append(("wheel", n))
+        winput.ours_at = lambda hwnd, x, y: not self.covered
+        winput.ensure_foreground = lambda hwnd: not self.covered
+        winput.press_keys = lambda vks: self.log.append(("keys", tuple(vks)))
+        winput.cursor_pos = lambda: self.cursor
+        return self
+
+    def uninstall(self):
+        from vr_sculpt import winput
+        for n, f in self.saved.items():
+            setattr(winput, n, f)
+
+
+def test_desktop_input():
+    print("== desktop input (fake OS layer)")
+    ctx = bpy.context
+    settings = ctx.scene.vr_sculpt
+    settings.show_desktop, settings.desktop_interactive, settings.desktop_size = True, True, 1.0
+    settings.desktop_keyboard = False
+    fake = FakeOS().install()
+    try:
+        ss = NavSession()
+        desktop.state["pose"] = None
+        desktop.place_in_front(ctx, ss)
+        check(desktop.use_os(ctx) and desktop.interactive(ctx), "Windows: OS capture and mouse from VR")
+        w, h = desktop.screen_size(ctx, 1.0)
+        check(abs(h - 0.5625) < 1e-6, f"screen keeps the window's 16:9 shape ({h:.4f})")
+        m = desktop.world_matrix(ctx, ss)
+
+        def aim_at(local_x, local_y):
+            """Point the right controller from the head at a point on the screen."""
+            target = m @ Vector((local_x, local_y, 0.0))
+            head = ss.viewer_pose_location
+            rot = (target - head).to_track_quat('-Z', 'Y')
+            ss.hands[1] = ss.nav().inverted() @ Matrix.LocRotScale(head, rot, None)
+            return target
+
+        aim_at(-w / 2 + 0.25 * w, 0.75 * h)  # a quarter in, three quarters up
+        kind, uv, _p = desktop.hit(ctx, ss, *desktop._right_ray(ctx, ss))
+        check(kind == 'content' and close(uv, (0.25, 0.75)), f"ray hits the content at window fractions ({uv})")
+        desktop.hover(ctx, ss)
+        check(fake.cursor == (100 + 400, 50 + 225), f"hover moves the cursor to that pixel ({fake.cursor})")
+
+        class Ctx:
+            def __getattr__(self, name):
+                return getattr(bpy.context, name)
+        c = Ctx()
+        c.window_manager = type("WM", (), {"xr_session_state": ss, "windows": bpy.context.window_manager.windows})()
+        settings.show_panel = False
+        pose = ss.nav() @ ss.hands[1]
+        handler = operators._pick_handler(c, settings, actions.HANDS[1], pose, pose, 1.0, 1.0)
+        check(isinstance(handler, desktop.MouseDrag) and ("button", "LEFT", True) in fake.log,
+              "right trigger on the content presses the left button")
+        aim_at(-w / 2 + 0.5 * w, 0.5 * h)
+        handler.update(ctx, None, None, 1.0)
+        check(fake.cursor == (100 + 800, 50 + 450), f"dragging moves the cursor ({fake.cursor})")
+        handler.finish(ctx)
+        check(fake.log[-1] == ("button", "LEFT", False), "release lets go of the button")
+
+        left = ss.nav() @ ss.hands[0]
+        handler = operators._pick_handler(c, settings, actions.HANDS[0], left, left, 1.0, 1.0)
+        check(isinstance(handler, desktop.MouseDrag) and handler.button == 'MIDDLE',
+              "left trigger while the right hand points: middle button (pan)")
+        handler.finish(ctx)
+
+        fake.log.clear()
+        op = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_brush.execute, "left_hand": False,
+                            "report": lambda *a: None})()
+        op.execute(c)
+        check(("button", "RIGHT", True) in fake.log and ("button", "RIGHT", False) in fake.log,
+              "B while pointing: right click")
+        desktop.scroll(ctx, ss, -1)
+        check(fake.log[-1] == ("wheel", -1), "the stick scrolls the wheel")
+
+        # Covered window: no click goes out.
+        fake.covered = True
+        fake.log.clear()
+        handler = desktop.MouseDrag(ctx, ss, 'LEFT')
+        check(not handler.pressed and not any(e[0] == "button" for e in fake.log), "covered window: no click")
+        check("covered" in desktop.state["notice"][0], "and the title bar says why")
+        handler.finish(ctx)
+        fake.covered = False
+
+        # Title bar: drag area moves the screen, buttons press.
+        title = next(p for p in desktop.panels(ctx, ss) if p[0] == "title")
+        _n, tm, widgets, th, tw = title
+        kb = vr_ui.find(widgets, "desk_keyboard")
+        target = tm @ Vector(((kb.rect[0] + kb.rect[2]) / 2, (kb.rect[1] + kb.rect[3]) / 2, 0.0))
+        head = ss.viewer_pose_location
+        ss.hands[1] = ss.nav().inverted() @ Matrix.LocRotScale(head, (target - head).to_track_quat('-Z', 'Y'), None)
+        pose = ss.nav() @ ss.hands[1]
+        handler = operators._pick_handler(c, settings, actions.HANDS[1], pose, pose, 1.0, 1.0)
+        check(isinstance(handler, desktop.ButtonPress) and settings.desktop_keyboard,
+              "title bar Keyboard button shows the keyboard")
+        lbl = widgets[0]
+        target = tm @ Vector(((lbl.rect[0] + lbl.rect[2]) / 2, (lbl.rect[1] + lbl.rect[3]) / 2, 0.0))
+        ss.hands[1] = ss.nav().inverted() @ Matrix.LocRotScale(head, (target - head).to_track_quat('-Z', 'Y'), None)
+        pose = ss.nav() @ ss.hands[1]
+        handler = operators._pick_handler(c, settings, actions.HANDS[1], pose, pose, 1.0, 1.0)
+        check(isinstance(handler, desktop.MoveScreen), "title bar label drags the screen")
+
+        # Keyboard: sticky modifiers.
+        names = [p[0] for p in desktop.panels(ctx, ss)]
+        check(names == ["title", "keyboard"], f"keyboard panel under the screen ({names})")
+        kb_widgets = desktop.panels(ctx, ss)[1][2]
+        fake.log.clear()
+        vr_ui.find(kb_widgets, "key_ctrl").on_press()
+        kb_widgets = desktop.panels(ctx, ss)[1][2]
+        vr_ui.find(kb_widgets, "key_z").on_press()
+        check(fake.log == [("keys", (0x11, ord("Z")))], f"Ctrl then Z sends Ctrl+Z ({fake.log})")
+        check(not desktop.keyboard["CTRL"], "modifiers are released after one key")
+        settings.desktop_keyboard = False
+    finally:
+        fake.uninstall()
+        desktop.state["pose"] = None
+        desktop.state["notice"] = ("", 0.0)
+        settings.show_desktop = False
+        settings.show_panel = True
+
+
 def test_tools_page():
     print("== Tools page and buttons")
     ctx = bpy.context
@@ -449,7 +594,7 @@ def main():
     vr_sculpt.register()
     try:
         for t in (test_grid, test_symmetry, test_measure, test_camera, test_navigation, test_tracking,
-                  test_desktop_screen, test_tools_page):
+                  test_desktop_screen, test_desktop_input, test_tools_page):
             try:
                 t()
             except Exception:

@@ -29,6 +29,8 @@ ACTIONS = {
     "fly_turnright": ('TURN', -1.0, 0.0),
 }
 
+SCROLL_ACTIONS = ("fly_up", "fly_down", "fly_turnleft", "fly_turnright")  # the right stick
+SCROLL_RATE = 12.0  # wheel notches per second at full tilt, over the desktop screen
 TURN_SPEED = math.radians(90.0)  # Fly: radians per second at full tilt
 DEAD_ZONE = 0.3  # stick values below this count as zero (the bindings' threshold)
 STEP_UP = 0.3  # Walk: hand-space meters the floor may rise at once (stairs, not tables)
@@ -150,7 +152,14 @@ class VRSCULPT_OT_navigate(bpy.types.Operator):
         settings = context.scene.vr_sculpt
         ss = context.window_manager.xr_session_state
         self.floor = FloorFollower(context, ss) if self.kind == 'MOVE' and settings.nav_mode == 'WALK' else None
-        if self.kind == 'TURN' and settings.nav_mode == 'WALK':
+        from . import desktop
+        if xr.action in SCROLL_ACTIONS and ss is not None and desktop.pointing_at_content(context, ss):
+            # Right stick while pointing at the desktop screen: the mouse wheel.
+            self.kind = 'SCROLL' if xr.action in ("fly_up", "fly_down") else 'HOLD'
+            self.notches = 0.0
+            if self.kind == 'SCROLL':
+                desktop.scroll(context, ss, self.x)
+        elif self.kind == 'TURN' and settings.nav_mode == 'WALK':
             # One snap per push; the rest of the push is ignored (but still ours, so it
             # doesn't start another turn every frame).
             turn(ss, self.x * settings.nav_turn)
@@ -205,6 +214,13 @@ class VRSCULPT_OT_navigate(bpy.types.Operator):
             lift(ss, settings, self.x, self.value, dt)
         elif self.kind == 'TURN' and settings.nav_mode == 'FLY':
             turn(ss, self.x * TURN_SPEED * ramp(self.value) * dt)
+        elif self.kind == 'SCROLL':
+            from . import desktop
+            # A first notch on push (in invoke), then a steady rate after a short delay.
+            self.notches += SCROLL_RATE * ramp(self.value) * dt
+            while self.notches >= 1.0:
+                self.notches -= 1.0
+                desktop.scroll(context, ss, self.x)
 
     def _finish(self, context):
         if self.timer is not None:

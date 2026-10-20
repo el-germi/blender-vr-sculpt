@@ -70,6 +70,17 @@ def sculpt_target(context):
     return None
 
 
+def _tip_engaged(context, settings, tip, scale):
+    """Whether the tip is at work on something, so a desktop screen behind it doesn't take the trigger."""
+    if settings.mode == 'SCULPT':
+        return primitives.touching(context, tip, settings.radius * scale) is not None
+    if settings.mode == 'MODEL':
+        return primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale) is not None
+    if settings.mode == 'DRAW' and settings.draw_tool in {'EDIT', 'ERASE'}:
+        return strokes.nearest(context, tip, drawing.EDIT_RADIUS * scale) is not None
+    return False
+
+
 def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
     """Panel press, grab, create or draw for this trigger press; None means sculpt (or nothing)."""
     ss = context.window_manager.xr_session_state
@@ -78,6 +89,10 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         if hit is not None:
             # A press anywhere on the panel belongs to the panel, even between widgets.
             return interactions.UIPress(context, ss, vr_ui.hit_test(widgets, *hit), hit)
+    if settings.show_desktop and ss is not None and not _tip_engaged(context, settings, tip_pose.translation, scale):
+        handler = desktop.pick(context, ss, hand, pose)
+        if handler is not None:
+            return handler
     if settings.mode == 'MODEL':
         obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale)
         if obj is not None:
@@ -86,9 +101,6 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
     if settings.mode == 'DRAW':
         return drawing.pick(context, settings, tip_pose, value, scale)
     if settings.mode == 'TOOLS':
-        if settings.show_desktop and hand == actions.HANDS[1] and ss is not None:
-            if desktop.ray_hit(context, ss, pose.translation, interactions.aim_direction(pose)) is not None:
-                return desktop.MoveScreen(context, ss, pose)
         if settings.tool == 'CAMERA':
             return camera.AimCamera(context, pose)
         return measure.Measure(context, settings, tip_pose.translation, scale)
@@ -298,6 +310,10 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
 
     def execute(self, context):
         settings = context.scene.vr_sculpt
+        ss = context.window_manager.xr_session_state
+        if not self.left_hand and ss is not None and desktop.pointing_at_content(context, ss):
+            desktop.right_click(context, ss)
+            return {'FINISHED'}
         if self.left_hand:
             i = MODE_CYCLE.index(settings.mode) if settings.mode in MODE_CYCLE else -1
             menus.set_mode(context, MODE_CYCLE[(i + 1) % len(MODE_CYCLE)])

@@ -93,6 +93,15 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         name="Desktop Window",
         description="Show the Blender window on a floating screen in VR (view only)",
     )
+    desktop_interactive: BoolProperty(
+        name="Use From VR",
+        description=(
+            "Windows: the right controller drives the real mouse while it points at the desktop screen "
+            "(trigger = left button, left trigger = middle button, B = right click, right stick = wheel)"
+        ),
+        default=True,
+    )
+    desktop_keyboard: BoolProperty(name="Keyboard", description="Show a virtual keyboard under the desktop screen")
     desktop_size: FloatProperty(
         name="Desktop Size", description="Width of the floating desktop screen (meters, hand space)",
         default=0.9, min=0.2, soft_max=3.0, subtype='DISTANCE', unit='LENGTH')

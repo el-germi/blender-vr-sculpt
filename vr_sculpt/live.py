@@ -35,7 +35,8 @@ def _tick():
                 region = camera.host_region(context)
                 if region is not None:
                     region.tag_redraw()
-        return FAST if settings.tracking or camera.wanted(context) else IDLE
+        busy = settings.tracking or camera.wanted(context) or desktop.interactive(context)
+        return FAST if busy else IDLE
     except Exception:
         if not _errors:
             import traceback

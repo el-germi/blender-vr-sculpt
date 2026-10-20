@@ -64,9 +64,15 @@ Meta Quest over OpenXR.
   empties in a "VR Tracking" collection follow the headset and controllers,
   with the trigger, grip and stick values as custom properties, for parenting
   and drivers. Record keyframes them on every frame while the timeline plays.
-- **Floating desktop window**: the whole Blender window on a screen in VR,
-  view only. It travels with you when you move; point at it in Tools mode
-  and drag to move it.
+- **Floating desktop window you can use from VR** (Windows): the whole
+  Blender window on a screen in VR, menus and popups included, so editors
+  without VR tools (compositor, geometry nodes, shader editor, any add-on's
+  UI) work without taking the headset off. The right controller drives the
+  real mouse while it points at the screen: trigger = left button (drags
+  work), left trigger = middle button (pan / orbit), B = right click, right
+  stick = scroll wheel. A virtual keyboard (sticky Shift / Ctrl / Alt) opens
+  from the screen's title bar; drag the title bar to move the screen. It
+  travels with you when you move. On other systems the screen is view only.
 - **Passthrough** toggle (Blender's own; needs a runtime that supports it).
 - **Hand panel** above the left controller: Sculpt / Model / Draw / Tools
   tabs, engine and brush buttons, radius and strength sliders, primitive
@@ -79,7 +85,7 @@ Meta Quest over OpenXR.
 
 | Input | Sculpt mode | Model mode | Draw mode | Tools mode |
 |---|---|---|---|---|
-| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab | Draw / Edit / Erase | Measure / aim the camera. Pointing at the desktop screen: move it |
+| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab | Draw / Edit / Erase | Measure / aim the camera |
 | Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Same as right |
 | Right trigger, pointing at the hand panel | Press buttons, drag sliders | Same | Same | Same |
 | Y (left) | Next mode (Sculpt, Model, Draw, Tools) | Same | Same | Same |
@@ -89,6 +95,11 @@ Meta Quest over OpenXR.
 | Left stick click | Show / hide the hand panel | Same | Same | Same |
 | Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Same |
 | Grip, A / X | Blender's stock VR navigation (unchanged) | Same | Same | Same |
+
+Pointing at the desktop screen (in any mode, unless the tip is touching
+something you're working on): right trigger = left mouse button, left
+trigger = middle button, B = right click, right stick = scroll wheel.
+Pointing at its title bar: drag to move it, or press Keyboard / Hide.
 
 Trigger teleport and the stock stick navigation are replaced while "Sculpt
 With Triggers" is on. The setting applies when the VR session starts.
@@ -171,7 +182,17 @@ window, passthrough and tracking settings (including hiding the hand panel's
   then corrects with a uniform object scale so the shape fills the box
   exactly. Generators slower than 40 ms (e.g. Wall Factory) regenerate on
   slider release instead of every frame.
-- **Floating desktop window** ([desktop.py](vr_sculpt/desktop.py)): Python
+- **Floating desktop window** ([desktop.py](vr_sculpt/desktop.py),
+  [winput.py](vr_sculpt/winput.py)): on Windows, a worker thread copies the
+  window with GDI (`BitBlt` of the window DC, about 5 ms for 1920x1017,
+  menus and tooltips included) at up to 30 fps, splits it into 64-row
+  strips and only converts the strips that changed; the VR draw callback
+  turns those into textures. Blender ignores posted window messages (it
+  reads the real cursor), so input uses `SendInput` and really moves the
+  mouse; a button is only pressed when `WindowFromPoint` says Blender's
+  window is the one under that point, so nothing behind or over it gets
+  clicked. Keys go to the foreground window, so the keyboard first makes
+  Blender the active window. Elsewhere (view only), Python
   can't read the window's final image, but every region draws into its own
   buffer and a `POST_PIXEL` draw callback runs right after, on every editor
   type. There the region's pixels are read (`read_color`, about 0.5-2 ms per
@@ -284,10 +305,12 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   versions) size non-uniformly to the drag box; other primitives keep their
   proportions.
 - Geometry-node asset primitives in Add > Mesh aren't listed yet.
-- The desktop window in VR is view only: Python can't send clicks or key
-  presses to Blender's UI. Menus and popups aren't captured (they are
-  temporary regions), and nothing updates while the Blender window is
-  minimized. The camera preview needs a visible desktop 3D view too.
+- Using the desktop window from VR needs Windows; elsewhere it's view only,
+  without menus and popups (they are temporary regions). It moves your real
+  mouse while you point at it. The Blender window must be on screen and not
+  minimized; clicks where another window covers it are refused (the title
+  bar says so). The virtual keyboard sends US-layout key codes (letters,
+  digits, a few symbols). The camera preview needs a visible desktop 3D view.
 - Passthrough is Blender's own `show_passthrough`; whether it shows depends
   on the OpenXR runtime.
 - Hand tracking isn't possible from an add-on: Blender's VR layer doesn't

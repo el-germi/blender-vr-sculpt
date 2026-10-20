@@ -145,6 +145,8 @@ class VIEW3D_PT_vr_extras(bpy.types.Panel):
         sub = col.column()
         sub.active = settings.show_desktop
         sub.prop(settings, "desktop_size")
+        sub.prop(settings, "desktop_interactive")
+        sub.prop(settings, "desktop_keyboard")
         col.prop(context.window_manager.xr_session_settings, "show_passthrough", text="Passthrough")
 
         col = layout.column(heading="Tracking")

@@ -95,10 +95,11 @@ def scenario_measure(ctx):
     s.camera_preview = True
     s.show_desktop = True
     s.desktop_size = 0.6
+    s.desktop_keyboard = True
     desktop.state["force"] = True
     desktop.state["pose"] = None
     # Behind the scene, so it doesn't cover everything.
-    world = Matrix.LocRotScale(Vector((0.0, 0.35, 1.25)), Quaternion((1, 0, 0), math.pi / 2), None)
+    world = Matrix.LocRotScale(Vector((0.0, 0.35, 1.3)), Quaternion((1, 0, 0), math.pi / 2), None)
     desktop.set_world_matrix(fake, world)
     desktop.request_full_capture(ctx)
 
