@@ -31,11 +31,15 @@ COL_DIM = (0.7, 0.7, 0.74, 1.0)
 
 
 class Widget:
-    """One cell of the panel. kind: 'label', 'button' or 'slider'."""
+    """One cell of the panel. kind: 'label', 'button', 'select' or 'slider'.
+
+    A 'select' shows "text  value_text \u25be" and calls on_press, which opens a picker page.
+    """
 
     def __init__(self, kind, id="", text="", *, active=False, danger=False, on_press=None,
-                 value=0.0, min=0.0, max=1.0, integer=False, fmt=None, on_change=None):
+                 value=0.0, min=0.0, max=1.0, integer=False, fmt=None, on_change=None, value_text=""):
         self.kind, self.id, self.text = kind, id, text
+        self.value_text = value_text
         self.active, self.danger, self.on_press = active, danger, on_press
         self.value, self.min, self.max, self.integer = value, min, max, integer
         self.fmt = fmt or ((lambda v: str(int(v))) if integer else (lambda v: f"{v:.3f}"))
@@ -65,6 +69,10 @@ def label(text):
 
 def button(id, text, on_press, active=False, danger=False):
     return Widget('button', id, text, active=active, danger=danger, on_press=on_press)
+
+
+def select(id, text, value_text, on_press):
+    return Widget('select', id, text, on_press=on_press, value_text=value_text)
 
 
 def slider(id, text, value, lo, hi, on_change, integer=False, fmt=None):
@@ -148,6 +156,33 @@ def _lighter(c, amount=0.08):
     return (min(c[0] + amount, 1.0), min(c[1] + amount, 1.0), min(c[2] + amount, 1.0), c[3])
 
 
+MIN_TEXT_SCALE = 0.75
+
+
+def fit_text(text, max_width, height=TEXT_H):
+    """(text, height) that fits max_width: shrink a little, then cut with an ellipsis."""
+    width = hud.text_width(text, height)
+    if width <= max_width:
+        return text, height
+    h = max(height * max_width / max(width, 1e-9), height * MIN_TEXT_SCALE)
+    if hud.text_width(text, h) <= max_width:
+        return text, h
+    while len(text) > 1 and hud.text_width(text + "\u2026", h) > max_width:
+        text = text[:-1]
+    return text.rstrip() + "\u2026", h
+
+
+def _draw_fitted(matrix, x, y_mid, text, max_width, color, align='LEFT'):
+    text, h = fit_text(text, max_width)
+    w = hud.text_width(text, h)
+    if align == 'CENTER':
+        x += (max_width - w) / 2
+    elif align == 'RIGHT':
+        x += max_width - w
+    hud.draw_text(matrix, x, y_mid - h / 2, text, h, color)
+    return w
+
+
 def draw_panel(matrix, widgets, height, hover_id=None, pressed_id=None, title=None):
     shader = gpu.shader.from_builtin('UNIFORM_COLOR')
     gpu.state.blend_set('ALPHA')
@@ -158,7 +193,7 @@ def draw_panel(matrix, widgets, height, hover_id=None, pressed_id=None, title=No
     for w in widgets:
         x0, y0, x1, y1 = w.rect
         hot = w.id and (w.id == hover_id or w.id == pressed_id)
-        if w.kind == 'button':
+        if w.kind in {'button', 'select'}:
             c = COL_DANGER if w.danger else (COL_ACTIVE if w.active else COL_BUTTON)
             _quad(shader, x0, y0, x1, y1, _lighter(c, 0.14 if w.id == pressed_id else 0.08) if hot else c, 0.0002)
         elif w.kind == 'slider':
@@ -172,18 +207,21 @@ def draw_panel(matrix, widgets, height, hover_id=None, pressed_id=None, title=No
             batch.draw(shader)
     gpu.matrix.pop()
 
+    inner = 0.002  # text margin inside buttons
     for w in widgets:
         x0, y0, x1, y1 = w.rect
-        ty = y0 + (y1 - y0 - TEXT_H) / 2
+        mid = (y0 + y1) / 2
         if w.kind == 'label':
-            hud.draw_text(matrix, x0 + 0.002, ty, w.text, TEXT_H, COL_DIM)
+            _draw_fitted(matrix, x0 + inner, mid, w.text, x1 - x0 - inner, COL_DIM)
         elif w.kind == 'button':
-            tw = hud.text_width(w.text, TEXT_H)
-            hud.draw_text(matrix, (x0 + x1 - tw) / 2, ty, w.text, TEXT_H, COL_TEXT)
-        elif w.kind == 'slider':
-            hud.draw_text(matrix, x0 + PAD, ty + 0.0015, w.text, TEXT_H, COL_DIM)
-            value = w.fmt(w.value)
-            hud.draw_text(matrix, x1 - PAD - hud.text_width(value, TEXT_H), ty + 0.0015, value, TEXT_H, COL_TEXT)
+            _draw_fitted(matrix, x0 + inner, mid, w.text, x1 - x0 - 2 * inner, COL_TEXT, 'CENTER')
+        elif w.kind in {'select', 'slider'}:
+            # The value gets the room it needs (up to 60%); the label fits in what's left.
+            value = w.value_text + "  \u25be" if w.kind == 'select' else w.fmt(w.value)
+            ymid = mid if w.kind == 'select' else mid + 0.0015
+            room = x1 - x0 - 2 * PAD
+            vw = _draw_fitted(matrix, x0 + PAD + room * 0.4, ymid, value, room * 0.6, COL_TEXT, 'RIGHT')
+            _draw_fitted(matrix, x0 + PAD, ymid, w.text, room - vw - 0.004, COL_DIM)
     gpu.state.blend_set('NONE')
 
 

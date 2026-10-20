@@ -51,24 +51,38 @@ def setup():
 
         def add(x, hover=None):
             widgets, height = vr_ui.layout(menus.rows(ctx))
-            m = vr_ui.panel_matrix(Vector((x, 0.0, -0.09)), Vector((x, -0.6, 0.0)), 1.0)
+            m = vr_ui.panel_matrix(Vector((x, 0.0, -0.12)), Vector((x, -0.6, 0.0)), 1.0)
             panels.append((m, widgets, height, hover))
 
-        s.mode, s.engine = 'SCULPT', 'PYTHON'
-        add(-0.3, "brush_SMOOTH")
+        import addon_utils
+        from vr_sculpt import catalog
+        addon_utils.enable("bl_ext.blender_org.extra_mesh_objects", default_set=True)
+        catalog.entries(refresh=True)
+
+        # Row 1: model panel with the Add select, the category picker, the Gears page.
         s.mode = 'MODEL'
-        add(-0.1)
-        cube = primitives.create(ctx, 'CUBE', (0, 5, 0))
-        add(0.1, "size_Y")
-        cyl = primitives.create(ctx, 'CYLINDER', (0, 5, 0))
-        add(0.3, "delete")
+        add(-0.4, "add")
+        menus.open_add_picker(ctx)
+        add(-0.2, "cat_Gears")
+        menus._set_category("Gears")
+        add(0.0, None)
+        menus._set_category("Mesh")
+        add(0.2, "opt_mesh.primitive_torus_add")
+        menus.close_picker()
+        # Gear settings page 1, torus with its Dimensions Mode select.
+        gear_key = next(e.key for e in catalog.entries() if e.idname == "mesh.primitive_gear")
+        primitives.create_from_entry(ctx, gear_key, (0, 5, 0))
+        add(0.4, "param_number_of_teeth")
+        torus_key = next(e.key for e in catalog.entries() if e.idname == "mesh.primitive_torus_add")
+        primitives.create_from_entry(ctx, torus_key, (0, 5, 0))
+        add(0.6, "param_mode")
         log("panels:", len(panels), "heights:", [round(p[2], 3) for p in panels])
 
         rv3d = space.region_3d
         rv3d.view_perspective = 'PERSP'
-        rv3d.view_location = (0.0, 0.0, 0.0)
+        rv3d.view_location = (0.1, 0.0, 0.0)
         rv3d.view_rotation = Quaternion((1, 0, 0), 1.5708)
-        rv3d.view_distance = 0.6
+        rv3d.view_distance = 0.95
         bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW')
         bpy.app.timers.register(lambda: (shoot(win, area, region), None)[1], first_interval=0.8)
     except Exception:

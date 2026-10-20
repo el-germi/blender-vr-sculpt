@@ -1,4 +1,4 @@
-﻿"""Brush card: a small panel above the right controller with the brush icon and name.
+"""Brush card: a small panel above the right controller with the brush icon and name.
 
 After the brush changes, it also shows a one-line description for a few seconds.
 """
@@ -88,7 +88,8 @@ def brush_texture(brush):
 def card_content(settings, sculpt_brush, colors):
     """(title, description, color, texture) for the current brush."""
     if settings.mode == 'MODEL':
-        title = "Add " + ("Cube" if settings.primitive == 'CUBE' else "Cylinder")
+        from . import primitives
+        title = "Add " + primitives.label(settings.primitive)
         content = (title, "Drag in empty space to create. Touch an object to grab it",
                    MODEL_COLOR, None)
     elif settings.engine == 'NATIVE':

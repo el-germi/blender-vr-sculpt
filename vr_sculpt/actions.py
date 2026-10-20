@@ -88,6 +88,12 @@ def on_xr_session_start_pre(_context):
         return
     # Our cursor is drawn by an add-on draw handler, which the headset only shows with this on.
     context.window_manager.xr_session_settings.show_custom_overlays = True
+    # Pick up primitives from extensions enabled since the last session.
+    from . import catalog
+    try:
+        catalog.entries(refresh=True)
+    except Exception as ex:
+        print("VR Sculpt: could not list Add > Mesh entries:", ex)
     try:
         last_status = _patch(session_state)
     except Exception as ex:  # Never block the VR session from starting.

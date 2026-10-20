@@ -1,4 +1,4 @@
-﻿"""Windowed test: native strokes driven from inside a modal operator, like in VR.
+"""Windowed test: native strokes driven from inside a modal operator, like in VR.
 
 blender --factory-startup --python tests/native_modal.py
 """

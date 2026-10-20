@@ -5,11 +5,12 @@ Needs the bundled "VR Scene Inspection" add-on, which starts the VR session.
 
 if "bpy" in locals():
     import importlib
-    for _m in (brushes, native, props, primitives, actions, vr_ui, menus, interactions, operators, hud, draw, ui):
+    for _m in (brushes, native, props, catalog, primitives, generic, actions, vr_ui, menus, interactions,
+               operators, hud, draw, ui):
         importlib.reload(_m)
 else:
-    from . import (brushes, native, props, primitives, actions, vr_ui, menus, interactions, operators, hud,
-                   draw, ui)
+    from . import (brushes, native, props, catalog, primitives, generic, actions, vr_ui, menus, interactions,
+                   operators, hud, draw, ui)
 
 import bpy
 

@@ -254,7 +254,7 @@ def test_trigger():
     settings.tip_offset = 0.0
     settings.show_panel = True
 
-    settings.primitive = 'CUBE'
+    settings.primitive = 'mesh.primitive_cube_add'
     n = len(bpy.data.objects)
     op, r = press(ctx, ss, 1, [(1.0, 0, 1), (1.1, 0.05, 1.05), (1.2, 0.1, 1.15)])
     obj = bpy.context.view_layer.objects.active
@@ -264,7 +264,7 @@ def test_trigger():
     check(close(obj.location, (1.1, 0.05, 1.075), 1e-5), "cube is centered in the drag box")
     check(not wm.timers, "timer removed")
 
-    settings.primitive = 'CYLINDER'
+    settings.primitive = 'mesh.primitive_cylinder_add'
     op, r = press(ctx, ss, 0, [(3, 0, 1), (3.002, 0, 1)])
     cyl = bpy.context.view_layer.objects.active
     check(cyl.vr_prim.kind == 'CYLINDER' and abs(cyl.vr_prim.height - primitives.DEFAULT_SIZE) < 1e-6,
@@ -353,4 +353,5 @@ def main():
     print("RESULT:", "FAILED " + str(failures) if failures else "ALL PASSED")
 
 
-main()
+if __name__ == "__main__":
+    main()

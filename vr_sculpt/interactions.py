@@ -1,4 +1,4 @@
-﻿"""Non-sculpt trigger interactions: hand panel presses, grabbing objects, creating primitives.
+"""Non-sculpt trigger interactions: hand panel presses, grabbing objects, creating primitives.
 
 Each handler gets update(context, aim_pose, tip_pose, value) every frame while the trigger is
 held and finish(context) on release; `changed` decides whether an undo step is pushed.
@@ -6,7 +6,7 @@ held and finish(context) on release; `changed` decides whether an undo step is p
 
 from mathutils import Vector
 
-from . import menus, primitives, vr_ui
+from . import generic, menus, primitives, vr_ui
 
 # Widget the right trigger is holding down, for drawing.
 pressed_id = None
@@ -48,7 +48,7 @@ class UIPress:
         pressed_id = self.widget_id
         if widget is None:
             return
-        if widget.kind == 'button' and widget.on_press:
+        if widget.kind in {'button', 'select'} and widget.on_press:
             widget.on_press()
             self.changed = True
         elif widget.kind == 'slider':
@@ -76,6 +76,7 @@ class UIPress:
     def finish(self, context):
         global pressed_id
         pressed_id = None
+        generic.flush_pending(context)
         if self.changed:
             context.view_layer.update()
 
@@ -103,24 +104,28 @@ class MoveObject:
 class CreatePrimitive:
     """Drag out a box from the press point; the primitive fills it. A click makes a default size."""
 
-    def __init__(self, context, kind, tip, scale):
+    def __init__(self, context, key, tip, scale):
         self.start = Vector(tip)
         self.scale = scale
-        self.obj = primitives.create(context, kind, self.start)
-        self._fit(self.start)
+        self.obj = primitives.create_from_entry(context, key, self.start)
+        self._fit(context, self.start)
         self.changed = True
 
-    def _fit(self, tip):
-        prim = self.obj.vr_prim
+    def _fit(self, context, tip):
         if (Vector(tip) - self.start).length < CLICK_DISTANCE * self.scale:
             half = Vector((primitives.DEFAULT_SIZE * self.scale / 2,) * 3)
-            center = primitives.fit_box(prim, self.start - half, self.start + half)
+            a, b = self.start - half, self.start + half
         else:
-            center = primitives.fit_box(prim, self.start, tip)
-        self.obj.location = center
+            a, b = self.start, Vector(tip)
+        prim = self.obj.vr_prim
+        if prim.kind == 'OPERATOR':
+            # Uniform: the operator's own proportions are kept, the largest side fills the box.
+            generic.fit(context, self.obj, a, b, 0.005 * self.scale)
+        else:
+            self.obj.location = primitives.fit_box(prim, a, b)
 
     def update(self, context, pose, tip_pose, value):
-        self._fit(tip_pose.translation)
+        self._fit(context, tip_pose.translation)
 
     def finish(self, context):
         # Refresh bounds now, so the new object can be grabbed right away.

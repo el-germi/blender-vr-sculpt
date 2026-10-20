@@ -6,17 +6,19 @@ settings change can't wipe the sculpt.
 
 import bmesh
 import bpy
-from bpy.props import EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty
+from bpy.props import (EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty,
+                       StringProperty)
 from mathutils import Matrix, Vector
 
 KIND_ITEMS = (
     ('NONE', "None", "Not an editable primitive"),
     ('CUBE', "Cube", "Box with per-axis size"),
     ('CYLINDER', "Cylinder", "Capped cylinder"),
+    ('OPERATOR', "Operator", "Made by an Add > Mesh operator; settings re-run it (see generic.py)"),
 )
 
-ADDABLE = ('CUBE', 'CYLINDER')
 DEFAULT_SIZE = 0.1  # meters, for a click without a drag
+DEFAULT_ADD = "mesh.primitive_cube_add"
 
 
 def _rebuild(self, context):
@@ -36,6 +38,12 @@ class VRPrimitive(bpy.types.PropertyGroup):
     height: FloatProperty(name="Height", default=DEFAULT_SIZE, min=0.001, soft_max=10.0,
                           subtype='DISTANCE', unit='LENGTH', update=_rebuild)
     segments: IntProperty(name="Segments", default=24, min=3, max=128, update=_rebuild)
+    # 'OPERATOR' primitives (generic.py).
+    op_key: StringProperty(name="Generator", description="Add > Mesh entry that made this object")
+    op_params: StringProperty(name="Settings", description="JSON of the operator settings changed in VR")
+    op_scale: FloatProperty(name="Drag Scale", default=1.0, description="Scale applied to length settings")
+    op_extent: FloatProperty(name="Default Extent", default=1.0,
+                             description="Largest side of the mesh made with default settings")
 
 
 def build_bmesh(prim):
@@ -53,7 +61,7 @@ def build_bmesh(prim):
 
 def rebuild(obj):
     prim = obj.vr_prim
-    if prim.kind == 'NONE' or obj.type != 'MESH':
+    if prim.kind not in {'CUBE', 'CYLINDER'} or obj.type != 'MESH':
         return
     bm = build_bmesh(prim)
     bm.to_mesh(obj.data)
@@ -69,6 +77,25 @@ def forget(obj):
     """Turn a primitive into a plain mesh (e.g. once it's sculpted)."""
     if obj is not None and obj.type == 'MESH' and obj.vr_prim.kind != 'NONE':
         obj.vr_prim.kind = 'NONE'
+
+
+def label(key):
+    """Display name for an Add entry key."""
+    from . import catalog
+    entry = catalog.find(key)
+    return entry.label if entry else key.split(".")[-1]
+
+
+def create_from_entry(context, key, location):
+    """New editable primitive for a catalog entry key (our own Cube/Cylinder, or any Add > Mesh operator)."""
+    from . import catalog, generic
+    entry = catalog.find(key)
+    kind = catalog.BUILTIN_KIND.get(entry.idname if entry else key)
+    if kind is not None:
+        return create(context, kind, location)
+    if entry is None:
+        raise RuntimeError(f"'{key}' is not in Add > Mesh (is its extension enabled?)")
+    return generic.create(context, entry, location)
 
 
 def create(context, kind, location):

@@ -1,10 +1,10 @@
-﻿import time
+import time
 
 import bpy
 from bpy.props import BoolProperty, EnumProperty
 from mathutils import Matrix, Quaternion, Vector
 
-from . import actions, brushes, interactions, menus, native, primitives, vr_ui
+from . import actions, brushes, catalog, interactions, menus, native, primitives, vr_ui
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
 # Shared geometry cache, so both hands sculpt the same arrays.
@@ -111,7 +111,14 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         pose = controller_pose(xr.controller_location, xr.controller_rotation)
         tip_pose = pose.copy()
         tip_pose.translation = brush_tip(pose, self.offset)
-        self.handler = _pick_handler(context, settings, self.hand, pose, tip_pose, scale)
+        try:
+            self.handler = _pick_handler(context, settings, self.hand, pose, tip_pose, scale)
+        except Exception as ex:
+            # E.g. an extension's operator failing to create its primitive.
+            import traceback
+            traceback.print_exc()
+            self.report({'WARNING'}, f"VR Sculpt: {ex}")
+            return {'CANCELLED'}
         if self.handler is not None:
             haptic(context, self.hand, 0.5, 0.03)
             return self._start_modal(context)
@@ -267,7 +274,10 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
         if self.left_hand:
             menus.set_mode(context, 'MODEL' if settings.mode == 'SCULPT' else 'SCULPT')
         elif settings.mode == 'MODEL':
-            settings.primitive = 'CYLINDER' if settings.primitive == 'CUBE' else 'CUBE'
+            keys = [e.key for e in catalog.entries()]
+            if keys:
+                i = keys.index(settings.primitive) if settings.primitive in keys else -1
+                settings.primitive = keys[(i + 1) % len(keys)]
         elif settings.engine == 'NATIVE':
             try:
                 native.cycle_brush(context)

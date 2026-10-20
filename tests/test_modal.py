@@ -1,4 +1,4 @@
-﻿"""Drive the stroke operator's invoke/modal with fake XR and timer events.
+"""Drive the stroke operator's invoke/modal with fake XR and timer events.
 
 blender --background --factory-startup --python tests/test_modal.py
 

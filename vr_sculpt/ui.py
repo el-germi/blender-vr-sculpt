@@ -1,6 +1,6 @@
 import bpy
 
-from . import actions, native, operators, primitives
+from . import actions, catalog, native, operators, primitives
 
 
 class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
@@ -27,7 +27,9 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
         col = layout.column()
         col.active = settings.enabled
         if settings.mode == 'MODEL':
-            col.prop(settings, "primitive")
+            row = col.row(align=True)
+            row.label(text="Add: " + primitives.label(settings.primitive))
+            row.operator("vrsculpt.choose_primitive", text="Choose", icon='VIEWZOOM')
             col.prop(settings, "tip_offset")
             col.prop(settings, "show_cursor")
             box = layout.box()
@@ -84,6 +86,10 @@ class VIEW3D_PT_vr_primitive(bpy.types.Panel):
         layout.use_property_split = True
         layout.use_property_decorate = False
         prim = context.active_object.vr_prim
+        if prim.kind == 'OPERATOR':
+            layout.label(text=primitives.label(prim.op_key))
+            layout.label(text="Edit its settings from the VR hand panel", icon='INFO')
+            return
         layout.label(text=prim.bl_rna.properties["kind"].enum_items[prim.kind].name)
         if prim.kind == 'CUBE':
             layout.prop(prim, "size")
@@ -94,7 +100,33 @@ class VIEW3D_PT_vr_primitive(bpy.types.Panel):
             layout.prop(prim, "segments")
 
 
-classes = (VIEW3D_PT_vr_sculpt, VIEW3D_PT_vr_primitive)
+_choice_items = []  # Blender needs the enum strings kept alive.
+
+
+def _primitive_items(self, context):
+    _choice_items[:] = [(e.key, f"{e.category} / {e.label}" if e.category else e.label, e.idname)
+                        for e in catalog.entries(refresh=True)]
+    return _choice_items
+
+
+class VRSCULPT_OT_choose_primitive(bpy.types.Operator):
+    """Choose what the trigger creates in Model mode (every Add > Mesh entry, including extensions)"""
+    bl_idname = "vrsculpt.choose_primitive"
+    bl_label = "Choose VR Primitive"
+    bl_property = "entry"
+
+    entry: bpy.props.EnumProperty(name="Primitive", items=_primitive_items)
+
+    def execute(self, context):
+        context.scene.vr_sculpt.primitive = self.entry
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        context.window_manager.invoke_search_popup(self)
+        return {'RUNNING_MODAL'}
+
+
+classes = (VIEW3D_PT_vr_sculpt, VIEW3D_PT_vr_primitive, VRSCULPT_OT_choose_primitive)
 
 
 def register():
