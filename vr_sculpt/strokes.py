@@ -210,6 +210,25 @@ def reflect(arr, mask, center=None):
     return out
 
 
+TAPER_MIN = 0.1  # width at a tapered stroke's tips, as a fraction of its full width
+
+
+def taper_envelope(points, fraction):
+    """Per-sample width factor for Taper strokes: ramps up from thin tips over `fraction` of the
+    stroke's length at each end (eased), full width in between. Proportional to the length, so
+    a short flick and a long sweep get the same shape."""
+    n = len(points)
+    if n < 2 or fraction <= 0.0:
+        return np.ones(n)
+    s = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(points, axis=0), axis=1))])
+    length = s[-1]
+    if length <= 1e-9:
+        return np.ones(n)
+    ramp = max(min(fraction, 0.5), 1e-3) * length
+    x = np.clip(np.minimum(s, length - s) / ramp, 0.0, 1.0)
+    return TAPER_MIN + (1.0 - TAPER_MIN) * x * x * (3.0 - 2.0 * x)
+
+
 # While the trigger is held, strokes longer than this are rebuilt without the Catmull-Rom
 # subdivision (about 3x fewer vertices); the full mesh is built on release.
 PREVIEW_SAMPLES = 150
@@ -221,6 +240,8 @@ def build(samples, preview=False):
     if len(p) < 2:
         return np.zeros((0, 3)), np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.int64)
     subdiv = 1 if preview and len(p) > PREVIEW_SAMPLES else SUBDIV
+    if samples.get("taper", 0.0) > 0.0:
+        w = w * taper_envelope(p, samples["taper"])
     pts, (radii, sides) = catmull_rom(p, (w / 2.0, s), subdiv)
     sides = _normalize(sides)
     make = tube if samples["style"] == 'TUBE' else ribbon
@@ -307,6 +328,7 @@ def save(obj, samples):
         "p": samples["p"].astype(float).ravel().tolist(),
         "w": samples["w"].astype(float).tolist(),
         "s": samples["s"].astype(float).ravel().tolist(),
+        "taper": float(samples.get("taper", 0.0)),
         "v": version,
     }
     _cache.pop(obj.name, None)
@@ -327,6 +349,7 @@ def load(obj):
         "p": np.array(data["p"].to_list(), dtype=np.float64).reshape(-1, 3),
         "w": np.array(data["w"].to_list(), dtype=np.float64),
         "s": np.array(data["s"].to_list(), dtype=np.float64).reshape(-1, 3),
+        "taper": float(data.get("taper", 0.0)),
     }
     _cache[key] = (data.get("v", 0), samples)
     return samples

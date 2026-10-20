@@ -237,6 +237,9 @@ def _draw_rows(context, settings):
         "draw_thickness", "Thickness", names[settings.draw_thickness],
         lambda: open_picker("Thickness", [Option(i, n) for i, n in items], settings.draw_thickness,
                             lambda v: setattr(settings, "draw_thickness", v)))])
+    if settings.draw_thickness == 'TAPER':
+        out.append([vr_ui.slider("draw_taper", "Taper length", settings.draw_taper, 0.05, 0.5,
+                                 lambda v: setattr(settings, "draw_taper", v), fmt=lambda v: f"{v * 100:.0f}%")])
     out.append([vr_ui.button("undo_stroke", "Undo stroke", lambda: _undo_stroke(context), danger=True)])
     return out
 

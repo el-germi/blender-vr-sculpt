@@ -34,8 +34,10 @@ Meta Quest over OpenXR.
 - **Draw mode**: freehand 3D strokes that become real meshes, like Gravity
   Sketch. Tube (round, never twists) and Ribbon (flat, follows your wrist's
   roll) strokes, plus Note strokes that are Blender annotations. Thickness
-  from trigger pressure, from hand speed (fast = thin or fast = thick), or
-  fixed. Edit pulls part of a stroke into a new shape; Erase sweeps
+  from trigger pressure, from hand speed (fast = thin or fast = thick;
+  averaged over ~0.3 s, eased up to 2 m/s, changing gradually along the
+  stroke), Taper (thin tips ramping to full width over a share of the
+  stroke's length), or fixed. Edit pulls part of a stroke into a new shape; Erase sweeps
   strokes and notes away. Mirror on X / Y / Z around the 3D cursor (editing
   one side updates the other), a stabilizer, 8 colors, and B to undo the last
   stroke.

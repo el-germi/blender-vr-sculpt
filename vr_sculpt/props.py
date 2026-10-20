@@ -68,10 +68,16 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('PRESSURE', "Pressure", "Squeeze the trigger harder for a thicker stroke"),
             ('SPEED_THIN', "Speed: fast = thin", "Faster hand movement draws thinner, like a calligraphy brush"),
             ('SPEED_THICK', "Speed: fast = thick", "Faster hand movement draws thicker"),
+            ('TAPER', "Taper", "Thin at both ends, ramping smoothly to full width; "
+                               "the ramps are a share of the stroke's length"),
             ('FIXED', "Fixed", "Always the Width setting"),
         ),
         default='PRESSURE',
     )
+    draw_taper: FloatProperty(
+        name="Taper Length",
+        description="Share of the stroke's length each end takes to ramp up to full width",
+        default=0.3, min=0.05, max=0.5, subtype='FACTOR')
     mirror_x: BoolProperty(name="Mirror X", description="Mirror strokes across the 3D cursor's X plane")
     mirror_y: BoolProperty(name="Mirror Y", description="Mirror strokes across the 3D cursor's Y plane")
     mirror_z: BoolProperty(name="Mirror Z", description="Mirror strokes across the 3D cursor's Z plane")

@@ -332,34 +332,97 @@ def test_orientation():
     check(end_angle > 75, f"RIBBON follows a deliberate 90 degree roll ({end_angle:.0f} deg)")
 
 
+def draw_at_speeds(ctx, ss, phases):
+    """Draw along +X with the trigger held: phases = [(speed m/s, seconds), ...] at ~100 Hz.
+    Returns the stroke object."""
+    ss.trigger = 1.0
+    op = tm.harness()
+    start = Vector((0, 0, 1))
+    ss.aim_loc[1], ss.aim_rot[1] = start, Quaternion()
+    op.invoke(ctx, tm.FakeEvent('XR_ACTION', 'PRESS', tm.FakeXR(start, Quaternion(), 1.0)))
+    x = 0.0
+    last = time.perf_counter()
+    for speed, seconds in phases:
+        end = time.perf_counter() + seconds
+        while time.perf_counter() < end:
+            time.sleep(0.01)
+            now = time.perf_counter()
+            x += speed * (now - last)  # real elapsed time, so the measured speed is right
+            last = now
+            ss.aim_loc[1] = Vector((x, 0, 1))
+            op.modal(ctx, tm.FakeEvent('TIMER'))
+    ss.trigger = 0.0
+    op.modal(ctx, tm.FakeEvent('TIMER'))
+    return next(o for o in bpy.data.objects if strokes.is_stroke(o))
+
+
 def test_speed_thickness():
     print("== speed-based thickness")
     ss, ctx, s = setup_trigger()
     s.draw_style = 'TUBE'
+    full = s.draw_width
     for mode, slow_wider in (('SPEED_THIN', True), ('SPEED_THICK', False)):
         clear()
         s.draw_thickness = mode
-        ss.trigger = 1.0
-        op = tm.harness()
-        start = Vector((0, 0, 1))
-        ss.aim_loc[1], ss.aim_rot[1] = start, Quaternion()
-        op.invoke(ctx, tm.FakeEvent('XR_ACTION', 'PRESS', tm.FakeXR(start, Quaternion(), 1.0)))
-        x = 0.0
-        # Slow half (5 cm/s), then fast half (2 m/s), at ~100 Hz.
-        for speed, steps in ((0.05, 60), (2.0, 30)):
-            for _ in range(steps):
-                time.sleep(0.01)
-                x += speed * 0.01
-                ss.aim_loc[1] = Vector((x, 0, 1))
-                op.modal(ctx, tm.FakeEvent('TIMER'))
-        ss.trigger = 0.0
-        op.modal(ctx, tm.FakeEvent('TIMER'))
-        obj = next(o for o in bpy.data.objects if strokes.is_stroke(o))
+        obj = draw_at_speeds(ctx, ss, [(0.05, 0.6), (2.5, 0.8)])
         smp = strokes.load(obj)
-        slow_w = np.median(smp["w"][smp["p"][:, 0] + obj.location.x < 0.025])
-        fast_w = np.median(smp["w"][smp["p"][:, 0] + obj.location.x > 0.2])
+        x = smp["p"][:, 0] + obj.location.x
+        slow_w = np.median(smp["w"][x < 0.025])
+        fast_w = np.median(smp["w"][x > x.max() - 0.4])
         ok = slow_w > fast_w * 2 if slow_wider else fast_w > slow_w * 2
         check(ok, f"{mode}: slow width {slow_w * 1000:.1f} mm, fast width {fast_w * 1000:.1f} mm")
+        # The switch from slow to fast ramps over several centimeters, no steps.
+        dw = np.abs(np.diff(smp["w"]))
+        seg = np.linalg.norm(np.diff(smp["p"], axis=0), axis=1)
+        per_cm = (dw / np.maximum(seg, 1e-9)).max() / 100 / full
+        check(per_cm <= (1 - 0.15) / 5 + 1e-6, f"{mode}: width changes gradually "
+                                               f"(max {per_cm * 100:.0f}% of full width per cm)")
+
+    # Normal sketching speed (1 m/s) lands in the middle, not at the extreme.
+    clear()
+    s.draw_thickness = 'SPEED_THIN'
+    obj = draw_at_speeds(ctx, ss, [(1.0, 1.2)])
+    smp = strokes.load(obj)
+    steady = np.median(smp["w"][len(smp["w"]) // 2:]) / full
+    check(0.35 < steady < 0.8, f"steady 1 m/s gives a middle width ({steady * 100:.0f}% of full)")
+
+
+def test_taper():
+    print("== taper")
+    clear()
+    ss, ctx, s = setup_trigger()
+    s.draw_style, s.draw_thickness, s.draw_taper = 'TUBE', 'TAPER', 0.3
+    hold(ctx, ss, 1, path((0, 0, 1), (0.4, 0, 1), 81), [1.0] * 81)
+    obj = next(o for o in bpy.data.objects if strokes.is_stroke(o))
+    smp = strokes.load(obj)
+    check(abs(smp["taper"] - 0.3) < 1e-6 and np.allclose(smp["w"], s.draw_width),
+          "taper is stored on the stroke; samples keep the plain width")
+    env = strokes.taper_envelope(smp["p"], smp["taper"])
+    # Compare by position along the stroke (samples aren't evenly spaced).
+    arc = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(smp["p"], axis=0), axis=1))])
+    u = arc / arc[-1]
+    at = lambda f: float(np.interp(f, u, env))  # noqa: E731
+    check(abs(env[0] - strokes.TAPER_MIN) < 1e-6 and abs(env[-1] - strokes.TAPER_MIN) < 1e-6,
+          "both tips are thin")
+    grid = np.linspace(0, 1, 41)
+    sym = max(abs(at(f) - at(1 - f)) for f in grid)
+    check(abs(at(0.5) - 1.0) < 1e-6 and sym < 0.03, f"full width in the middle, symmetric (off by {sym:.3f})")
+    check(0.45 < at(0.15) < 0.65, f"half way up the ramp at 15% of the length ({at(0.15):.2f})")
+    co = np.array([v.co[:] for v in obj.data.vertices])
+    r = np.linalg.norm(co[:, 1:] - 0, axis=1)
+    near_tip = r[np.abs(co[:, 0] - co[:, 0].min()) < 0.004].max()
+    middle = r[np.abs(co[:, 0] - (co[:, 0].min() + co[:, 0].max()) / 2) < 0.004].max()
+    check(near_tip < middle * 0.35, f"the built mesh tapers (tip radius {near_tip * 1000:.1f} mm, "
+                                    f"middle {middle * 1000:.1f} mm)")
+    # A longer stroke gets proportionally longer ramps.
+    long_env = strokes.taper_envelope(np.stack([np.linspace(0, 1.2, 81), np.zeros(81), np.zeros(81)], 1), 0.3)
+    long_at = lambda f: float(np.interp(f, np.linspace(0, 1, 81), long_env))  # noqa: E731
+    diff = max(abs(long_at(f) - at(f)) for f in grid)
+    check(diff < 0.03, f"ramps are proportional to the stroke's length (3x longer stroke, same shape, off by {diff:.3f})")
+    # Edit keeps the taper.
+    s.draw_tool = 'EDIT'
+    hold(ctx, ss, 1, [(0.2, 0, 1), (0.2, 0, 1.04)])
+    check(abs(strokes.load(obj)["taper"] - 0.3) < 1e-6, "Edit keeps the taper")
 
 
 def test_sculpt_forgets_and_panel():
@@ -400,6 +463,7 @@ def main():
         test_edit_and_erase()
         test_orientation()
         test_speed_thickness()
+        test_taper()
         test_sculpt_forgets_and_panel()
     except Exception:
         traceback.print_exc()

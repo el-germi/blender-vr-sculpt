@@ -33,6 +33,8 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
             col.prop(settings, "draw_width")
             col.prop(settings, "draw_smoothing")
             col.prop(settings, "draw_thickness")
+            if settings.draw_thickness == 'TAPER':
+                col.prop(settings, "draw_taper")
             row = col.row(align=True, heading="Mirror")
             row.prop(settings, "mirror_x", text="X", toggle=True)
             row.prop(settings, "mirror_y", text="Y", toggle=True)

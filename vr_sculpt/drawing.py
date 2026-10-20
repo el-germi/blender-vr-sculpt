@@ -4,6 +4,7 @@ Same interface as interactions.py: update(context, aim_pose, tip_pose, value) ev
 frame while the trigger is held, finish(context) on release, `changed` for undo.
 """
 
+import math
 import time
 
 import numpy as np
@@ -27,9 +28,10 @@ def mirror_bits(settings):
 
 TRIGGER_THRESHOLD = 0.3  # the stroke action fires past this much trigger travel
 MIN_WIDTH = 0.15  # thinnest, as a fraction of the width setting
-SPEED_SLOW = 0.1  # hand-space m/s: at or below, speed modes give the "slow" width
-SPEED_FAST = 1.0  # hand-space m/s: at or above, the "fast" width
-SPEED_SMOOTHING = 0.75  # how much of the previous speed estimate each frame keeps
+SPEED_SLOW = 0.15  # hand-space m/s: at or below, speed modes give the "slow" width
+SPEED_FAST = 2.0  # hand-space m/s: at or above, the "fast" width (eased in between)
+SPEED_TAU = 0.3  # seconds: speed is averaged over about this long, so wobbles don't show
+SPEED_WIDTH_RATE = 0.05  # hand-space meters of stroke for speed modes to go from thinnest to widest
 STEER_BASELINE = 0.02  # hand-space meters of stroke used to judge its direction for ribbon steering
 
 
@@ -37,14 +39,23 @@ def _clamp01(x):
     return min(max(x, 0.0), 1.0)
 
 
+def _ease(x):
+    x = _clamp01(x)
+    return x * x * (3.0 - 2.0 * x)
+
+
 def stroke_width(settings, scale, value, speed):
-    """Width for a new sample. value: trigger travel 0..1; speed: hand-space m/s."""
+    """Width for a new sample. value: trigger travel 0..1; speed: hand-space m/s.
+
+    Taper mode stores the plain width; the ramps are applied over the whole stroke when it's
+    built (strokes.taper_envelope), since the end isn't known until the trigger is released.
+    """
     width = settings.draw_width * scale
     mode = settings.draw_thickness
     if mode == 'PRESSURE':
         f = _clamp01((value - TRIGGER_THRESHOLD) / (1.0 - TRIGGER_THRESHOLD))
     elif mode in {'SPEED_THIN', 'SPEED_THICK'}:
-        f = _clamp01((speed - SPEED_SLOW) / (SPEED_FAST - SPEED_SLOW))
+        f = _ease((speed - SPEED_SLOW) / (SPEED_FAST - SPEED_SLOW))
         if mode == 'SPEED_THIN':
             f = 1.0 - f
     else:
@@ -75,6 +86,7 @@ class DrawStroke:
         self.samples = {
             "style": settings.draw_style, "sym": mirror_bits(settings), "c": np.array(center[:]),
             "p": np.zeros((0, 3)), "w": np.zeros(0), "s": np.zeros((0, 3)),
+            "taper": settings.draw_taper if settings.draw_thickness == 'TAPER' else 0.0,
         }
         self.spacing = max(settings.draw_width * scale * 0.25, MIN_SPACING * scale)
         self.stab = _Stabilizer(tip, settings.draw_smoothing)
@@ -101,8 +113,15 @@ class DrawStroke:
                 s["s"][0] = first if first is not None else strokes.any_perpendicular(t)
             normal = strokes.orient_step(s["s"][-1], t, desired, strokes.TWIST_RATE * seg / self.scale,
                                          steer_t=self._long_tangent(p))
+        width = stroke_width(self.settings, self.scale, value, self.speed)
+        if len(s["w"]) and self.settings.draw_thickness in {'SPEED_THIN', 'SPEED_THICK'}:
+            # Speed widths change gradually along the stroke, never in steps.
+            seg = float(np.linalg.norm(p - s["p"][-1]))
+            full = self.settings.draw_width * self.scale * (1.0 - MIN_WIDTH)
+            step = full * seg / (SPEED_WIDTH_RATE * self.scale)
+            width = min(max(width, s["w"][-1] - step), s["w"][-1] + step)
         s["p"] = np.vstack([s["p"], p])
-        s["w"] = np.append(s["w"], stroke_width(self.settings, self.scale, value, self.speed))
+        s["w"] = np.append(s["w"], width)
         s["s"] = np.vstack([s["s"], normal])
 
     def _long_tangent(self, p):
@@ -117,11 +136,13 @@ class DrawStroke:
         return None
 
     def _track_speed(self, point):
+        """Hand speed averaged over about SPEED_TAU seconds (the same at any frame rate)."""
         now = time.perf_counter()
         dt = now - self.last_time
         if dt > 1e-4:
             v = (point - self.last_point).length / dt / self.scale
-            self.speed = SPEED_SMOOTHING * self.speed + (1.0 - SPEED_SMOOTHING) * v
+            alpha = 1.0 - math.exp(-dt / SPEED_TAU)
+            self.speed += (v - self.speed) * alpha
         self.last_point, self.last_time = point.copy(), now
 
     def update(self, context, pose, tip_pose, value):
