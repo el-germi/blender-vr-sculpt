@@ -4,7 +4,7 @@ import math
 
 import bpy
 
-from . import camera, catalog, desktop, generic, measure, native, primitives, strokes, symmetry, vr_ui
+from . import camera, catalog, desktop, generic, measure, native, paint, primitives, strokes, symmetry, vr_ui
 from .props import BRUSH_ITEMS
 
 NATIVE_SHORT = {
@@ -38,8 +38,12 @@ def set_mode(context, mode):
     obj = context.view_layer.objects.active
     if mode in {'MODEL', 'DRAW', 'TOOLS'}:
         set_object_mode(context, obj, 'OBJECT')
+    elif mode == 'PAINT':
+        paint.enter(context)
     elif settings.engine == 'NATIVE':
         set_object_mode(context, obj, 'SCULPT')
+    else:
+        set_object_mode(context, obj, 'OBJECT')  # E.g. coming back from Texture Paint.
 
 
 def set_engine(context, engine):
@@ -182,6 +186,7 @@ def rows(context):
         vr_ui.button("mode_sculpt", "Sculpt", lambda: set_mode(context, 'SCULPT'), active=mode == 'SCULPT'),
         vr_ui.button("mode_model", "Model", lambda: set_mode(context, 'MODEL'), active=mode == 'MODEL'),
         vr_ui.button("mode_draw", "Draw", lambda: set_mode(context, 'DRAW'), active=mode == 'DRAW'),
+        vr_ui.button("mode_paint", "Paint", lambda: set_mode(context, 'PAINT'), active=mode == 'PAINT'),
         vr_ui.button("mode_tools", "Tools", lambda: set_mode(context, 'TOOLS'), active=mode == 'TOOLS'),
     ]]
     if mode == 'SCULPT':
@@ -190,6 +195,8 @@ def rows(context):
         out += _draw_rows(context, settings)
     elif mode == 'TOOLS':
         out += _tools_rows(context, settings)
+    elif mode == 'PAINT':
+        out += _paint_rows(context, settings)
     else:
         out += _model_rows(context, settings)
     return out
@@ -486,4 +493,62 @@ def _tools_rows(context, settings):
     ])
     out.append([vr_ui.slider("nav_speed", "Speed", settings.nav_speed, 0.2, 6.0,
                              lambda v: setattr(settings, "nav_speed", v), fmt=lambda v: f"{v:.1f} m/s")])
+    return out
+
+
+def _paint_setup(context):
+    obj = paint.target(context)
+    if obj is not None:
+        paint.setup(context, obj, int(context.scene.vr_sculpt.paint_texture_size))
+
+
+def _paint_rows(context, settings):
+    obj = paint.target(context)
+    if obj is None:
+        return [[vr_ui.label("Select a mesh to paint")]]
+    if not paint.ready(obj):
+        items = [(i.identifier, i.name) for i in settings.bl_rna.properties["paint_texture_size"].enum_items]
+        return [
+            [vr_ui.label(f"{obj.name} needs UVs and an image")],
+            [vr_ui.button("paint_size_" + ident, name, (lambda i=ident: setattr(settings, "paint_texture_size", i)),
+                          active=settings.paint_texture_size == ident) for ident, name in items],
+            [vr_ui.button("paint_setup", "Set up for painting", lambda: _paint_setup(context))],
+        ]
+    b = paint.brush(context)
+    current = b.name if b else ""
+    cells = [vr_ui.button("pbrush_" + n, paint.SHORT[n], (lambda n=n: paint.activate_brush(context, n)),
+                          active=n == current) for n in paint.BRUSHES]
+    out = [cells[:3], cells[3:]]
+    out.append([
+        vr_ui.button("reach_contact", "Contact", lambda: setattr(settings, "paint_reach", 'CONTACT'),
+                     active=settings.paint_reach == 'CONTACT'),
+        vr_ui.button("reach_spray", "Spray", lambda: setattr(settings, "paint_reach", 'SPRAY'),
+                     active=settings.paint_reach == 'SPRAY'),
+        vr_ui.button("paint_pick", "Pick color",
+                     lambda: setattr(settings, "paint_tool", 'PAINT' if settings.paint_tool == 'PICK' else 'PICK'),
+                     active=settings.paint_tool == 'PICK'),
+    ])
+    color = paint.get_color(context)
+    swatches = [vr_ui.button("pcolor_" + ident, "", (lambda rgb=rgb: paint.set_color(context, rgb)),
+                             active=all(abs(a - b) < 1e-3 for a, b in zip(color, rgb)), swatch=rgb)
+                for ident, _name, rgb in strokes.PALETTE]
+    out += [swatches[:4], swatches[4:]]
+    h, s, v = paint.get_hsv(context)
+    out.append([vr_ui.slider("paint_hue", "Hue", h, 0.0, 1.0, lambda x: paint.set_hsv(context, h=x),
+                             fmt=lambda x: f"{x * 360:.0f}" + chr(0xB0))])  # degrees
+    out.append([vr_ui.slider("paint_sat", "Saturation", s, 0.0, 1.0, lambda x: paint.set_hsv(context, s=x),
+                             fmt=lambda x: f"{x * 100:.0f}%")])
+    out.append([vr_ui.slider("paint_val", "Value", v, 0.0, 1.0, lambda x: paint.set_hsv(context, v=x),
+                             fmt=lambda x: f"{x * 100:.0f}%")])
+    out.append([
+        vr_ui.button("paint_color1", "Color", lambda: None, swatch=color, active=True),
+        vr_ui.button("paint_color2", "2nd", lambda: None, swatch=paint.get_color(context, True)),
+        vr_ui.button("paint_swap", "Swap", lambda: paint.swap_colors(context)),
+    ])
+    out.append([vr_ui.slider("paint_radius", "Radius", settings.paint_radius, 0.002, 0.15,
+                             lambda x: setattr(settings, "paint_radius", x), fmt=_meters)])
+    if b is not None:
+        out.append([vr_ui.slider("paint_strength", "Strength", b.strength, 0.0, 1.0,
+                                 lambda x: setattr(b, "strength", x), fmt=lambda x: f"{x:.2f}")])
+    out.append([vr_ui.button("paint_undo", "Undo stroke", lambda: paint.undo_last(context), danger=True)])
     return out

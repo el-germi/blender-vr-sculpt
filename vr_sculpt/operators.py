@@ -5,7 +5,7 @@ from bpy.props import BoolProperty, EnumProperty
 from mathutils import Matrix, Quaternion, Vector
 
 from . import (actions, brushes, camera, catalog, desktop, drawing, interactions, measure, menus, native,
-               primitives, strokes, symmetry, vr_ui)
+               paint, primitives, strokes, symmetry, vr_ui)
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
 # Shared geometry cache, so both hands sculpt the same arrays.
@@ -78,6 +78,10 @@ def _tip_engaged(context, settings, tip, scale):
         return primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale) is not None
     if settings.mode == 'DRAW' and settings.draw_tool in {'EDIT', 'ERASE'}:
         return strokes.nearest(context, tip, drawing.EDIT_RADIUS * scale) is not None
+    if settings.mode == 'PAINT':
+        obj = paint.target(context)
+        return obj is not None and settings.paint_reach == 'CONTACT' and \
+            paint.surface_near(obj, tip, settings.paint_radius * scale) is not None
     return False
 
 
@@ -100,6 +104,8 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         return interactions.CreatePrimitive(context, settings.primitive, tip_pose.translation, scale)
     if settings.mode == 'DRAW':
         return drawing.pick(context, settings, tip_pose, value, scale)
+    if settings.mode == 'PAINT':
+        return paint.pick(context, settings, hand == actions.HANDS[0], pose, tip_pose, scale, value)
     if settings.mode == 'TOOLS':
         if settings.tool == 'CAMERA':
             return camera.AimCamera(context, pose)
@@ -285,7 +291,7 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         return {'FINISHED'} if self.times else {'CANCELLED'}
 
 
-MODE_CYCLE = ('SCULPT', 'MODEL', 'DRAW', 'TOOLS')
+MODE_CYCLE = ('SCULPT', 'MODEL', 'DRAW', 'PAINT', 'TOOLS')
 
 
 def undo_last_stroke(context):
@@ -319,6 +325,8 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
             menus.set_mode(context, MODE_CYCLE[(i + 1) % len(MODE_CYCLE)])
         elif settings.mode == 'DRAW':
             undo_last_stroke(context)
+        elif settings.mode == 'PAINT':
+            paint.undo_last(context)
         elif settings.mode == 'TOOLS':
             if settings.tool == 'CAMERA':
                 camera.next_camera(context)
@@ -361,8 +369,9 @@ class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
         if self.left_hand:
             settings.show_panel = not settings.show_panel
             return {'FINISHED'}
-        bigger = [r for r in RADIUS_STEPS if r > settings.radius + 1e-6]
-        settings.radius = bigger[0] if bigger else RADIUS_STEPS[0]
+        prop = "paint_radius" if settings.mode == 'PAINT' else "radius"
+        bigger = [r for r in RADIUS_STEPS if r > getattr(settings, prop) + 1e-6]
+        setattr(settings, prop, bigger[0] if bigger else RADIUS_STEPS[0])
         return {'FINISHED'}
 
     def invoke(self, context, event):
@@ -387,6 +396,24 @@ class VRSCULPT_OT_undo_stroke(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class VRSCULPT_OT_paint_setup(bpy.types.Operator):
+    """Give the active mesh UVs (Smart UV Project, if it has none) and an image to paint on"""
+    bl_idname = "vrsculpt.paint_setup"
+    bl_label = "Set Up for Painting"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return paint.target(context) is not None
+
+    def execute(self, context):
+        obj = paint.target(context)
+        if not paint.setup(context, obj, int(context.scene.vr_sculpt.paint_texture_size)):
+            self.report({'WARNING'}, "Could not set up the mesh for painting")
+            return {'CANCELLED'}
+        return {'FINISHED'}
+
+
 class VRSCULPT_OT_clear_measures(bpy.types.Operator):
     """Remove all tape measurements made in VR"""
     bl_idname = "vrsculpt.clear_measures"
@@ -398,13 +425,13 @@ class VRSCULPT_OT_clear_measures(bpy.types.Operator):
 
 
 class VRSCULPT_OT_set_mode(bpy.types.Operator):
-    """Switch the VR tools between Sculpt, Model, Draw and Tools mode"""
+    """Switch the VR tools between Sculpt, Model, Draw, Paint and Tools mode"""
     bl_idname = "vrsculpt.set_mode"
     bl_label = "Set VR Mode"
     bl_options = {'INTERNAL'}
 
     mode: EnumProperty(items=(('SCULPT', "Sculpt", ""), ('MODEL', "Model", ""), ('DRAW', "Draw", ""),
-                              ('TOOLS', "Tools", "")))
+                              ('PAINT', "Paint", ""), ('TOOLS', "Tools", "")))
 
     def execute(self, context):
         menus.set_mode(context, self.mode)
@@ -412,7 +439,7 @@ class VRSCULPT_OT_set_mode(bpy.types.Operator):
 
 
 classes = (VRSCULPT_OT_stroke, VRSCULPT_OT_cycle_brush, VRSCULPT_OT_cycle_radius, VRSCULPT_OT_undo_stroke,
-           VRSCULPT_OT_clear_measures, VRSCULPT_OT_set_mode)
+           VRSCULPT_OT_paint_setup, VRSCULPT_OT_clear_measures, VRSCULPT_OT_set_mode)
 
 
 def register():

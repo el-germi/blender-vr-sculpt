@@ -28,9 +28,38 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('SCULPT', "Sculpt", "Trigger sculpts the active mesh"),
             ('MODEL', "Model", "Trigger creates primitives in empty space and grabs objects it touches"),
             ('DRAW', "Draw", "Trigger draws freehand 3D strokes"),
+            ('PAINT', "Paint", "Trigger paints the active mesh's texture with Blender's texture paint brushes"),
             ('TOOLS', "Tools", "Tape measure and scene camera, plus grid, desktop window and navigation options"),
         ),
         default='SCULPT',
+    )
+    # Paint mode.
+    paint_tool: EnumProperty(
+        name="Paint Tool",
+        items=(
+            ('PAINT', "Paint", "Paint with the active texture paint brush"),
+            ('PICK', "Pick Color", "Take the texture's color under the tip (then back to painting)"),
+        ),
+        default='PAINT',
+    )
+    paint_reach: EnumProperty(
+        name="Reach",
+        items=(
+            ('CONTACT', "Contact", "Paint where the tip touches the surface, like a brush"),
+            ('SPRAY', "Spray", "Paint where the controller points, at any distance, like a spray can"),
+        ),
+        default='CONTACT',
+    )
+    paint_radius: FloatProperty(
+        name="Paint Radius",
+        description="Paint brush radius in your hand's space (meters). Stays the same size when you scale the world",
+        default=0.02, min=0.001, soft_max=0.2, subtype='DISTANCE', unit='LENGTH',
+    )
+    paint_texture_size: EnumProperty(
+        name="Texture Size",
+        description="Size of the image made by Set Up for Painting",
+        items=(('1024', "1K", "1024 x 1024"), ('2048', "2K", "2048 x 2048"), ('4096', "4K", "4096 x 4096")),
+        default='2048',
     )
     # Tools mode.
     tool: EnumProperty(

@@ -111,6 +111,15 @@ def card_content(settings, sculpt_brush, colors):
             title, desc = DRAW_INFO[tool]
         color = strokes.COLORS.get(settings.draw_color, (1.0, 1.0, 1.0)) if tool == 'DRAW' else MODEL_COLOR
         content = (title, desc, color, None)
+    elif settings.mode == 'PAINT':
+        from . import paint
+        b = paint.brush(bpy_context())
+        name = b.name if b else "No brush"
+        if settings.paint_tool == 'PICK':
+            content = ("Pick Color", "Touch the surface to take its color (left hand: 2nd color)",
+                       paint.get_color(bpy_context()), None)
+        else:
+            content = (name, paint.INFO.get(name, ""), paint.get_color(bpy_context()), brush_texture(b))
     elif settings.mode == 'TOOLS':
         title, desc = TOOLS_INFO[settings.tool]
         content = (title, desc, CAMERA_COLOR if settings.tool == 'CAMERA' else MEASURE_COLOR, None)
@@ -131,6 +140,11 @@ def card_content(settings, sculpt_brush, colors):
         _last["key"] = key
         _last["time"] = time.monotonic()
     return content
+
+
+def bpy_context():
+    import bpy
+    return bpy.context
 
 
 def show_description():

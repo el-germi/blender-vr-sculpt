@@ -8,8 +8,8 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-from . import (camera, desktop, drawing, grid, hud, interactions, measure, operators, primitives, strokes,
-               symmetry, vr_ui)
+from . import (camera, desktop, drawing, grid, hud, interactions, measure, operators, paint, primitives,
+               strokes, symmetry, vr_ui)
 
 COLORS = {
     'DRAW': (1.0, 0.55, 0.2),
@@ -83,11 +83,15 @@ def _draw_cursors(context, ss, settings, xr):
     model = settings.mode == 'MODEL'
     sketch = settings.mode == 'DRAW'
     tools = settings.mode == 'TOOLS'
+    painting = settings.mode == 'PAINT'
+    if painting:
+        _draw_paint_cursors(context, ss, settings)
     if sketch:
         radius = {'EDIT': drawing.EDIT_RADIUS, 'ERASE': drawing.ERASE_MARGIN}.get(
             settings.draw_tool, settings.draw_width / 2) * scale
     else:
-        radius = (interactions.TOUCH_MARGIN if model or tools else settings.radius) * scale
+        radius = (interactions.TOUCH_MARGIN if model or tools else
+                  settings.paint_radius if painting else settings.radius) * scale
     offset = settings.tip_offset * scale
 
     native = settings.engine == 'NATIVE'
@@ -120,6 +124,8 @@ def _draw_cursors(context, ss, settings, xr):
                 _draw_bounds(shader, touched, (1.0, 0.85, 0.3, 0.9))
         elif tools:
             color = hud.CAMERA_COLOR if settings.tool == 'CAMERA' else measure.COLOR
+        elif painting:
+            color = paint.get_color(context, secondary=idx == 0)
         elif idx == 0 and settings.left_inverts and (native or settings.brush in {'DRAW', 'INFLATE'}):
             color = INVERT_COLOR
         alpha = 1.0 if idx in operators.active_hands else 0.6
@@ -170,6 +176,40 @@ def _draw_cursors(context, ss, settings, xr):
         matrix, _widgets, _height = interactions.panel_frame(context, ss)
         width = camera.PREVIEW_WIDTH
         camera.draw_preview(matrix, context.scene, width, x=-vr_ui.WIDTH / 2 - 0.006 - width)
+
+
+def _draw_paint_cursors(context, ss, settings):
+    """Where the paint lands: a ring on the surface (Contact: near the tip; Spray: along the ray)."""
+    obj = paint.target(context)
+    if obj is None or not paint.ready(obj):
+        return
+    scale = ss.viewer_scale
+    radius = settings.paint_radius * scale
+    shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+    gpu.state.blend_set('ALPHA')
+    gpu.state.depth_test_set('NONE')
+    for idx in range(2):
+        pose = operators.controller_pose(ss.controller_aim_location_get(context, idx),
+                                         ss.controller_aim_rotation_get(context, idx))
+        if settings.paint_reach == 'SPRAY':
+            h = paint.surface_along(obj, pose.translation, interactions.aim_direction(pose))
+        else:
+            h = paint.surface_near(obj, operators.brush_tip(pose, settings.tip_offset * scale), radius)
+        if h is None:
+            continue
+        point, normal, _face = h
+        rot = normal.to_track_quat('Z', 'Y').to_matrix().to_4x4()
+        m = Matrix.Translation(point + normal * 0.0005 * scale) @ rot @ Matrix.Scale(radius, 4)
+        ring = [m @ Vector((math.cos(a), math.sin(a), 0.0)) for a in
+                (2 * math.pi * i / _SEGMENTS for i in range(_SEGMENTS))]
+        coords = [p for i in range(_SEGMENTS) for p in (ring[i], ring[(i + 1) % _SEGMENTS])]
+        if settings.paint_reach == 'SPRAY':
+            coords += [pose.translation, point]
+        color = (1.0, 1.0, 1.0) if settings.paint_tool == 'PICK' else paint.get_color(context, secondary=idx == 0)
+        batch = batch_for_shader(shader, 'LINES', {"pos": coords})
+        shader.uniform_float("color", (*color, 0.95))
+        batch.draw(shader)
+    gpu.state.blend_set('NONE')
 
 
 ERASE_COLOR = (1.0, 0.3, 0.3)
