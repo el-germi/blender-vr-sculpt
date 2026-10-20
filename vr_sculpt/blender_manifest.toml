@@ -1,0 +1,14 @@
+schema_version = "1.0.0"
+
+id = "vr_sculpt"
+version = "0.1.0"
+name = "VR Sculpt (prototype)"
+tagline = "Sculpt meshes with VR controllers during a VR session"
+maintainer = "el-germi"
+type = "add-on"
+website = "https://github.com/el-germi/blender-vr-sculpt"
+
+blender_version_min = "5.4.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+tags = ["3D View", "Sculpt"]
