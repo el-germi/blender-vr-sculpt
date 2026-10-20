@@ -3,7 +3,8 @@ every location key that the trigger can grab to move that key.
 
 Paths are (re)calculated with object.paths_calculate over the scene's frame range for the
 selected animated objects, when the selection or the keys change (at most UPDATE_HZ times a
-second, so dragging a key stays smooth).
+second, so dragging a key stays smooth). For an armature in Pose Mode, its selected animated
+bones get paths of their tails instead (pose.paths_calculate), with markers on their keys.
 """
 
 import time
@@ -29,13 +30,26 @@ def mark_dirty():
 
 
 def targets(context):
-    """Selected objects that have their own animation."""
-    return [o for o in anim.selection(context) if anim.fcurves(o)]
+    """Selected objects that have their own animation (not an armature being posed: its bones get paths)."""
+    return [o for o in anim.selection(context) if anim.fcurves(o) and not anim.posing(o)]
+
+
+def bone_targets(context):
+    """(rig, [selected pose bones that have keys]) for an armature in Pose Mode, or (None, [])."""
+    rig = context.view_layer.objects.active
+    if not anim.posing(rig):
+        return None, []
+    keyed = {fc.data_path for fc in anim.fcurves(rig)}
+    bones = [pb for pb in anim.selected_bones(rig)
+             if any(p.startswith(anim.bone_prefix(pb.name)) for p in keyed)]
+    return rig, bones
 
 
 def _signature(context, objs):
     scene = context.scene
-    return (tuple(o.name for o in objs), scene.frame_start, scene.frame_end)
+    rig, bones = bone_targets(context)
+    return (tuple(o.name for o in objs), rig.name if rig else None, tuple(pb.name for pb in bones),
+            scene.frame_start, scene.frame_end)
 
 
 def ensure(context, force=False):
@@ -50,8 +64,11 @@ def ensure(context, force=False):
     if not force and time.monotonic() - _state["time"] < 1.0 / UPDATE_HZ:
         return False
     _state.update(dirty=False, signature=sig, time=time.monotonic())
+    rig, bones = bone_targets(context)
+    if bones:
+        _bone_paths(context, rig, bones)
     if not objs:
-        return False
+        return bool(bones)
     scene = context.scene
     for obj in objs:
         mp = obj.animation_visualization.motion_path
@@ -62,6 +79,34 @@ def ensure(context, force=False):
                                active_object=objs[0], object=objs[0]):
         bpy.ops.object.paths_calculate(display_type='RANGE', range='SCENE')
     return True
+
+
+def _bone_paths(context, rig, bones):
+    scene = context.scene
+    mp = rig.pose.animation_visualization.motion_path
+    mp.type = 'RANGE'
+    mp.frame_start, mp.frame_end = scene.frame_start, scene.frame_end
+    ov = anim._window_override(context) or {}
+    with context.temp_override(**ov, object=rig, active_object=rig, selected_pose_bones=bones):
+        bpy.ops.pose.paths_calculate(display_type='RANGE', range='SCENE', bake_location='TAILS')
+
+
+def bone_markers(rig, pb):
+    """[(frame, world position)] for the bone's keys inside its motion path (the tail's position)."""
+    mp = pb.motion_path
+    if mp is None or not len(mp.points):
+        return []
+    prefix = anim.bone_prefix(pb.name)
+    frames = set()
+    for fc in anim.fcurves(rig):
+        if fc.data_path.startswith(prefix):
+            frames.update(int(round(k.co[0])) for k in fc.keyframe_points)
+    out = []
+    for f in sorted(frames):
+        i = f - mp.frame_start
+        if 0 <= i < len(mp.points):
+            out.append((f, Vector(mp.points[i].co)))
+    return out
 
 
 def clear(context):
@@ -144,17 +189,17 @@ class KeyDrag:
 
 
 def draw(context, scale):
-    objs = targets(context)
-    if not objs:
+    paths = [(obj.motion_path, key_markers(obj)) for obj in targets(context)]
+    rig, bones = bone_targets(context)
+    paths += [(pb.motion_path, bone_markers(rig, pb)) for pb in bones]
+    paths = [(mp, markers) for mp, markers in paths if mp is not None and len(mp.points) >= 2]
+    if not paths:
         return
     shader = gpu.shader.from_builtin('UNIFORM_COLOR')
     gpu.state.blend_set('ALPHA')
     gpu.state.depth_test_set('NONE')
     current = context.scene.frame_current
-    for obj in objs:
-        mp = obj.motion_path
-        if mp is None or len(mp.points) < 2:
-            continue
+    for mp, markers in paths:
         pts = [Vector(p.co) for p in mp.points]
         batch = batch_for_shader(shader, 'LINE_STRIP', {"pos": pts})
         shader.uniform_float("color", LINE_COLOR)
@@ -176,7 +221,7 @@ def draw(context, scale):
             shader.uniform_float("color", LINE_COLOR)
             batch.draw(shader)
         # Key markers: small diamonds; the current frame in blue.
-        for frame, co in key_markers(obj):
+        for frame, co in markers:
             _diamond(shader, co, 0.006 * scale, CURRENT_COLOR if frame == current else KEY_COLOR)
         i = current - mp.frame_start
         if 0 <= i < len(pts):

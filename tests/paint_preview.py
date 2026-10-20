@@ -108,6 +108,8 @@ def run():
     from vr_sculpt import menus, native, paint, primitives
     try:
         vr_sculpt.register()
+        from vr_sculpt import operators
+        _gen["start"] = operators.data_generation
         ctx = bpy.context
         win = ctx.window_manager.windows[0]
         area, region = native.largest_view3d(win)
@@ -293,7 +295,14 @@ def shoot(win, area, region):
     done()
 
 
+_gen = {"start": None}
+
+
 def done():
+    from vr_sculpt import operators
+    if _gen["start"] is not None:
+        check(operators.data_generation == _gen["start"],
+              "painting's own undo pushes don't count as an undo (held strokes aren't dropped)")
     log("RESULT:", "ALL PASSED" if not failures else f"FAILED {failures}")
     with open(LOG, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")

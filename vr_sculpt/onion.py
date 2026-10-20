@@ -7,6 +7,9 @@ frame put back right after, cached as world-space triangles, and only recomputed
 current frame, the keys or the objects change. While the timeline plays they are hidden.
 
 The selection's meshes are ghosted; for a selected armature, the meshes it deforms.
+
+Changing frames re-applies the keys, which would throw away a pose (or a move) that isn't keyed
+yet, so the bones' and objects' own transforms are put back after the ghosts are computed.
 """
 
 import time
@@ -69,6 +72,30 @@ def _signature(context):
     return (context.scene.frame_current, tuple(o.name for o in objs), tuple(ghost_frames(context)))
 
 
+def _snapshot(context, objs):
+    """[(owner, matrix_basis)] of what a frame change could undo: the selected objects, the meshes
+    being ghosted, and every bone of the armatures that deform them."""
+    owners = {o for o in anim.selection(context)} | set(objs)
+    rigs = {o for o in owners if o.type == 'ARMATURE'}
+    for o in objs:
+        rigs.update(m.object for m in o.modifiers if m.type == 'ARMATURE' and m.object)
+    out = [(o, o.matrix_basis.copy()) for o in owners | rigs]
+    for rig in rigs:
+        out += [(pb, pb.matrix_basis.copy()) for pb in rig.pose.bones]
+    return out
+
+
+def _restore(context, snapshot):
+    restored = 0
+    for owner, basis in snapshot:
+        if owner.matrix_basis != basis:
+            owner.matrix_basis = basis
+            restored += 1
+    if restored:
+        context.view_layer.update()
+    return restored
+
+
 def _triangles(obj, depsgraph):
     ev = obj.evaluated_get(depsgraph)
     me = ev.to_mesh()
@@ -103,13 +130,17 @@ def update(context, force=False):
     sig = _signature(context)
     if not force and not _state["dirty"] and sig == _state["signature"]:
         return False
+    from . import puppet
+    if not force and puppet.live():
+        return False  # Bones are being posed live: catch up once that stops (the ghosts stay dirty).
     scene = context.scene
     current = scene.frame_current
     t0 = time.perf_counter()
     ghosts = []
     _state["computing"] = True
+    objs = meshes(context)
+    snapshot = _snapshot(context, objs)
     try:
-        objs = meshes(context)
         frames = ghost_frames(context)
         for rank, (frame, side) in enumerate(sorted(frames, key=lambda fs: abs(fs[0] - current))):
             scene.frame_set(frame)
@@ -123,6 +154,7 @@ def update(context, force=False):
     finally:
         if scene.frame_current != current:
             scene.frame_set(current)
+        _restore(context, snapshot)
         _state["computing"] = False
     _ghosts[:] = ghosts
     _watched.clear()

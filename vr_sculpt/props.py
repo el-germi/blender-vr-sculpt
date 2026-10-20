@@ -29,6 +29,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('MODEL', "Model", "Trigger creates primitives in empty space and grabs objects it touches"),
             ('DRAW', "Draw", "Trigger draws freehand 3D strokes"),
             ('PAINT', "Paint", "Trigger paints the active mesh's texture with Blender's texture paint brushes"),
+            ('POSE', "Pose", "Trigger poses the bones of the active armature (FK or IK); puppeteer bones with "
+                             "your hands and record takes"),
             ('TOOLS', "Tools", "Tape measure and scene camera, plus grid, desktop window and navigation options"),
         ),
         default='SCULPT',
@@ -61,6 +63,23 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         items=(('1024', "1K", "1024 x 1024"), ('2048', "2K", "2048 x 2048"), ('4096', "4K", "4096 x 4096")),
         default='2048',
     )
+    # Pose mode.
+    pose_tool: EnumProperty(
+        name="Pose Tool",
+        items=(
+            ('FK', "FK", "The grabbed bone turns about its head to follow the tip; twist the controller to roll it. "
+                         "A free bone grabbed near its head moves instead"),
+            ('IK', "IK", "The grabbed bone follows the controller and its parent bones bend to reach"),
+        ),
+        default='FK',
+    )
+    pose_chain: IntProperty(
+        name="IK Chain", description="Parent bones that bend to reach in IK (for a hand: forearm and upper arm = 2)",
+        default=2, min=1, max=8)
+    pose_mirror: BoolProperty(
+        name="Mirror Pose", description="Posing a .L/.R bone poses its counterpart the same way, mirrored across X")
+    pose_show_bones: BoolProperty(
+        name="Show Bones", description="Draw the posed rig's bones on top of everything in VR", default=True)
     # Tools mode.
     tool: EnumProperty(
         name="Tool",

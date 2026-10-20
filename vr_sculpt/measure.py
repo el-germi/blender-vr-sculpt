@@ -100,7 +100,6 @@ class Measure:
     """Trigger handler: press at one end, release at the other."""
 
     def __init__(self, context, settings, tip, scale):
-        self.settings = settings
         self.scale = scale
         self.snapper = _VertexSnap()
         self.a = snap_point(context, settings, tip, scale, self.snapper)
@@ -109,7 +108,12 @@ class Measure:
         active.append(self)
 
     def update(self, context, pose, tip_pose, value):
-        self.b = snap_point(context, self.settings, tip_pose.translation, self.scale, self.snapper)
+        # The settings are looked up every time: a reference kept from the press goes stale on undo.
+        self.b = snap_point(context, context.scene.vr_sculpt, tip_pose.translation, self.scale, self.snapper)
+
+    def abandon(self):
+        if self in active:
+            active.remove(self)
 
     def finish(self, context):
         if self in active:

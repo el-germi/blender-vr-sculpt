@@ -1,6 +1,6 @@
 import bpy
 
-from . import actions, catalog, measure, native, operators, paint, primitives
+from . import actions, catalog, measure, native, operators, paint, pose, primitives, puppet
 
 
 class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
@@ -19,10 +19,10 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
             layout.label(text="Enable the 'VR Scene Inspection' add-on", icon='ERROR')
 
         layout.prop(settings, "enabled")
-        row = layout.row(align=True)
+        row = layout.grid_flow(row_major=True, columns=3, even_columns=True, align=True)
         row.active = settings.enabled
         for mode, text in (('SCULPT', "Sculpt"), ('MODEL', "Model"), ('DRAW', "Draw"), ('PAINT', "Paint"),
-                           ('TOOLS', "Tools")):
+                           ('POSE', "Pose"), ('TOOLS', "Tools")):
             row.operator("vrsculpt.set_mode", text=text, depress=settings.mode == mode).mode = mode
         layout.prop(settings, "show_panel")
         col = layout.column()
@@ -66,6 +66,26 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
                 row.prop(owner, "secondary_color", text="")
                 if b is not None:
                     col.prop(b, "strength")
+            col.prop(settings, "tip_offset")
+            box = layout.box()
+            box.scale_y = 0.8
+            box.label(text=actions.last_status)
+            return
+        if settings.mode == 'POSE':
+            obj = pose.rig(context)
+            if obj is None:
+                col.label(text="No armature in Pose Mode: the trigger moves objects", icon='INFO')
+            else:
+                pb = pose.active_bone(obj)
+                col.label(text=f"{obj.name}: {pb.name if pb else 'no active bone'}", icon='ARMATURE_DATA')
+                col.prop(settings, "pose_tool", expand=True)
+                sub = col.column()
+                sub.active = settings.pose_tool == 'IK'
+                sub.prop(settings, "pose_chain")
+                col.prop(settings, "pose_mirror")
+                col.prop(settings, "pose_show_bones")
+            n = puppet.binding_count()
+            col.label(text=f"Puppet bindings: {n}" if n else "Puppet: bind bones on the hand panel")
             col.prop(settings, "tip_offset")
             box = layout.box()
             box.scale_y = 0.8

@@ -9,7 +9,8 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
 from . import (camera, desktop, drawing, grid, hud, interactions, measure, onion, operators, paint, paths,
-               primitives, strokes, symmetry, vr_ui)
+               primitives, puppet, strokes, symmetry, vr_ui)
+from . import pose as pose_mode  # "pose" is a controller pose below
 
 COLORS = {
     'DRAW': (1.0, 0.55, 0.2),
@@ -75,6 +76,9 @@ def draw_overlay(context, ss, xr=True):
     onion.draw(context)
     if settings.show_paths and xr:  # The desktop view draws Blender's own paths.
         paths.draw(context, scale)
+    if settings.mode == 'POSE' and settings.pose_show_bones:
+        pose_mode.draw(context, tips, scale)
+    puppet.draw(context, scale)
     if xr and settings.show_desktop:
         desktop.draw(context, ss, poses[1])
     if settings.show_cursor:
@@ -86,6 +90,7 @@ def _draw_cursors(context, ss, settings, xr):
     model = settings.mode == 'MODEL'
     sketch = settings.mode == 'DRAW'
     tools = settings.mode == 'TOOLS'
+    posing = settings.mode == 'POSE'
     painting = settings.mode == 'PAINT'
     if painting:
         _draw_paint_cursors(context, ss, settings)
@@ -93,7 +98,7 @@ def _draw_cursors(context, ss, settings, xr):
         radius = {'EDIT': drawing.EDIT_RADIUS, 'ERASE': drawing.ERASE_MARGIN}.get(
             settings.draw_tool, settings.draw_width / 2) * scale
     else:
-        radius = (interactions.TOUCH_MARGIN if model or tools else
+        radius = (pose_mode.REACH if posing else interactions.TOUCH_MARGIN if model or tools else
                   settings.paint_radius if painting else settings.radius) * scale
     offset = settings.tip_offset * scale
 
@@ -127,6 +132,8 @@ def _draw_cursors(context, ss, settings, xr):
                 _draw_bounds(shader, touched, (1.0, 0.85, 0.3, 0.9))
         elif tools:
             color = hud.CAMERA_COLOR if settings.tool == 'CAMERA' else measure.COLOR
+        elif posing:
+            color = hud.POSE_COLORS[settings.pose_tool]
         elif painting:
             color = paint.get_color(context, secondary=idx == 0)
         elif idx == 0 and settings.left_inverts and (native or settings.brush in {'DRAW', 'INFLATE'}):

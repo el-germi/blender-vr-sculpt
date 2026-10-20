@@ -113,7 +113,7 @@ class FakeContext:
 def harness():
     """An object with the operator's methods, without Blender's operator machinery."""
     cls = operators.VRSCULPT_OT_stroke
-    h = type("StrokeHarness", (), {k: cls.__dict__[k] for k in ("invoke", "modal", "_modal", "_apply", "_finish", "_start_modal")})()
+    h = type("StrokeHarness", (), {k: cls.__dict__[k] for k in ("invoke", "modal", "_modal", "_apply", "_finish", "_abandon", "_start_modal")})()
     h.report = lambda kind, msg: print("    report:", kind, msg)
     return h
 
@@ -208,4 +208,5 @@ def main():
     print("RESULT:", "FAILED " + str(failures) if failures else "ALL PASSED")
 
 
-main()
+if __name__ == "__main__":
+    main()

@@ -171,6 +171,12 @@ _edges_cache = {}
 _adjacency_cache = {}
 
 
+def forget_caches():
+    """Keyed by mesh pointers, which a new mesh can reuse after an undo."""
+    _edges_cache.clear()
+    _adjacency_cache.clear()
+
+
 def _topology_key(state):
     return (state.mesh.as_pointer(), len(state.co), state.num_edges)
 

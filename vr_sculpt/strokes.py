@@ -337,6 +337,10 @@ def save(obj, samples):
 _cache = {}
 
 
+def forget_caches():
+    _cache.clear()
+
+
 def load(obj):
     data = obj[PROP]
     key = obj.name

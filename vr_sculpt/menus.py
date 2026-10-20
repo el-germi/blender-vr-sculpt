@@ -4,7 +4,8 @@ import math
 
 import bpy
 
-from . import anim, camera, catalog, desktop, generic, measure, native, paint, primitives, strokes, symmetry, vr_ui
+from . import (anim, camera, catalog, desktop, generic, measure, native, paint, pose, primitives, puppet, strokes,
+               symmetry, vr_ui)
 from .props import BRUSH_ITEMS
 
 NATIVE_SHORT = {
@@ -22,11 +23,17 @@ def _desktop_view(context):
 
 
 def set_object_mode(context, obj, mode):
-    """Switch obj to 'OBJECT' or 'SCULPT' mode from any context (XR operators have no area)."""
-    if obj is None or obj.type != 'MESH' or obj.mode == mode:
+    """Switch a mesh to 'OBJECT' or 'SCULPT' mode, or an armature to 'OBJECT' or 'POSE' mode, from any
+    context (XR operators have no area)."""
+    if obj is None or obj.mode == mode:
+        return
+    if obj.type != 'MESH' and not (obj.type == 'ARMATURE' and mode in {'OBJECT', 'POSE'}):
         return
     window, view = _desktop_view(context)
     if view is None:
+        if bpy.app.background:  # Tests: no window, and none needed.
+            with context.temp_override(active_object=obj, object=obj):
+                bpy.ops.object.mode_set(mode=mode)
         return
     with context.temp_override(window=window, area=view[0], region=view[1], active_object=obj, object=obj):
         bpy.ops.object.mode_set(mode=mode)
@@ -34,12 +41,17 @@ def set_object_mode(context, obj, mode):
 
 def set_mode(context, mode):
     settings = context.scene.vr_sculpt
+    if settings.mode == 'POSE' and mode != 'POSE':
+        pose.leave(context)
     settings.mode = mode
     obj = context.view_layer.objects.active
     if mode in {'MODEL', 'DRAW', 'TOOLS'}:
         set_object_mode(context, obj, 'OBJECT')
     elif mode == 'PAINT':
         paint.enter(context)
+    elif mode == 'POSE':
+        if not anim.posing(obj):
+            pose.enter(context)
     elif settings.engine == 'NATIVE':
         set_object_mode(context, obj, 'SCULPT')
     else:
@@ -176,19 +188,19 @@ def _picker_rows():
 
 # --- rows ------------------------------------------------------------------
 
+MODE_TABS = (('SCULPT', "Sculpt"), ('MODEL', "Model"), ('DRAW', "Draw"), ('PAINT', "Paint"), ('POSE', "Pose"),
+             ('TOOLS', "Tools"))
+
+
 def rows(context):
     """Rows of widgets for the current mode (or the open picker)."""
     if _picker is not None:
         return _picker_rows()
     settings = context.scene.vr_sculpt
     mode = settings.mode
-    out = [[
-        vr_ui.button("mode_sculpt", "Sculpt", lambda: set_mode(context, 'SCULPT'), active=mode == 'SCULPT'),
-        vr_ui.button("mode_model", "Model", lambda: set_mode(context, 'MODEL'), active=mode == 'MODEL'),
-        vr_ui.button("mode_draw", "Draw", lambda: set_mode(context, 'DRAW'), active=mode == 'DRAW'),
-        vr_ui.button("mode_paint", "Paint", lambda: set_mode(context, 'PAINT'), active=mode == 'PAINT'),
-        vr_ui.button("mode_tools", "Tools", lambda: set_mode(context, 'TOOLS'), active=mode == 'TOOLS'),
-    ]]
+    tabs = [vr_ui.button("mode_" + ident.lower(), name, (lambda i=ident: set_mode(context, i)), active=mode == ident)
+            for ident, name in MODE_TABS]
+    out = [tabs[:3], tabs[3:]]
     if mode == 'SCULPT':
         out += _sculpt_rows(context, settings)
     elif mode == 'DRAW':
@@ -197,6 +209,8 @@ def rows(context):
         out += _tools_rows(context, settings)
     elif mode == 'PAINT':
         out += _paint_rows(context, settings)
+    elif mode == 'POSE':
+        out += _pose_rows(context, settings)
     else:
         out += _model_rows(context, settings)
     return out
@@ -551,6 +565,52 @@ def _paint_rows(context, settings):
         out.append([vr_ui.slider("paint_strength", "Strength", b.strength, 0.0, 1.0,
                                  lambda x: setattr(b, "strength", x), fmt=lambda x: f"{x:.2f}")])
     out.append([vr_ui.button("paint_undo", "Undo stroke", lambda: paint.undo_last(context), danger=True)])
+    return out
+
+
+def open_rig_picker(context):
+    current = pose.rig(context)
+    options = [Option(o.name, o.name) for o in pose.rigs(context)] + [Option("", "Objects (no rig)")]
+    open_picker("Pose", options, current.name if current else "", lambda name: pose.choose_rig(context, name))
+
+
+def _bind(context, source):
+    puppet.bind(context, context.window_manager.xr_session_state, source)
+
+
+def _pose_rows(context, settings):
+    obj = pose.rig(context)
+    out = [[vr_ui.select("pose_rig", "Rig", obj.name if obj else "Objects", lambda: open_rig_picker(context))]]
+    if obj is not None:
+        pb = pose.active_bone(obj)
+        out.append([vr_ui.label(f"Bone: {pb.name}" if pb is not None else "Touch a bone to pose it")])
+        out.append([
+            vr_ui.button("pose_fk", "FK", lambda: setattr(settings, "pose_tool", 'FK'),
+                         active=settings.pose_tool == 'FK'),
+            vr_ui.button("pose_ik", "IK", lambda: setattr(settings, "pose_tool", 'IK'),
+                         active=settings.pose_tool == 'IK'),
+            vr_ui.button("pose_mirror", "Mirror X", _toggle(settings, "pose_mirror"), active=settings.pose_mirror),
+            vr_ui.button("pose_bones", "Bones", _toggle(settings, "pose_show_bones"),
+                         active=settings.pose_show_bones),
+        ])
+        if settings.pose_tool == 'IK':
+            out.append([vr_ui.slider("pose_chain", "IK chain", settings.pose_chain, 1, 6,
+                                     lambda v: setattr(settings, "pose_chain", int(v)), integer=True)])
+        out.append([
+            vr_ui.button("pose_reset", "Reset bone", lambda: pose.reset_selected(context)),
+            vr_ui.button("pose_reset_all", "Reset pose", lambda: pose.reset_selected(context, True), danger=True),
+        ])
+    else:
+        out.append([vr_ui.label("Touch an object to move it")])
+    out.append([vr_ui.button("bind_" + ident.lower(), "Bind " + short, (lambda i=ident: _bind(context, i)))
+                for ident, short in (('LEFT', "L"), ('RIGHT', "R"), ('HEAD', "head"))])
+    n = puppet.binding_count()
+    recording = puppet.state() in {'RECORDING', 'ENDING'}
+    out.append([
+        vr_ui.button("unbind", f"Unbind ({n})", puppet.unbind_all, danger=True) if n else vr_ui.label("Puppet:"),
+        vr_ui.button("puppet_rec", puppet.status(), lambda: puppet.toggle_record(context),
+                     active=puppet.state() is not None, danger=recording),
+    ])
     return out
 
 

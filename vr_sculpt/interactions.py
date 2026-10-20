@@ -98,6 +98,10 @@ class UIPress:
         if x is not None:
             self._set(widget, x)
 
+    def abandon(self):
+        global pressed_id
+        pressed_id = None
+
     def finish(self, context):
         global pressed_id
         pressed_id = None

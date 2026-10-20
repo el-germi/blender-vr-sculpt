@@ -1,11 +1,11 @@
 """One app timer for the things that update while VR runs, outside of any operator:
-tracking objects, desktop window captures and camera preview redraws."""
+tracking objects, desktop window captures, camera preview redraws, puppet bindings and takes."""
 
 import time
 
 import bpy
 
-from . import camera, desktop, onion, operators, paths, tracking
+from . import camera, desktop, onion, operators, paths, puppet, tracking
 
 FAST = 1.0 / 90.0
 IDLE = 0.25
@@ -23,10 +23,14 @@ def _tick():
             return IDLE
         desktop.tick(context)
         if not operators.session_running(context):
+            if puppet.active():
+                puppet.end_session(context)
             return IDLE
         ss = context.window_manager.xr_session_state
         if settings.tracking:
             tracking.update(context, ss)
+        if puppet.active():
+            puppet.tick(context, ss)
         paths.ensure(context)
         onion.update(context)
         if camera.wanted(context):
@@ -38,7 +42,7 @@ def _tick():
                 if region is not None:
                     region.tag_redraw()
         busy = (settings.tracking or camera.wanted(context) or desktop.interactive(context)
-                or settings.onion or settings.show_paths)
+                or settings.onion or settings.show_paths or puppet.active())
         return FAST if busy else IDLE
     except Exception:
         if not _errors:
