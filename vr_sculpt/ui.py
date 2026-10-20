@@ -21,11 +21,28 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
         layout.prop(settings, "enabled")
         row = layout.row(align=True)
         row.active = settings.enabled
-        for mode, text in (('SCULPT', "Sculpt"), ('MODEL', "Model")):
+        for mode, text in (('SCULPT', "Sculpt"), ('MODEL', "Model"), ('DRAW', "Draw")):
             row.operator("vrsculpt.set_mode", text=text, depress=settings.mode == mode).mode = mode
         layout.prop(settings, "show_panel")
         col = layout.column()
         col.active = settings.enabled
+        if settings.mode == 'DRAW':
+            col.prop(settings, "draw_tool")
+            col.prop(settings, "draw_style")
+            col.prop(settings, "draw_color")
+            col.prop(settings, "draw_width")
+            col.prop(settings, "draw_smoothing")
+            col.prop(settings, "draw_pressure")
+            row = col.row(align=True, heading="Mirror")
+            row.prop(settings, "mirror_x", text="X", toggle=True)
+            row.prop(settings, "mirror_y", text="Y", toggle=True)
+            row.prop(settings, "mirror_z", text="Z", toggle=True)
+            col.prop(settings, "tip_offset")
+            col.operator("vrsculpt.undo_stroke", icon='LOOP_BACK')
+            box = layout.box()
+            box.scale_y = 0.8
+            box.label(text=actions.last_status)
+            return
         if settings.mode == 'MODEL':
             row = col.row(align=True)
             row.label(text="Add: " + primitives.label(settings.primitive))

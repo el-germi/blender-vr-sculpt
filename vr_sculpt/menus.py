@@ -4,7 +4,7 @@ import math
 
 import bpy
 
-from . import catalog, generic, native, primitives, vr_ui
+from . import catalog, generic, native, primitives, strokes, vr_ui
 from .props import BRUSH_ITEMS
 
 NATIVE_SHORT = {
@@ -36,7 +36,7 @@ def set_mode(context, mode):
     settings = context.scene.vr_sculpt
     settings.mode = mode
     obj = context.view_layer.objects.active
-    if mode == 'MODEL':
+    if mode in {'MODEL', 'DRAW'}:
         set_object_mode(context, obj, 'OBJECT')
     elif settings.engine == 'NATIVE':
         set_object_mode(context, obj, 'SCULPT')
@@ -181,12 +181,68 @@ def rows(context):
     out = [[
         vr_ui.button("mode_sculpt", "Sculpt", lambda: set_mode(context, 'SCULPT'), active=mode == 'SCULPT'),
         vr_ui.button("mode_model", "Model", lambda: set_mode(context, 'MODEL'), active=mode == 'MODEL'),
+        vr_ui.button("mode_draw", "Draw", lambda: set_mode(context, 'DRAW'), active=mode == 'DRAW'),
     ]]
     if mode == 'SCULPT':
         out += _sculpt_rows(context, settings)
+    elif mode == 'DRAW':
+        out += _draw_rows(context, settings)
     else:
         out += _model_rows(context, settings)
     return out
+
+
+def _cursor_to_left_hand(context):
+    """Put the 3D cursor (the mirror center) at the left controller's tip."""
+    ss = context.window_manager.xr_session_state
+    if ss is None:
+        return
+    from . import operators
+    pose = operators.controller_pose(ss.controller_aim_location_get(context, 0),
+                                     ss.controller_aim_rotation_get(context, 0))
+    tip = operators.brush_tip(pose, context.scene.vr_sculpt.tip_offset * ss.viewer_scale)
+    context.scene.cursor.location = tip
+
+
+def _draw_rows(context, settings):
+    def choice(prefix, prop, items):
+        return [vr_ui.button(f"{prefix}_{ident}", name, (lambda i=ident: setattr(settings, prop, i)),
+                             active=getattr(settings, prop) == ident) for ident, name in items]
+
+    out = [
+        choice("tool", "draw_tool", (('DRAW', "Draw"), ('EDIT', "Edit"), ('ERASE', "Erase"))),
+        choice("style", "draw_style", (('TUBE', "Tube"), ('RIBBON', "Ribbon"), ('NOTE', "Note"))),
+    ]
+    swatches = [vr_ui.button("color_" + ident, "", (lambda i=ident: setattr(settings, "draw_color", i)),
+                             active=settings.draw_color == ident, swatch=rgb)
+                for ident, _name, rgb in strokes.PALETTE]
+    out += [swatches[:4], swatches[4:]]
+    out.append([vr_ui.slider("draw_width", "Width", settings.draw_width, 0.001, 0.05,
+                             lambda v: setattr(settings, "draw_width", v), fmt=_meters)])
+    out.append([vr_ui.slider("draw_smoothing", "Smoothing", settings.draw_smoothing, 0.0, 0.95,
+                             lambda v: setattr(settings, "draw_smoothing", v), fmt=lambda v: f"{v:.2f}")])
+    out.append([
+        vr_ui.label("Mirror:"),
+        vr_ui.button("mirror_x", "X", lambda: setattr(settings, "mirror_x", not settings.mirror_x),
+                     active=settings.mirror_x),
+        vr_ui.button("mirror_y", "Y", lambda: setattr(settings, "mirror_y", not settings.mirror_y),
+                     active=settings.mirror_y),
+        vr_ui.button("mirror_z", "Z", lambda: setattr(settings, "mirror_z", not settings.mirror_z),
+                     active=settings.mirror_z),
+        vr_ui.button("mirror_here", "Here", lambda: _cursor_to_left_hand(context)),
+    ])
+    out.append([
+        vr_ui.button("draw_pressure", f"Pressure: {'On' if settings.draw_pressure else 'Off'}",
+                     lambda: setattr(settings, "draw_pressure", not settings.draw_pressure),
+                     active=settings.draw_pressure),
+        vr_ui.button("undo_stroke", "Undo stroke", lambda: _undo_stroke(context), danger=True),
+    ])
+    return out
+
+
+def _undo_stroke(context):
+    from . import operators
+    operators.undo_last_stroke(context)
 
 
 def _sculpt_rows(context, settings):

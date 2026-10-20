@@ -31,7 +31,14 @@ Meta Quest over OpenXR.
   up too: with Extra Mesh Objects that's 42 entries (gears, pipe joints,
   gemstones, torus knots, rocks, ...). Their settings panels are built from
   the operators' own properties.
-- **Hand panel** above the left controller: Sculpt / Model tabs, engine and
+- **Draw mode**: freehand 3D strokes that become real meshes, like Gravity
+  Sketch. Tube (round, trigger pressure sets the thickness) and Ribbon (flat,
+  follows your wrist's roll) strokes, plus Note strokes that are Blender
+  annotations. Edit pulls part of a stroke into a new shape; Erase sweeps
+  strokes and notes away. Mirror on X / Y / Z around the 3D cursor (editing
+  one side updates the other), a stabilizer, 8 colors, and B to undo the last
+  stroke.
+- **Hand panel** above the left controller: Sculpt / Model / Draw tabs, engine and
   brush buttons, radius and strength sliders, primitive settings, Duplicate
   and Delete. Point at it with the right controller and pull the trigger.
 
@@ -39,16 +46,16 @@ Meta Quest over OpenXR.
 
 ## Controls
 
-| Input | Sculpt mode | Model mode |
-|---|---|---|
-| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab |
-| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right |
-| Right trigger, pointing at the hand panel | Press buttons, drag sliders | Same |
-| Y (left) | Switch to Model mode | Switch to Sculpt mode |
-| B (right) | Next brush | Next primitive in the Add list |
-| Left stick click | Show / hide the hand panel | Same |
-| Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same |
-| Grip, thumbsticks, A / X | Blender's stock VR navigation (unchanged) | Same |
+| Input | Sculpt mode | Model mode | Draw mode |
+|---|---|---|---|
+| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab | Draw / Edit / Erase |
+| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right |
+| Right trigger, pointing at the hand panel | Press buttons, drag sliders | Same | Same |
+| Y (left) | Next mode (Sculpt, Model, Draw) | Same | Same |
+| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke |
+| Left stick click | Show / hide the hand panel | Same | Same |
+| Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same |
+| Grip, thumbsticks, A / X | Blender's stock VR navigation (unchanged) | Same | Same |
 
 Trigger teleport is replaced while "Sculpt With Triggers" is on. The setting
 applies when the VR session starts.
@@ -98,6 +105,15 @@ offset and display options.
   a handler per press: hand panel, grab, or create. Primitive settings are a
   property group on the object whose update callbacks rebuild the mesh with
   bmesh.
+- **Draw mode** ([strokes.py](vr_sculpt/strokes.py), [drawing.py](vr_sculpt/drawing.py)):
+  each stroke object keeps its raw samples (position, width, the
+  controller's side vector) as an ID property in object space. The mesh is
+  rebuilt from them with numpy (Catmull-Rom smoothing, tube rings or ribbon
+  strips, mirrored copies) and written with `foreach_set`, so edits and
+  mirroring stay live. Long strokes rebuild a lighter preview while the
+  trigger is held (under 8 ms per frame for a 1200-sample mirrored tube) and
+  the full mesh on release. Notes are 3D annotation strokes, one layer per
+  color.
 - **Hand panel** ([vr_ui.py](vr_sculpt/vr_ui.py), [menus.py](vr_sculpt/menus.py)):
   rows of buttons, sliders and selects on a card that faces the headset; the
   right controller's aim ray is intersected with the card's plane. A select
@@ -173,6 +189,10 @@ blender --background --factory-startup --python tests/test_model.py
 blender --background --factory-startup --python tests/test_generic.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_draw.py
+```
+
 `test_generic.py` enables Extra Mesh Objects for its own run (factory
 settings, so your preferences aren't touched) and checks all 42 entries.
 
@@ -191,6 +211,9 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   versions) size non-uniformly to the drag box; other primitives keep their
   proportions.
 - Geometry-node asset primitives in Add > Mesh aren't listed yet.
+- Hand tracking isn't possible from an add-on: Blender's VR layer doesn't
+  enable OpenXR's hand tracking or hand interaction extensions, so drawing
+  uses controllers.
 - Blender plans to move VR out of the add-on list into core (issue #161834),
   which may change how action maps are set up.
 

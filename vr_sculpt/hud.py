@@ -35,6 +35,14 @@ NATIVE_COLORS = {
 
 MODEL_COLOR = (0.55, 0.9, 0.85)
 
+DRAW_INFO = {
+    'TUBE': ("Draw Tube", "Squeeze harder for thicker. B undoes the last stroke"),
+    'RIBBON': ("Draw Ribbon", "Roll your wrist to twist the band. B undoes the last stroke"),
+    'NOTE': ("Draw Note", "Annotation line, not geometry. B undoes the last note"),
+    'EDIT': ("Edit Strokes", "Grab part of a stroke and pull it into shape"),
+    'ERASE': ("Erase", "Sweep through strokes and notes to erase them"),
+}
+
 PYTHON_INFO = {
     'DRAW': ("Draw", "Pushes the surface out. Left hand: pushes in"),
     'SMOOTH': ("Smooth", "Relaxes bumps and evens out the surface"),
@@ -87,7 +95,16 @@ def brush_texture(brush):
 
 def card_content(settings, sculpt_brush, colors):
     """(title, description, color, texture) for the current brush."""
-    if settings.mode == 'MODEL':
+    if settings.mode == 'DRAW':
+        from . import strokes
+        tool, style = settings.draw_tool, settings.draw_style
+        if tool == 'DRAW':
+            title, desc = DRAW_INFO[style]
+        else:
+            title, desc = DRAW_INFO[tool]
+        color = strokes.COLORS.get(settings.draw_color, (1.0, 1.0, 1.0)) if tool == 'DRAW' else MODEL_COLOR
+        content = (title, desc, color, None)
+    elif settings.mode == 'MODEL':
         from . import primitives
         title = "Add " + primitives.label(settings.primitive)
         content = (title, "Drag in empty space to create. Touch an object to grab it",

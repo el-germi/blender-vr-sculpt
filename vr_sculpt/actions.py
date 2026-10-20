@@ -73,7 +73,7 @@ def _patch(session_state):
             items.remove(src)
     if missing:
         return "Patched, but stock actions missing: " + ", ".join(missing)
-    return "Trigger = sculpt/model, Y = mode, B = next brush, sticks: L = panel, R = radius"
+    return "Trigger = sculpt/model/draw, Y = mode, B = next brush / undo stroke, sticks: L = panel, R = radius"
 
 
 @persistent
@@ -88,6 +88,8 @@ def on_xr_session_start_pre(_context):
         return
     # Our cursor is drawn by an add-on draw handler, which the headset only shows with this on.
     context.window_manager.xr_session_settings.show_custom_overlays = True
+    # Draw mode's Note strokes are annotations.
+    context.window_manager.xr_session_settings.show_annotation = True
     # Pick up primitives from extensions enabled since the last session.
     from . import catalog
     try:
