@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, PointerProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, PointerProperty, StringProperty
 
 BRUSH_ITEMS = (
     ('DRAW', "Draw", "Push the surface out along its normal (left hand pushes in)"),
@@ -20,6 +20,20 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         ),
         default=True,
     )
+    mode: EnumProperty(
+        name="Mode",
+        items=(
+            ('SCULPT', "Sculpt", "Trigger sculpts the active mesh"),
+            ('MODEL', "Model", "Trigger creates primitives in empty space and grabs objects it touches"),
+        ),
+        default='SCULPT',
+    )
+    primitive: StringProperty(
+        name="Add",
+        default="mesh.primitive_cube_add",
+        description="Add > Mesh entry the trigger creates in Model mode (see catalog.py)",
+    )
+    show_panel: BoolProperty(name="Show Hand Panel", description="Menu panel above the left controller", default=True)
     engine: EnumProperty(
         name="Engine",
         items=(

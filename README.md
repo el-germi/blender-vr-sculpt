@@ -1,6 +1,6 @@
 # VR Sculpt for Blender (prototype)
 
-Sculpt meshes with VR controllers inside Blender's own VR session. Pure Python
+Sculpt and model with VR controllers inside Blender's own VR session. Pure Python
 extension, no Blender fork. Built and tested on **Blender 5.4.0 Alpha** with a
 Meta Quest over OpenXR.
 
@@ -23,18 +23,32 @@ Meta Quest over OpenXR.
   one-line description for a few seconds after switching.
 - **Haptics** on contact with the surface.
 - One undo step per stroke (Python engine).
+- **Model mode**: drag out any Add > Mesh primitive in empty space, grab
+  objects to move and rotate them, and edit the primitive's settings
+  afterwards. Primitives stay editable until you sculpt them.
+- **Every Add > Mesh entry, including extensions.** The list is read from
+  Blender's own Add > Mesh menu, so primitives that extensions add there show
+  up too: with Extra Mesh Objects that's 42 entries (gears, pipe joints,
+  gemstones, torus knots, rocks, ...). Their settings panels are built from
+  the operators' own properties.
+- **Hand panel** above the left controller: Sculpt / Model tabs, engine and
+  brush buttons, radius and strength sliders, primitive settings, Duplicate
+  and Delete. Point at it with the right controller and pull the trigger.
 
 ![Brush cards](docs/brush_cards.png)
 
 ## Controls
 
-| Input | Action |
-|---|---|
-| Right trigger | Sculpt |
-| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) |
-| B / Y | Next brush |
-| Thumbstick click | Next radius (1, 2, 4, 8, 16 cm) |
-| Grip, thumbsticks, A / X | Blender's stock VR navigation (unchanged) |
+| Input | Sculpt mode | Model mode |
+|---|---|---|
+| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab |
+| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right |
+| Right trigger, pointing at the hand panel | Press buttons, drag sliders | Same |
+| Y (left) | Switch to Model mode | Switch to Sculpt mode |
+| B (right) | Next brush | Next primitive in the Add list |
+| Left stick click | Show / hide the hand panel | Same |
+| Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same |
+| Grip, thumbsticks, A / X | Blender's stock VR navigation (unchanged) | Same |
 
 Trigger teleport is replaced while "Sculpt With Triggers" is on. The setting
 applies when the VR session starts.
@@ -79,6 +93,25 @@ offset and display options.
 - **Native engine** ([native.py](vr_sculpt/native.py)): calls
   `bpy.ops.sculpt.brush_stroke` once per dab with a stroke element at the
   controller tip.
+- **Model mode** ([interactions.py](vr_sculpt/interactions.py),
+  [primitives.py](vr_sculpt/primitives.py)): the same trigger operator picks
+  a handler per press: hand panel, grab, or create. Primitive settings are a
+  property group on the object whose update callbacks rebuild the mesh with
+  bmesh.
+- **Hand panel** ([vr_ui.py](vr_sculpt/vr_ui.py), [menus.py](vr_sculpt/menus.py)):
+  rows of buttons, sliders and selects on a card that faces the headset; the
+  right controller's aim ray is intersected with the card's plane. A select
+  opens a picker page (categories first, then a paged grid).
+- **Primitive catalog** ([catalog.py](vr_sculpt/catalog.py)): runs the Add >
+  Mesh menu's draw functions (including ones extensions appended) against a
+  recording layout, collecting each `layout.operator(...)` with its preset
+  properties and following `layout.menu(...)` into submenus.
+- **Operator primitives** ([generic.py](vr_sculpt/generic.py)): the object
+  stores its menu entry and the settings changed in VR; a change re-runs the
+  operator and swaps the new mesh in. Drag-to-create scales length settings,
+  then corrects with a uniform object scale so the shape fills the box
+  exactly. Generators slower than 40 ms (e.g. Wall Factory) regenerate on
+  slider release instead of every frame.
 - **Drawing in the headset** ([draw.py](vr_sculpt/draw.py),
   [hud.py](vr_sculpt/hud.py)): `SpaceView3D` draw handlers on region type
   `'XR'` (headset) and `'WINDOW'` (desktop). The session's
@@ -132,9 +165,21 @@ blender --background --factory-startup --python tests/test_brushes.py
 blender --background --factory-startup --python tests/test_modal.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_model.py
+```
+
+```bash
+blender --background --factory-startup --python tests/test_generic.py
+```
+
+`test_generic.py` enables Extra Mesh Objects for its own run (factory
+settings, so your preferences aren't touched) and checks all 42 entries.
+
 Windowed (opens Blender briefly, writes `tests/*_result.txt`):
 `native_engine.py`, `native_modal.py`, `native_transform.py`. The
-`overlay_preview.py` and `hud_preview.py` scripts render the overlay to PNG.
+`overlay_preview.py`, `panel_preview.py` and `hud_preview.py` scripts render
+the overlay to PNG.
 Run the overlay one with `test_scene.blend` loaded; create that file with
 `tests/make_test_scene.py`.
 
@@ -142,7 +187,10 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
 
 - Prototype. Only tested on Blender 5.4.0 Alpha with Meta Quest controllers.
 - The native engine's undo granularity in VR hasn't been checked.
-- Brush and radius cycling is button-only; there's no in-VR menu yet.
+- Creation is aligned to the world axes. Only Cube and Cylinder (our own
+  versions) size non-uniformly to the drag box; other primitives keep their
+  proportions.
+- Geometry-node asset primitives in Add > Mesh aren't listed yet.
 - Blender plans to move VR out of the add-on list into core (issue #161834),
   which may change how action maps are set up.
 

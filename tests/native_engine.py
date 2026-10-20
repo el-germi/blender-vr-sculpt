@@ -1,4 +1,4 @@
-﻿"""Windowed test of vr_sculpt.native without a headset.
+"""Windowed test of vr_sculpt.native without a headset.
 
 blender --factory-startup --python tests/native_engine.py
 """

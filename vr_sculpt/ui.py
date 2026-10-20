@@ -1,6 +1,6 @@
 import bpy
 
-from . import actions, native, operators
+from . import actions, catalog, native, operators, primitives
 
 
 class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
@@ -19,8 +19,23 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
             layout.label(text="Enable the 'VR Scene Inspection' add-on", icon='ERROR')
 
         layout.prop(settings, "enabled")
+        row = layout.row(align=True)
+        row.active = settings.enabled
+        for mode, text in (('SCULPT', "Sculpt"), ('MODEL', "Model")):
+            row.operator("vrsculpt.set_mode", text=text, depress=settings.mode == mode).mode = mode
+        layout.prop(settings, "show_panel")
         col = layout.column()
         col.active = settings.enabled
+        if settings.mode == 'MODEL':
+            row = col.row(align=True)
+            row.label(text="Add: " + primitives.label(settings.primitive))
+            row.operator("vrsculpt.choose_primitive", text="Choose", icon='VIEWZOOM')
+            col.prop(settings, "tip_offset")
+            col.prop(settings, "show_cursor")
+            box = layout.box()
+            box.scale_y = 0.8
+            box.label(text=actions.last_status)
+            return
         col.prop(settings, "engine")
         is_native = settings.engine == 'NATIVE'
         if is_native:
@@ -56,9 +71,69 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
             box.label(text=f"avg {s['avg_ms']:.1f} ms, max {s['max_ms']:.1f} ms (mesh update {s['write_ms']:.1f} ms)")
 
 
+class VIEW3D_PT_vr_primitive(bpy.types.Panel):
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "VR"
+    bl_label = "VR Primitive"
+
+    @classmethod
+    def poll(cls, context):
+        return primitives.is_editable(context.active_object)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        prim = context.active_object.vr_prim
+        if prim.kind == 'OPERATOR':
+            layout.label(text=primitives.label(prim.op_key))
+            layout.label(text="Edit its settings from the VR hand panel", icon='INFO')
+            return
+        layout.label(text=prim.bl_rna.properties["kind"].enum_items[prim.kind].name)
+        if prim.kind == 'CUBE':
+            layout.prop(prim, "size")
+            layout.prop(prim, "subdivisions")
+        else:
+            layout.prop(prim, "radius")
+            layout.prop(prim, "height")
+            layout.prop(prim, "segments")
+
+
+_choice_items = []  # Blender needs the enum strings kept alive.
+
+
+def _primitive_items(self, context):
+    _choice_items[:] = [(e.key, f"{e.category} / {e.label}" if e.category else e.label, e.idname)
+                        for e in catalog.entries(refresh=True)]
+    return _choice_items
+
+
+class VRSCULPT_OT_choose_primitive(bpy.types.Operator):
+    """Choose what the trigger creates in Model mode (every Add > Mesh entry, including extensions)"""
+    bl_idname = "vrsculpt.choose_primitive"
+    bl_label = "Choose VR Primitive"
+    bl_property = "entry"
+
+    entry: bpy.props.EnumProperty(name="Primitive", items=_primitive_items)
+
+    def execute(self, context):
+        context.scene.vr_sculpt.primitive = self.entry
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        context.window_manager.invoke_search_popup(self)
+        return {'RUNNING_MODAL'}
+
+
+classes = (VIEW3D_PT_vr_sculpt, VIEW3D_PT_vr_primitive, VRSCULPT_OT_choose_primitive)
+
+
 def register():
-    bpy.utils.register_class(VIEW3D_PT_vr_sculpt)
+    for cls in classes:
+        bpy.utils.register_class(cls)
 
 
 def unregister():
-    bpy.utils.unregister_class(VIEW3D_PT_vr_sculpt)
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)
