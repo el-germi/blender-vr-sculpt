@@ -4,7 +4,8 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty
 from mathutils import Matrix, Quaternion, Vector
 
-from . import actions, brushes, catalog, drawing, interactions, menus, native, primitives, strokes, vr_ui
+from . import (actions, brushes, camera, catalog, desktop, drawing, interactions, measure, menus, native,
+               primitives, strokes, symmetry, vr_ui)
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
 # Shared geometry cache, so both hands sculpt the same arrays.
@@ -84,6 +85,13 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         return interactions.CreatePrimitive(context, settings.primitive, tip_pose.translation, scale)
     if settings.mode == 'DRAW':
         return drawing.pick(context, settings, tip_pose, value, scale)
+    if settings.mode == 'TOOLS':
+        if settings.show_desktop and hand == actions.HANDS[1] and ss is not None:
+            if desktop.ray_hit(context, ss, pose.translation, interactions.aim_direction(pose)) is not None:
+                return desktop.MoveScreen(context, ss, pose)
+        if settings.tool == 'CAMERA':
+            return camera.AimCamera(context, pose)
+        return measure.Measure(context, settings, tip_pose.translation, scale)
     return None
 
 
@@ -145,7 +153,7 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
             invert = settings.left_inverts and left and settings.brush in {'DRAW', 'INFLATE'}
             self.stroke = brushes.Stroke(
                 get_state(obj), settings.brush, settings.radius * scale, settings.strength,
-                invert=invert, symmetry_x=settings.symmetry_x, grab_rotate=settings.grab_rotate,
+                invert=invert, symmetry=symmetry.sculpt_bits(settings), grab_rotate=settings.grab_rotate,
             )
         self.times = []
         self.write_ms = []
@@ -265,7 +273,7 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         return {'FINISHED'} if self.times else {'CANCELLED'}
 
 
-MODE_CYCLE = ('SCULPT', 'MODEL', 'DRAW')
+MODE_CYCLE = ('SCULPT', 'MODEL', 'DRAW', 'TOOLS')
 
 
 def undo_last_stroke(context):
@@ -280,8 +288,8 @@ def undo_last_stroke(context):
 
 
 class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
-    """Right hand (B): next brush (Sculpt), next primitive (Model), undo last stroke (Draw).
-    Left hand (Y): next mode (Sculpt, Model, Draw)"""
+    """Right hand (B): next brush (Sculpt), next primitive (Model), undo last stroke (Draw),
+    remove the last measurement or switch camera (Tools). Left hand (Y): next mode"""
     bl_idname = "vrsculpt.cycle_brush"
     bl_label = "VR Next Brush / Switch Mode"
     bl_options = {'INTERNAL'}
@@ -295,6 +303,11 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
             menus.set_mode(context, MODE_CYCLE[(i + 1) % len(MODE_CYCLE)])
         elif settings.mode == 'DRAW':
             undo_last_stroke(context)
+        elif settings.mode == 'TOOLS':
+            if settings.tool == 'CAMERA':
+                camera.next_camera(context)
+            else:
+                measure.undo_last(context.scene)
         elif settings.mode == 'MODEL':
             keys = [e.key for e in catalog.entries()]
             if keys:
@@ -358,13 +371,24 @@ class VRSCULPT_OT_undo_stroke(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class VRSCULPT_OT_clear_measures(bpy.types.Operator):
+    """Remove all tape measurements made in VR"""
+    bl_idname = "vrsculpt.clear_measures"
+    bl_label = "Clear VR Measurements"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        return {'FINISHED'} if measure.clear(context.scene) else {'CANCELLED'}
+
+
 class VRSCULPT_OT_set_mode(bpy.types.Operator):
-    """Switch the VR tools between Sculpt and Model mode"""
+    """Switch the VR tools between Sculpt, Model, Draw and Tools mode"""
     bl_idname = "vrsculpt.set_mode"
     bl_label = "Set VR Mode"
     bl_options = {'INTERNAL'}
 
-    mode: EnumProperty(items=(('SCULPT', "Sculpt", ""), ('MODEL', "Model", ""), ('DRAW', "Draw", "")))
+    mode: EnumProperty(items=(('SCULPT', "Sculpt", ""), ('MODEL', "Model", ""), ('DRAW', "Draw", ""),
+                              ('TOOLS', "Tools", "")))
 
     def execute(self, context):
         menus.set_mode(context, self.mode)
@@ -372,7 +396,7 @@ class VRSCULPT_OT_set_mode(bpy.types.Operator):
 
 
 classes = (VRSCULPT_OT_stroke, VRSCULPT_OT_cycle_brush, VRSCULPT_OT_cycle_radius, VRSCULPT_OT_undo_stroke,
-           VRSCULPT_OT_set_mode)
+           VRSCULPT_OT_clear_measures, VRSCULPT_OT_set_mode)
 
 
 def register():

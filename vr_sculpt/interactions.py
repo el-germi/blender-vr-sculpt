@@ -6,7 +6,7 @@ held and finish(context) on release; `changed` decides whether an undo step is p
 
 from mathutils import Vector
 
-from . import generic, menus, primitives, vr_ui
+from . import generic, grid, menus, primitives, vr_ui
 
 # Widget the right trigger is holding down, for drawing.
 pressed_id = None
@@ -93,6 +93,7 @@ class MoveObject:
 
     def update(self, context, pose, tip_pose, value):
         new = tip_pose @ self.pose_inv @ self.start
+        new.translation = grid.snap_if(context.scene.vr_sculpt, new.translation)
         if new != self.obj.matrix_world:
             self.obj.matrix_world = new
             self.changed = True
@@ -105,14 +106,15 @@ class CreatePrimitive:
     """Drag out a box from the press point; the primitive fills it. A click makes a default size."""
 
     def __init__(self, context, key, tip, scale):
-        self.start = Vector(tip)
+        self.start = grid.snap_if(context.scene.vr_sculpt, tip)
         self.scale = scale
         self.obj = primitives.create_from_entry(context, key, self.start)
         self._fit(context, self.start)
         self.changed = True
 
     def _fit(self, context, tip):
-        if (Vector(tip) - self.start).length < CLICK_DISTANCE * self.scale:
+        tip = grid.snap_if(context.scene.vr_sculpt, tip)
+        if (tip - self.start).length < CLICK_DISTANCE * self.scale:
             half = Vector((primitives.DEFAULT_SIZE * self.scale / 2,) * 3)
             a, b = self.start - half, self.start + half
         else:

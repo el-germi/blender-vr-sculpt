@@ -1,4 +1,5 @@
-"""Brush cursor: three rings at each controller tip, in the headset and the desktop view."""
+"""VR overlay: brush rings at the controller tips, brush card, hand panel, grid, measurements,
+plus (headset only) the desktop window screen and camera previews."""
 
 import math
 
@@ -7,7 +8,8 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-from . import drawing, hud, interactions, operators, primitives, strokes, vr_ui
+from . import (camera, desktop, drawing, grid, hud, interactions, measure, operators, primitives, strokes,
+               symmetry, vr_ui)
 
 COLORS = {
     'DRAW': (1.0, 0.55, 0.2),
@@ -37,12 +39,12 @@ def _unit_rings():
 _RINGS = _unit_rings()
 
 
-def _draw():
+def _draw(xr):
     context = bpy.context
     if not operators.session_running(context):
         return
     try:
-        draw_overlay(context, context.window_manager.xr_session_state)
+        draw_overlay(context, context.window_manager.xr_session_state, xr)
     except Exception as ex:
         # A failing draw handler runs every frame; report once, not 90 times a second.
         if not _errors:
@@ -54,19 +56,43 @@ def _draw():
 _errors = []
 
 
-def draw_overlay(context, ss):
-    """Brush rings at both controller tips, plus the brush card. ss: the XR session state."""
+def draw_overlay(context, ss, xr=True):
+    """Everything the add-on draws in VR. ss: the XR session state; xr: drawing the headset view
+    (the desktop view skips the desktop screen and camera previews)."""
     settings = getattr(context.scene, "vr_sculpt", None)
-    if settings is None or not settings.enabled or not settings.show_cursor:
+    if settings is None or not settings.enabled:
         return
+    scale = ss.viewer_scale
+    poses = [operators.controller_pose(ss.controller_aim_location_get(context, i),
+                                       ss.controller_aim_rotation_get(context, i)) for i in range(2)]
+    tips = [operators.brush_tip(p, settings.tip_offset * scale) for p in poses]
+    if settings.grid_show:
+        gpu.state.blend_set('ALPHA')
+        gpu.state.depth_test_set('NONE')
+        grid.draw(settings, tips, scale)
+        gpu.state.blend_set('NONE')
+    measure.draw(context, ss, scale)
+    screen_hit = None
+    if xr and settings.show_desktop:
+        if settings.mode == 'TOOLS' and settings.enabled:
+            screen_hit = desktop.ray_hit(context, ss, poses[1].translation, interactions.aim_direction(poses[1]))
+        desktop.draw(context, ss, screen_hit)
+    if settings.show_cursor:
+        _draw_cursors(context, ss, settings, xr)
+    if screen_hit is not None:
+        vr_ui.draw_ray(poses[1].translation, desktop.world_matrix(context, ss) @ Vector((*screen_hit, 0.0)), True)
+
+
+def _draw_cursors(context, ss, settings, xr):
     scale = ss.viewer_scale
     model = settings.mode == 'MODEL'
     sketch = settings.mode == 'DRAW'
+    tools = settings.mode == 'TOOLS'
     if sketch:
         radius = {'EDIT': drawing.EDIT_RADIUS, 'ERASE': drawing.ERASE_MARGIN}.get(
             settings.draw_tool, settings.draw_width / 2) * scale
     else:
-        radius = (interactions.TOUCH_MARGIN if model else settings.radius) * scale
+        radius = (interactions.TOUCH_MARGIN if model or tools else settings.radius) * scale
     offset = settings.tip_offset * scale
 
     native = settings.engine == 'NATIVE'
@@ -97,6 +123,8 @@ def draw_overlay(context, ss):
             touched = primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale)
             if touched is not None:
                 _draw_bounds(shader, touched, (1.0, 0.85, 0.3, 0.9))
+        elif tools:
+            color = hud.CAMERA_COLOR if settings.tool == 'CAMERA' else measure.COLOR
         elif idx == 0 and settings.left_inverts and (native or settings.brush in {'DRAW', 'INFLATE'}):
             color = INVERT_COLOR
         alpha = 1.0 if idx in operators.active_hands else 0.6
@@ -112,15 +140,27 @@ def draw_overlay(context, ss):
         active = context.view_layer.objects.active
         if active is not None and active.select_get() and active.visible_get():
             _draw_bounds(shader, active, (1.0, 1.0, 1.0, 0.35))
+            bits = symmetry.model_bits(active)
+            mod = active.modifiers.get(symmetry.MODIFIER)
+            if bits and mod is not None:
+                center = mod.mirror_object.matrix_world.translation if mod.mirror_object else \
+                    active.matrix_world.translation
+                _draw_mirror_planes(shader, bits, center, scale)
     if sketch:
-        _draw_mirror_planes(shader, settings, context.scene.cursor.location, scale)
+        _draw_mirror_planes(shader, drawing.mirror_bits(settings), context.scene.cursor.location, scale)
     gpu.state.blend_set('NONE')
 
+    viewer = Vector(ss.viewer_pose_location)
+    camera_tool = tools and settings.tool == 'CAMERA'
     if settings.show_brush_card:
         # Above the right hand, facing the headset.
         anchor = Vector(ss.controller_grip_location_get(context, 1)) + Vector((0.0, 0.0, 0.06 * scale))
         content = hud.card_content(settings, sculpt_brush, COLORS)
-        hud.draw_card(anchor, Vector(ss.viewer_pose_location), scale, content)
+        hud.draw_card(anchor, viewer, scale, content)
+    if xr and camera_tool and context.scene.camera is not None:
+        # A viewfinder above the card: the controller is the camera.
+        anchor = Vector(ss.controller_grip_location_get(context, 1)) + Vector((0.0, 0.0, 0.11 * scale))
+        camera.draw_preview(hud.billboard(anchor, viewer, scale), context.scene)
 
     if settings.show_panel:
         right = operators.controller_pose(ss.controller_aim_location_get(context, 1),
@@ -130,6 +170,11 @@ def draw_overlay(context, ss):
         vr_ui.draw_panel(matrix, widgets, height, hover.id if hover else None, interactions.pressed_id)
         if hit is not None:
             vr_ui.draw_ray(right.translation, matrix @ Vector((hit[0], hit[1], 0.0)), True)
+    if xr and settings.camera_preview and not camera_tool and context.scene.camera is not None:
+        # Pinned to the left of the hand panel.
+        matrix, _widgets, _height = interactions.panel_frame(context, ss)
+        width = camera.PREVIEW_WIDTH
+        camera.draw_preview(matrix, context.scene, width, x=-vr_ui.WIDTH / 2 - 0.006 - width)
 
 
 ERASE_COLOR = (1.0, 0.3, 0.3)
@@ -137,10 +182,10 @@ EDIT_COLOR = (1.0, 0.85, 0.3)
 MIRROR_COLORS = ((1.0, 0.35, 0.35), (0.45, 0.9, 0.35), (0.35, 0.55, 1.0))  # X, Y, Z like Blender's axes
 
 
-def _draw_mirror_planes(shader, settings, center, scale, half=0.3, lines=6):
-    """A light grid on each active mirror plane, through the 3D cursor."""
-    for axis, on in enumerate((settings.mirror_x, settings.mirror_y, settings.mirror_z)):
-        if not on:
+def _draw_mirror_planes(shader, bits, center, scale, half=0.3, lines=6):
+    """A light grid on each mirror plane in bits (1 = X, 2 = Y, 4 = Z), through center."""
+    for axis in range(3):
+        if not bits & (1 << axis):
             continue
         u, v = [(a, b) for a, b in ((1, 2), (0, 2), (0, 1))][axis]
         h = half * scale
@@ -172,7 +217,8 @@ def _draw_bounds(shader, obj, color):
 
 def register():
     for region in ('XR', 'WINDOW'):
-        _handles.append((region, bpy.types.SpaceView3D.draw_handler_add(_draw, (), region, 'POST_VIEW')))
+        _handles.append((region, bpy.types.SpaceView3D.draw_handler_add(_draw, (region == 'XR',), region,
+                                                                        'POST_VIEW')))
 
 
 def unregister():

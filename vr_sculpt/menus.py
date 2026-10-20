@@ -4,7 +4,7 @@ import math
 
 import bpy
 
-from . import catalog, generic, native, primitives, strokes, vr_ui
+from . import camera, catalog, desktop, generic, measure, native, primitives, strokes, symmetry, vr_ui
 from .props import BRUSH_ITEMS
 
 NATIVE_SHORT = {
@@ -36,7 +36,7 @@ def set_mode(context, mode):
     settings = context.scene.vr_sculpt
     settings.mode = mode
     obj = context.view_layer.objects.active
-    if mode in {'MODEL', 'DRAW'}:
+    if mode in {'MODEL', 'DRAW', 'TOOLS'}:
         set_object_mode(context, obj, 'OBJECT')
     elif settings.engine == 'NATIVE':
         set_object_mode(context, obj, 'SCULPT')
@@ -182,11 +182,14 @@ def rows(context):
         vr_ui.button("mode_sculpt", "Sculpt", lambda: set_mode(context, 'SCULPT'), active=mode == 'SCULPT'),
         vr_ui.button("mode_model", "Model", lambda: set_mode(context, 'MODEL'), active=mode == 'MODEL'),
         vr_ui.button("mode_draw", "Draw", lambda: set_mode(context, 'DRAW'), active=mode == 'DRAW'),
+        vr_ui.button("mode_tools", "Tools", lambda: set_mode(context, 'TOOLS'), active=mode == 'TOOLS'),
     ]]
     if mode == 'SCULPT':
         out += _sculpt_rows(context, settings)
     elif mode == 'DRAW':
         out += _draw_rows(context, settings)
+    elif mode == 'TOOLS':
+        out += _tools_rows(context, settings)
     else:
         out += _model_rows(context, settings)
     return out
@@ -201,7 +204,22 @@ def _cursor_to_left_hand(context):
     pose = operators.controller_pose(ss.controller_aim_location_get(context, 0),
                                      ss.controller_aim_rotation_get(context, 0))
     tip = operators.brush_tip(pose, context.scene.vr_sculpt.tip_offset * ss.viewer_scale)
-    context.scene.cursor.location = tip
+    symmetry.move_center(context, tip)
+
+
+def _toggle(settings, prop):
+    return lambda: setattr(settings, prop, not getattr(settings, prop))
+
+
+def _grid_rows(settings):
+    out = [[
+        vr_ui.button("grid_show", "Grid", _toggle(settings, "grid_show"), active=settings.grid_show),
+        vr_ui.button("grid_snap", "Snap to grid", _toggle(settings, "grid_snap"), active=settings.grid_snap),
+    ]]
+    if settings.grid_show or settings.grid_snap:
+        out.append([vr_ui.slider("grid_size", "Grid size", settings.grid_size, 0.005, 0.5,
+                                 lambda v: setattr(settings, "grid_size", v), fmt=_meters)])
+    return out
 
 
 def _draw_rows(context, settings):
@@ -274,6 +292,10 @@ def _sculpt_rows(context, settings):
     if settings.engine == 'PYTHON':
         out.append([vr_ui.slider("strength", "Strength", settings.strength, 0.0, 1.0,
                                  lambda v: setattr(settings, "strength", v), fmt=lambda v: f"{v:.2f}")])
+    axes = symmetry.sculpt_axes(context)
+    out.append([vr_ui.label("Symmetry:")] + [
+        vr_ui.button("sym_" + a, a, (lambda i=i: symmetry.sculpt_toggle(context, i)), active=axes[i])
+        for i, a in enumerate(symmetry.AXES)])
     return out
 
 
@@ -333,7 +355,7 @@ def _operator_rows(context, obj):
 
 
 def _model_rows(context, settings):
-    out = [[vr_ui.select("add", "Add", primitives.label(settings.primitive), lambda: open_add_picker(context))]]
+    out = [[vr_ui.select("add", "Add", primitives.label(settings.primitive), lambda: open_add_picker(context))]] + _grid_rows(settings)
     obj = context.view_layer.objects.active
     if obj is None or not obj.select_get():
         out.append([vr_ui.label("Drag in empty space to add")])
@@ -357,8 +379,111 @@ def _model_rows(context, settings):
         out += _operator_rows(context, obj)
     else:
         out.append([vr_ui.label("Plain mesh (sculpted or not a VR primitive)")])
+    if obj.type == 'MESH':
+        axes = symmetry.model_axes(obj)
+        out.append([vr_ui.label("Mirror:")] + [
+            vr_ui.button("mirror_" + a, a, (lambda i=i: symmetry.model_toggle(context, obj, i)), active=axes[i])
+            for i, a in enumerate(symmetry.AXES)] + [
+            vr_ui.button("mirror_here", "Here", lambda: _cursor_to_left_hand(context))])
     out.append([
         vr_ui.button("duplicate", "Duplicate", lambda: primitives.duplicate(context, obj)),
         vr_ui.button("delete", "Delete", lambda: primitives.delete(context, obj), danger=True),
     ])
+    return out
+
+
+def _passthrough(context):
+    xs = context.window_manager.xr_session_settings
+    xs.show_passthrough = not xs.show_passthrough
+
+
+def _show_desktop(context, settings):
+    settings.show_desktop = not settings.show_desktop
+    if settings.show_desktop:
+        desktop.request_full_capture(context)
+        ss = context.window_manager.xr_session_state
+        if ss is not None:
+            desktop.place_in_front(context, ss)
+
+
+def _bring_desktop(context):
+    ss = context.window_manager.xr_session_state
+    if ss is not None:
+        desktop.place_in_front(context, ss)
+
+
+def open_camera_picker(context):
+    scene = context.scene
+    options = [Option(o.name, o.name) for o in camera.cameras(scene)]
+    current = scene.camera.name if scene.camera else ""
+
+    def choose(name):
+        obj = scene.objects.get(name)
+        if obj is not None:
+            scene.camera = obj
+
+    open_picker("Scene camera", options, current, choose)
+
+
+def _new_camera_here(context):
+    ss = context.window_manager.xr_session_state
+    pose = None
+    if ss is not None:
+        from . import operators
+        pose = operators.controller_pose(ss.controller_aim_location_get(context, 1),
+                                         ss.controller_aim_rotation_get(context, 1))
+    camera.new_camera(context, pose)
+
+
+def _tools_rows(context, settings):
+    scene = context.scene
+    out = [[
+        vr_ui.button("tool_measure", "Measure", lambda: setattr(settings, "tool", 'MEASURE'),
+                     active=settings.tool == 'MEASURE'),
+        vr_ui.button("tool_camera", "Camera", lambda: setattr(settings, "tool", 'CAMERA'),
+                     active=settings.tool == 'CAMERA'),
+    ]]
+    if settings.tool == 'MEASURE':
+        n = len(measure.stored(scene))
+        out.append([
+            vr_ui.button("measures_show", "Show", _toggle(settings, "show_measures"), active=settings.show_measures),
+            vr_ui.button("measure_undo", "Undo", lambda: measure.undo_last(scene)),
+            vr_ui.button("measure_clear", f"Clear ({n})", lambda: measure.clear(scene), danger=True),
+        ])
+    else:
+        cam = scene.camera
+        out.append([vr_ui.select("camera", "Camera", cam.name if cam else "none",
+                                 lambda: open_camera_picker(context))])
+        out.append([
+            vr_ui.button("camera_new", "New here", lambda: _new_camera_here(context)),
+            vr_ui.button("camera_preview", "Pin preview", _toggle(settings, "camera_preview"),
+                         active=settings.camera_preview),
+        ])
+        if cam is not None and cam.data.type == 'PERSP':
+            out.append([vr_ui.slider("camera_lens", "Lens", cam.data.lens, 10.0, 200.0,
+                                     lambda v: setattr(cam.data, "lens", v), fmt=lambda v: f"{v:.0f} mm")])
+    out += _grid_rows(settings)
+    xs = context.window_manager.xr_session_settings
+    out.append([
+        vr_ui.button("show_desktop", "Desktop", lambda: _show_desktop(context, settings),
+                     active=settings.show_desktop),
+        vr_ui.button("bring_desktop", "Bring here", lambda: _bring_desktop(context))
+        if settings.show_desktop else vr_ui.label(""),
+        vr_ui.button("passthrough", "Passthrough", lambda: _passthrough(context),
+                     active=bool(xs and xs.show_passthrough)),
+    ])
+    out.append([
+        vr_ui.button("tracking", "Tracking", _toggle(settings, "tracking"), active=settings.tracking),
+        vr_ui.button("tracking_record", "Record", _toggle(settings, "tracking_record"),
+                     active=settings.tracking_record),
+    ])
+    out.append([
+        vr_ui.label("Move:"),
+        vr_ui.button("nav_walk", "Walk", lambda: setattr(settings, "nav_mode", 'WALK'),
+                     active=settings.nav_mode == 'WALK'),
+        vr_ui.button("nav_fly", "Fly", lambda: setattr(settings, "nav_mode", 'FLY'),
+                     active=settings.nav_mode == 'FLY'),
+    ])
+    out.append([vr_ui.slider("nav_speed", "Speed", settings.nav_speed, 0.2, 6.0,
+                             lambda v: setattr(settings, "nav_speed", v), fmt=lambda v: f"{v:.1f} m/s")])
     return out

@@ -1,6 +1,6 @@
 # VR Sculpt for Blender (prototype)
 
-Sculpt and model with VR controllers inside Blender's own VR session. Pure Python
+Sculpt, model, draw and measure with VR controllers inside Blender's own VR session. Pure Python
 extension, no Blender fork. Built and tested on **Blender 5.4.0 Alpha** with a
 Meta Quest over OpenXR.
 
@@ -12,8 +12,8 @@ Meta Quest over OpenXR.
   (push in, deflate, ...) where that makes sense.
 - **Two engines**
   - **Python brushes** (Object Mode): this add-on's own numpy brushes:
-    Draw, Smooth, Grab (follows controller rotation), Inflate. X symmetry,
-    works on moved, rotated and scaled objects.
+    Draw, Smooth, Grab (follows controller rotation), Inflate. X / Y / Z
+    symmetry, works on moved, rotated and scaled objects.
   - **Native (experimental)** (Sculpt Mode): drives Blender's real sculpt
     brushes from the controller tip: Draw, Clay Strips, Smooth,
     Inflate/Deflate, Crease Sharp, Flatten/Contrast.
@@ -41,27 +41,57 @@ Meta Quest over OpenXR.
   strokes and notes away. Mirror on X / Y / Z around the 3D cursor (editing
   one side updates the other), a stabilizer, 8 colors, and B to undo the last
   stroke.
-- **Hand panel** above the left controller: Sculpt / Model / Draw tabs, engine and
-  brush buttons, radius and strength sliders, primitive settings, Duplicate
-  and Delete. Point at it with the right controller and pull the trigger.
+- **Tools mode**:
+  - **Tape measure**: drag to measure. Ends snap to nearby mesh vertices (or
+    the grid), labels use the scene's units, and measurements stay until you
+    remove them (B removes the last one).
+  - **Scene camera**: hold the trigger and the camera follows your controller
+    (it looks where you point), with a live **camera preview** above your
+    hand. Switch or add cameras and set the lens from the panel. The preview
+    can also be pinned next to the hand panel in every mode.
+- **3D grid and snapping**: a lattice of points around the controller tips,
+  in scene units. Snap to Grid snaps new primitives, grabbed objects and tape
+  ends.
+- **Symmetry**: Model mode mirrors the selected object on X / Y / Z with a
+  live Mirror modifier around a "VR Mirror Center" empty (Here puts it at
+  your left hand). Sculpt mode has X / Y / Z symmetry for both engines (the
+  native engine uses the mesh's own symmetry flags).
+- **Walk and Fly navigation** on the thumbsticks, switchable while in VR.
+  Walk keeps you level, follows floors, slopes and stairs under you (but not
+  tables or walls), and snap-turns. Fly goes where you look, with up/down and
+  smooth turning. The speed is in hand space, so it scales with the world.
+- **Tracking objects**: "VR Headset", "VR Hand Left" and "VR Hand Right"
+  empties in a "VR Tracking" collection follow the headset and controllers,
+  with the trigger, grip and stick values as custom properties, for parenting
+  and drivers. Record keyframes them on every frame while the timeline plays.
+- **Floating desktop window**: the whole Blender window on a screen in VR,
+  view only. It travels with you when you move; point at it in Tools mode
+  and drag to move it.
+- **Passthrough** toggle (Blender's own; needs a runtime that supports it).
+- **Hand panel** above the left controller: Sculpt / Model / Draw / Tools
+  tabs, engine and brush buttons, radius and strength sliders, primitive
+  settings, Duplicate and Delete. Point at it with the right controller and
+  pull the trigger.
 
 ![Brush cards](docs/brush_cards.png)
 
 ## Controls
 
-| Input | Sculpt mode | Model mode | Draw mode |
-|---|---|---|---|
-| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab | Draw / Edit / Erase |
-| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right |
-| Right trigger, pointing at the hand panel | Press buttons, drag sliders | Same | Same |
-| Y (left) | Next mode (Sculpt, Model, Draw) | Same | Same |
-| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke |
-| Left stick click | Show / hide the hand panel | Same | Same |
-| Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same |
-| Grip, thumbsticks, A / X | Blender's stock VR navigation (unchanged) | Same | Same |
+| Input | Sculpt mode | Model mode | Draw mode | Tools mode |
+|---|---|---|---|---|
+| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab | Draw / Edit / Erase | Measure / aim the camera. Pointing at the desktop screen: move it |
+| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Same as right |
+| Right trigger, pointing at the hand panel | Press buttons, drag sliders | Same | Same | Same |
+| Y (left) | Next mode (Sculpt, Model, Draw, Tools) | Same | Same | Same |
+| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Remove the last measurement / next camera |
+| Left stick | Walk / fly (move) | Same | Same | Same |
+| Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same |
+| Left stick click | Show / hide the hand panel | Same | Same | Same |
+| Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Same |
+| Grip, A / X | Blender's stock VR navigation (unchanged) | Same | Same | Same |
 
-Trigger teleport is replaced while "Sculpt With Triggers" is on. The setting
-applies when the VR session starts.
+Trigger teleport and the stock stick navigation are replaced while "Sculpt
+With Triggers" is on. The setting applies when the VR session starts.
 
 ## Install
 
@@ -78,7 +108,8 @@ blender --background --command extension install-file -r user_default -e dist/vr
 
 Then in the 3D View: **Sidebar (N) > VR > Start VR Session**. The **VR
 Sculpt** panel in the same tab has the engine, brush, radius, strength, tip
-offset and display options.
+offset and display options; **VR Extras** has the grid, navigation, desktop
+window, passthrough and tracking settings.
 
 - Python engine: select a mesh in **Object Mode**.
 - Native engine: select a mesh in **Sculpt Mode** and keep it visible in the
@@ -139,6 +170,31 @@ offset and display options.
   then corrects with a uniform object scale so the shape fills the box
   exactly. Generators slower than 40 ms (e.g. Wall Factory) regenerate on
   slider release instead of every frame.
+- **Floating desktop window** ([desktop.py](vr_sculpt/desktop.py)): Python
+  can't read the window's final image, but every region draws into its own
+  buffer and a `POST_PIXEL` draw callback runs right after, on every editor
+  type. There the region's pixels are read (`read_color`, about 0.5-2 ms per
+  UI region, at most 4 times a second per region) into a texture, and the
+  headset draws all of them at their window positions. Regions only redraw
+  when something changes, so the captures stay current between redraws. 3D
+  views are the exception: their callback only sees the overlay layer, so
+  they are re-rendered offscreen from the same view at half resolution.
+- **Camera preview** ([camera.py](vr_sculpt/camera.py)):
+  `GPUOffScreen.draw_view3d` from the scene camera, which needs a 3D view's
+  draw callback: it renders while the largest desktop 3D view redraws (a
+  timer asks for 20 redraws a second while a preview is shown), and only the
+  headset displays it.
+- **Navigation** ([navigation.py](vr_sculpt/navigation.py)): the stock fly
+  actions keep their bindings but run `vrsculpt.navigate`, which moves
+  `XrSessionState.navigation_location` / `navigation_rotation` itself, so
+  Walk / Fly is read live instead of being baked into the action map. Walk
+  casts a ray down from the headset and follows changes in the surface
+  height (the VR tracking origin isn't the real floor, so it keeps your
+  height rather than putting you on the surface).
+- **Tracking objects** ([tracking.py](vr_sculpt/tracking.py)): an app timer
+  ([live.py](vr_sculpt/live.py)) sets the empties' matrices from the session
+  state at 90 Hz and reads the input values with `action_state_get`; custom
+  property changes are followed by `update_tag()` so drivers re-run.
 - **Drawing in the headset** ([draw.py](vr_sculpt/draw.py),
   [hud.py](vr_sculpt/hud.py)): `SpaceView3D` draw handlers on region type
   `'XR'` (headset) and `'WINDOW'` (desktop). The session's
@@ -204,13 +260,18 @@ blender --background --factory-startup --python tests/test_generic.py
 blender --background --factory-startup --python tests/test_draw.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_tools.py
+```
+
 `test_generic.py` enables Extra Mesh Objects for its own run (factory
 settings, so your preferences aren't touched) and checks all 42 entries.
 
 Windowed (opens Blender briefly, writes `tests/*_result.txt`):
 `native_engine.py`, `native_modal.py`, `native_transform.py`. The
-`overlay_preview.py`, `panel_preview.py` and `hud_preview.py` scripts render
-the overlay to PNG.
+`overlay_preview.py`, `panel_preview.py`, `hud_preview.py` and
+`tools_preview.py` scripts render the overlay to PNG; `probe_capture.py`
+checks region capture and offscreen camera rendering.
 Run the overlay one with `test_scene.blend` loaded; create that file with
 `tests/make_test_scene.py`.
 
@@ -222,6 +283,12 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   versions) size non-uniformly to the drag box; other primitives keep their
   proportions.
 - Geometry-node asset primitives in Add > Mesh aren't listed yet.
+- The desktop window in VR is view only: Python can't send clicks or key
+  presses to Blender's UI. Menus and popups aren't captured (they are
+  temporary regions), and nothing updates while the Blender window is
+  minimized. The camera preview needs a visible desktop 3D view too.
+- Passthrough is Blender's own `show_passthrough`; whether it shows depends
+  on the OpenXR runtime.
 - Hand tracking isn't possible from an add-on: Blender's VR layer doesn't
   enable OpenXR's hand tracking or hand interaction extensions, so drawing
   uses controllers.
