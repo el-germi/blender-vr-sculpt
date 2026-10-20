@@ -109,7 +109,7 @@ def setup_trigger():
     s = bpy.context.scene.vr_sculpt
     s.mode, s.tip_offset, s.show_panel = 'DRAW', 0.0, False
     s.draw_tool, s.draw_style, s.draw_color = 'DRAW', 'TUBE', 'RED'
-    s.draw_width, s.draw_smoothing, s.draw_pressure = 0.02, 0.0, True
+    s.draw_width, s.draw_smoothing, s.draw_thickness = 0.02, 0.0, 'PRESSURE'
     s.mirror_x = s.mirror_y = s.mirror_z = False
     bpy.context.scene.cursor.location = (0, 0, 0)
     return ss, ctx, s
@@ -204,7 +204,7 @@ def test_edit_and_erase():
     print("== edit and erase")
     clear()
     ss, ctx, s = setup_trigger()
-    s.draw_pressure = False
+    s.draw_thickness = 'FIXED'
     hold(ctx, ss, 1, path((0, 0, 1), (0.4, 0, 1), 41))
     obj = next(o for o in bpy.data.objects if strokes.is_stroke(o))
     before = strokes.load(obj)["p"].copy() + np.array(obj.location[:])
@@ -218,7 +218,7 @@ def test_edit_and_erase():
     # Through a mirrored copy: grab the copy, the original moves mirrored.
     clear()
     ss, ctx, s = setup_trigger()
-    s.draw_pressure, s.mirror_x = False, True
+    s.draw_thickness, s.mirror_x = 'FIXED', True
     hold(ctx, ss, 1, path((0.1, 0, 1), (0.5, 0, 1), 41))
     obj = next(o for o in bpy.data.objects if strokes.is_stroke(o))
     before = strokes.load(obj)["p"].copy() + np.array(obj.location[:])
@@ -241,6 +241,127 @@ def test_edit_and_erase():
     check(len(strokes.note_strokes(bpy.context)) == 0, "Erase removed the note it touched")
 
 
+def twist(obj):
+    """Per-sample twist about the stroke direction (degrees), sample spacing (m), and any flip.
+
+    Twist is the angle between a sample's frame normal and the previous one carried across
+    to this sample's direction; the normal merely following a bend isn't twist.
+    """
+    s = strokes.load(obj)
+    p, n = s["p"], s["s"]
+    out, segs, flipped = [], [], False
+    for i in range(1, len(p)):
+        t = p[i] - p[i - 1]
+        seg = np.linalg.norm(t)
+        t /= seg
+        carried, _ = strokes._across(n[i - 1], t)
+        d = float(np.clip(np.dot(carried, n[i]), -1, 1))
+        flipped |= d < 0
+        out.append(np.degrees(np.arccos(d)))
+        segs.append(seg)
+    return np.array(out), np.array(segs), flipped
+
+
+def caps(segs):
+    return np.degrees(strokes.TWIST_RATE * segs) + 0.5
+
+
+def test_orientation():
+    print("== stroke orientation: sideways strokes, rolling wrist")
+    clear()
+    ss, ctx, s = setup_trigger()
+    s.draw_thickness, s.draw_smoothing = 'FIXED', 0.0
+    # Sideways stroke along the controller's own X axis (identity aim pose): the old degenerate case.
+    rng = np.random.default_rng(7)
+    pts = path((0, 0, 1), (0.4, 0, 1), 81)
+    # Tiny hand wobble, like a real hand, so the old projection would swing.
+    pts = [tuple(np.array(p) + rng.normal(0, 0.0008, 3)) for p in pts]
+    for style, limit in (('RIBBON', 3.0), ('TUBE', 0.5)):
+        clear()
+        s.draw_style = style
+        hold(ctx, ss, 1, pts)
+        obj = next(o for o in bpy.data.objects if strokes.is_stroke(o))
+        turns, _segs, flipped = twist(obj)
+        check(not flipped and turns.max() < limit, f"{style}: wobbly sideways stroke doesn't twist or flip "
+                                                   f"(max {turns.max():.2f} deg per sample)")
+
+    # Wildly rolling controller while drawing forward: tubes ignore it, ribbons follow but capped.
+    for style in ('TUBE', 'RIBBON'):
+        clear()
+        s.draw_style = style
+        ss.trigger = 1.0
+        forward = path((0, 0, 1), (0, 0.4, 1), 81)
+        op = tm.harness()
+        ss.aim_loc[1], ss.aim_rot[1] = Vector(forward[0]), Quaternion()
+        op.invoke(ctx, tm.FakeEvent('XR_ACTION', 'PRESS', tm.FakeXR(forward[0], Quaternion(), 1.0)))
+        for i, p in enumerate(forward[1:]):
+            time.sleep(0.002)
+            ss.aim_loc[1] = Vector(p)
+            ss.aim_rot[1] = Quaternion((0, 1, 0), float(rng.uniform(-3, 3)))  # random roll every frame
+            op.modal(ctx, tm.FakeEvent('TIMER'))
+        ss.trigger = 0.0
+        op.modal(ctx, tm.FakeEvent('TIMER'))
+        obj = next(o for o in bpy.data.objects if strokes.is_stroke(o))
+        turns, segs, flipped = twist(obj)
+        if style == 'TUBE':
+            check(turns.max() < 0.5, f"TUBE ignores controller roll (max {turns.max():.2f} deg)")
+        else:
+            over = turns - caps(segs)
+            check(over.max() <= 0, f"RIBBON twist stays under half a turn per 10 cm "
+                                   f"(worst {turns[over.argmax()]:.1f} deg over {segs[over.argmax()] * 1000:.1f} mm)")
+        check(not flipped, f"{style}: no flips (bow-ties/knots) under a jittery wrist")
+
+    # A deliberate slow roll is followed by the ribbon.
+    clear()
+    s.draw_style = 'RIBBON'
+    ss.trigger = 1.0
+    forward = path((0, 0, 1), (0, 0.4, 1), 81)
+    op = tm.harness()
+    ss.aim_loc[1], ss.aim_rot[1] = Vector(forward[0]), Quaternion()
+    op.invoke(ctx, tm.FakeEvent('XR_ACTION', 'PRESS', tm.FakeXR(forward[0], Quaternion(), 1.0)))
+    for i, p in enumerate(forward[1:]):
+        time.sleep(0.002)
+        ss.aim_loc[1] = Vector(p)
+        ss.aim_rot[1] = Quaternion((0, 1, 0), (i + 1) / 80 * np.pi / 2)  # roll 90 degrees along the stroke
+        op.modal(ctx, tm.FakeEvent('TIMER'))
+    ss.trigger = 0.0
+    op.modal(ctx, tm.FakeEvent('TIMER'))
+    obj = next(o for o in bpy.data.objects if strokes.is_stroke(o))
+    n = strokes.load(obj)["s"]
+    end_angle = np.degrees(np.arccos(abs(np.dot(n[0], n[-1]))))
+    check(end_angle > 75, f"RIBBON follows a deliberate 90 degree roll ({end_angle:.0f} deg)")
+
+
+def test_speed_thickness():
+    print("== speed-based thickness")
+    ss, ctx, s = setup_trigger()
+    s.draw_style = 'TUBE'
+    for mode, slow_wider in (('SPEED_THIN', True), ('SPEED_THICK', False)):
+        clear()
+        s.draw_thickness = mode
+        ss.trigger = 1.0
+        op = tm.harness()
+        start = Vector((0, 0, 1))
+        ss.aim_loc[1], ss.aim_rot[1] = start, Quaternion()
+        op.invoke(ctx, tm.FakeEvent('XR_ACTION', 'PRESS', tm.FakeXR(start, Quaternion(), 1.0)))
+        x = 0.0
+        # Slow half (5 cm/s), then fast half (2 m/s), at ~100 Hz.
+        for speed, steps in ((0.05, 60), (2.0, 30)):
+            for _ in range(steps):
+                time.sleep(0.01)
+                x += speed * 0.01
+                ss.aim_loc[1] = Vector((x, 0, 1))
+                op.modal(ctx, tm.FakeEvent('TIMER'))
+        ss.trigger = 0.0
+        op.modal(ctx, tm.FakeEvent('TIMER'))
+        obj = next(o for o in bpy.data.objects if strokes.is_stroke(o))
+        smp = strokes.load(obj)
+        slow_w = np.median(smp["w"][smp["p"][:, 0] + obj.location.x < 0.025])
+        fast_w = np.median(smp["w"][smp["p"][:, 0] + obj.location.x > 0.2])
+        ok = slow_w > fast_w * 2 if slow_wider else fast_w > slow_w * 2
+        check(ok, f"{mode}: slow width {slow_w * 1000:.1f} mm, fast width {fast_w * 1000:.1f} mm")
+
+
 def test_sculpt_forgets_and_panel():
     print("== sculpting a stroke, panel rows")
     clear()
@@ -256,8 +377,13 @@ def test_sculpt_forgets_and_panel():
     s.mode = 'DRAW'
     widgets, _ = vr_ui.layout(menus.rows(bpy.context))
     ids = {w.id for w in widgets}
-    check({"mode_draw", "tool_EDIT", "style_RIBBON", "color_GREEN", "draw_width", "mirror_x", "undo_stroke"} <= ids,
-          "Draw panel has tools, styles, colors, width, mirror and undo")
+    check({"mode_draw", "tool_EDIT", "style_RIBBON", "color_GREEN", "draw_width", "mirror_x", "undo_stroke",
+           "draw_thickness"} <= ids, "Draw panel has tools, styles, colors, width, mirror, thickness and undo")
+    vr_ui.find(widgets, "draw_thickness").on_press()
+    widgets, _ = vr_ui.layout(menus.rows(bpy.context))
+    vr_ui.find(widgets, "opt_SPEED_THIN").on_press()
+    check(s.draw_thickness == 'SPEED_THIN' and not menus.picker_open(), "Thickness picker sets the mode")
+    widgets, _ = vr_ui.layout(menus.rows(bpy.context))
     vr_ui.find(widgets, "color_GREEN").on_press()
     vr_ui.find(widgets, "mirror_z").on_press()
     check(s.draw_color == 'GREEN' and s.mirror_z, "swatches and mirror toggles work")
@@ -272,6 +398,8 @@ def main():
         test_draw_and_undo()
         test_mirror_and_notes()
         test_edit_and_erase()
+        test_orientation()
+        test_speed_thickness()
         test_sculpt_forgets_and_panel()
     except Exception:
         traceback.print_exc()

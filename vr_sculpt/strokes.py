@@ -67,8 +67,90 @@ def _normalize(v):
     return v / np.maximum(n, 1e-12)
 
 
+# --- stroke orientation ------------------------------------------------------
+#
+# Each sample stores a frame normal (the "s" array): the direction across a ribbon,
+# and where a tube's rings start. It is computed sample by sample, never from the
+# controller directly: projecting the controller's side axis onto the plane across
+# the stroke breaks down when you draw along that axis (the usual sideways stroke),
+# where it shrinks to nothing, swings wildly and flips 180 degrees (a bow-tie in a
+# ribbon, a pinched knot in a tube). Instead the previous normal is carried along
+# the path (a rotation-minimizing frame), and ribbons turn toward the controller
+# only as far as its direction is meaningful, at a capped rate, never flipping.
+
+TWIST_RATE = math.pi / 0.1  # max ribbon twist: half a turn per 10 cm of stroke (hand space)
+STEER_DEAD = 0.26  # sin(15 deg): controller axis this close to the stroke direction doesn't steer
+STEER_FULL = 0.6  # sin(37 deg): from here on it steers at the full rate
+
+
+def _across(v, t):
+    """v with its component along t removed: (unit vector or None, length before normalizing)."""
+    v = v - np.dot(v, t) * t
+    n = float(np.linalg.norm(v))
+    return (v / n, n) if n > 1e-9 else (None, 0.0)
+
+
+def any_perpendicular(t):
+    a = np.cross(t, [0.0, 0.0, 1.0])
+    if np.linalg.norm(a) < 1e-6:
+        a = np.cross(t, [1.0, 0.0, 0.0])
+    return a / np.linalg.norm(a)
+
+
+def orient_step(prev_n, t, desired=None, max_angle=0.0, steer_t=None):
+    """Next frame normal: prev_n carried across to tangent t, turned toward `desired` by at most max_angle.
+
+    steer_t: the stroke's direction over a longer stretch, to judge how far `desired` stands out
+    across the stroke without hand jitter in the sample-to-sample direction t.
+    """
+    n, _ = _across(prev_n, t)
+    if n is None:
+        n = any_perpendicular(t)
+    if desired is None or max_angle <= 0.0:
+        return n
+    desired = np.asarray(desired, dtype=np.float64)
+    _, strength = _across(desired, steer_t if steer_t is not None else t)
+    d, _ = _across(desired, t)
+    if d is None:
+        return n
+    if np.dot(d, n) < 0.0:
+        d = -d  # A ribbon looks the same either way round: never flip.
+    angle = math.acos(min(max(float(np.dot(n, d)), -1.0), 1.0))
+    if angle < 1e-6:
+        return d
+    # The less the desired axis stands out across the stroke, the less it may steer: no say
+    # at all within ~15 degrees of the stroke direction (STEER_DEAD), full say past ~37.
+    k = min(max((strength - STEER_DEAD) / (STEER_FULL - STEER_DEAD), 0.0), 1.0)
+    turn = min(angle, max_angle * k * k * (3.0 - 2.0 * k))
+    u, _ = _across(d, n)
+    if u is None:
+        return n
+    out = n * math.cos(turn) + u * math.sin(turn)
+    return out / np.linalg.norm(out)
+
+
+def stable_normals(points, guide=None, max_angle_per_unit=0.0):
+    """Frame normals along a whole polyline (used after Edit reshapes a stroke).
+
+    guide: per-point directions to steer toward (ribbons), or None for twist-free (tubes).
+    """
+    n_pts = len(points)
+    if n_pts == 0:
+        return np.zeros((0, 3))
+    t = _normalize(np.gradient(points, axis=0)) if n_pts > 1 else np.array([[0.0, 0.0, 1.0]])
+    out = np.zeros((n_pts, 3))
+    start = guide[0] if guide is not None else any_perpendicular(t[0])
+    first, _ = _across(np.asarray(start, dtype=np.float64), t[0])
+    out[0] = first if first is not None else any_perpendicular(t[0])
+    for i in range(1, n_pts):
+        seg = float(np.linalg.norm(points[i] - points[i - 1]))
+        out[i] = orient_step(out[i - 1], t[i], None if guide is None else guide[i],
+                             max_angle_per_unit * seg)
+    return out
+
+
 def frames(points, sides):
-    """Tangents and a normal that follows the controller's side vector (so ribbons follow your wrist)."""
+    """Tangents, normals (the stored frame normals made exactly perpendicular) and binormals."""
     t = np.gradient(points, axis=0) if len(points) > 1 else np.array([[0.0, 0.0, 1.0]])
     t = _normalize(t)
     n = sides - np.sum(sides * t, axis=1, keepdims=True) * t

@@ -36,7 +36,7 @@ NATIVE_COLORS = {
 MODEL_COLOR = (0.55, 0.9, 0.85)
 
 DRAW_INFO = {
-    'TUBE': ("Draw Tube", "Squeeze harder for thicker. B undoes the last stroke"),
+    'TUBE': ("Draw Tube", "Round stroke mesh. B undoes the last stroke"),
     'RIBBON': ("Draw Ribbon", "Roll your wrist to twist the band. B undoes the last stroke"),
     'NOTE': ("Draw Note", "Annotation line, not geometry. B undoes the last note"),
     'EDIT': ("Edit Strokes", "Grab part of a stroke and pull it into shape"),

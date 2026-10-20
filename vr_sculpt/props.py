@@ -61,7 +61,17 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     draw_smoothing: FloatProperty(
         name="Smoothing", description="Stabilizer: how much hand jitter is filtered out",
         default=0.5, min=0.0, max=0.95, subtype='FACTOR')
-    draw_pressure: BoolProperty(name="Pressure", description="Trigger pressure sets the width", default=True)
+    draw_thickness: EnumProperty(
+        name="Thickness",
+        description="What varies the stroke's width along its length",
+        items=(
+            ('PRESSURE', "Pressure", "Squeeze the trigger harder for a thicker stroke"),
+            ('SPEED_THIN', "Speed: fast = thin", "Faster hand movement draws thinner, like a calligraphy brush"),
+            ('SPEED_THICK', "Speed: fast = thick", "Faster hand movement draws thicker"),
+            ('FIXED', "Fixed", "Always the Width setting"),
+        ),
+        default='PRESSURE',
+    )
     mirror_x: BoolProperty(name="Mirror X", description="Mirror strokes across the 3D cursor's X plane")
     mirror_y: BoolProperty(name="Mirror Y", description="Mirror strokes across the 3D cursor's Y plane")
     mirror_z: BoolProperty(name="Mirror Z", description="Mirror strokes across the 3D cursor's Z plane")

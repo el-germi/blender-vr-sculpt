@@ -32,9 +32,10 @@ Meta Quest over OpenXR.
   gemstones, torus knots, rocks, ...). Their settings panels are built from
   the operators' own properties.
 - **Draw mode**: freehand 3D strokes that become real meshes, like Gravity
-  Sketch. Tube (round, trigger pressure sets the thickness) and Ribbon (flat,
-  follows your wrist's roll) strokes, plus Note strokes that are Blender
-  annotations. Edit pulls part of a stroke into a new shape; Erase sweeps
+  Sketch. Tube (round, never twists) and Ribbon (flat, follows your wrist's
+  roll) strokes, plus Note strokes that are Blender annotations. Thickness
+  from trigger pressure, from hand speed (fast = thin or fast = thick), or
+  fixed. Edit pulls part of a stroke into a new shape; Erase sweeps
   strokes and notes away. Mirror on X / Y / Z around the 3D cursor (editing
   one side updates the other), a stabilizer, 8 colors, and B to undo the last
   stroke.
@@ -114,6 +115,14 @@ offset and display options.
   trigger is held (under 8 ms per frame for a 1200-sample mirrored tube) and
   the full mesh on release. Notes are 3D annotation strokes, one layer per
   color.
+- **Stroke orientation**: each sample's frame normal is carried along the
+  path (a rotation-minimizing frame), never taken straight from the
+  controller. Projecting the controller's side axis across the stroke breaks
+  down when you draw along that axis (the usual sideways stroke) and flips
+  180 degrees, which made bow-ties and knots. Tubes are twist-free; ribbons
+  turn toward the controller only when its side axis clearly stands across
+  the stroke (judged over the last 2 cm, so jitter doesn't count), at most
+  half a turn per 10 cm, and never flip.
 - **Hand panel** ([vr_ui.py](vr_sculpt/vr_ui.py), [menus.py](vr_sculpt/menus.py)):
   rows of buttons, sliders and selects on a card that faces the headset; the
   right controller's aim ray is intersected with the card's plane. A select

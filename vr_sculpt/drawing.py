@@ -4,6 +4,8 @@ Same interface as interactions.py: update(context, aim_pose, tip_pose, value) ev
 frame while the trigger is held, finish(context) on release, `changed` for undo.
 """
 
+import time
+
 import numpy as np
 from mathutils import Matrix, Vector
 
@@ -15,7 +17,7 @@ ERASE_MARGIN = 0.01  # hand-space meters around the tip that erase
 
 
 def side_vector(pose):
-    """The controller's local X axis: ribbons lie across it, tube rings start from it."""
+    """The controller's local X axis: ribbons steer to lie across it (see strokes.orient_step)."""
     return pose.to_3x3() @ Vector((1.0, 0.0, 0.0))
 
 
@@ -24,15 +26,30 @@ def mirror_bits(settings):
 
 
 TRIGGER_THRESHOLD = 0.3  # the stroke action fires past this much trigger travel
+MIN_WIDTH = 0.15  # thinnest, as a fraction of the width setting
+SPEED_SLOW = 0.1  # hand-space m/s: at or below, speed modes give the "slow" width
+SPEED_FAST = 1.0  # hand-space m/s: at or above, the "fast" width
+SPEED_SMOOTHING = 0.75  # how much of the previous speed estimate each frame keeps
+STEER_BASELINE = 0.02  # hand-space meters of stroke used to judge its direction for ribbon steering
 
 
-def pressure_width(settings, scale, value):
+def _clamp01(x):
+    return min(max(x, 0.0), 1.0)
+
+
+def stroke_width(settings, scale, value, speed):
+    """Width for a new sample. value: trigger travel 0..1; speed: hand-space m/s."""
     width = settings.draw_width * scale
-    if settings.draw_pressure:
-        # Trigger travel from the threshold to fully pressed maps to 15%..100% of the width.
-        t = (value - TRIGGER_THRESHOLD) / (1.0 - TRIGGER_THRESHOLD)
-        width *= 0.15 + 0.85 * min(max(t, 0.0), 1.0)
-    return width
+    mode = settings.draw_thickness
+    if mode == 'PRESSURE':
+        f = _clamp01((value - TRIGGER_THRESHOLD) / (1.0 - TRIGGER_THRESHOLD))
+    elif mode in {'SPEED_THIN', 'SPEED_THICK'}:
+        f = _clamp01((speed - SPEED_SLOW) / (SPEED_FAST - SPEED_SLOW))
+        if mode == 'SPEED_THIN':
+            f = 1.0 - f
+    else:
+        return width
+    return width * (MIN_WIDTH + (1.0 - MIN_WIDTH) * f)
 
 
 class _Stabilizer:
@@ -61,17 +78,55 @@ class DrawStroke:
         }
         self.spacing = max(settings.draw_width * scale * 0.25, MIN_SPACING * scale)
         self.stab = _Stabilizer(tip, settings.draw_smoothing)
+        self.ribbon = settings.draw_style == 'RIBBON'
+        self.speed = 0.0
+        self.last_point = tip.copy()
+        self.last_time = time.perf_counter()
         self.changed = False
         self._add(tip, side_vector(tip_pose), value)
 
     def _add(self, point, side, value):
         s = self.samples
-        s["p"] = np.vstack([s["p"], np.array((point - self.origin)[:])])
-        s["w"] = np.append(s["w"], pressure_width(self.settings, self.scale, value))
-        s["s"] = np.vstack([s["s"], np.array(side[:])])
+        p = np.array((point - self.origin)[:])
+        desired = np.array(side[:]) if self.ribbon else None
+        if len(s["p"]) == 0:
+            # No direction yet: start across the controller; fixed up by the second sample.
+            normal = np.array(side[:])
+        else:
+            t = p - s["p"][-1]
+            seg = float(np.linalg.norm(t))
+            t = t / seg
+            if len(s["p"]) == 1:
+                first, _ = strokes._across(s["s"][0], t)
+                s["s"][0] = first if first is not None else strokes.any_perpendicular(t)
+            normal = strokes.orient_step(s["s"][-1], t, desired, strokes.TWIST_RATE * seg / self.scale,
+                                         steer_t=self._long_tangent(p))
+        s["p"] = np.vstack([s["p"], p])
+        s["w"] = np.append(s["w"], stroke_width(self.settings, self.scale, value, self.speed))
+        s["s"] = np.vstack([s["s"], normal])
+
+    def _long_tangent(self, p):
+        """Direction from a sample at least STEER_BASELINE back (hand jitter averages out over it)."""
+        pts = self.samples["p"]
+        reach = STEER_BASELINE * self.scale
+        for i in range(len(pts) - 1, -1, -1):
+            d = p - pts[i]
+            length = float(np.linalg.norm(d))
+            if length >= reach or i == 0:
+                return d / length if length > 1e-9 else None
+        return None
+
+    def _track_speed(self, point):
+        now = time.perf_counter()
+        dt = now - self.last_time
+        if dt > 1e-4:
+            v = (point - self.last_point).length / dt / self.scale
+            self.speed = SPEED_SMOOTHING * self.speed + (1.0 - SPEED_SMOOTHING) * v
+        self.last_point, self.last_time = point.copy(), now
 
     def update(self, context, pose, tip_pose, value):
         point = self.stab(tip_pose.translation)
+        self._track_speed(point)
         last = Vector(self.samples["p"][-1]) + self.origin
         if (point - last).length >= self.spacing:
             self._add(point, side_vector(tip_pose), value)
@@ -153,6 +208,7 @@ class ReshapeStroke:
         self.mask, dist = best
         self.weights = brushes.falloff(dist, radius)
         self.pose_inv = tip_pose.inverted_safe()
+        self.scale = scale
         self.changed = False
 
     def update(self, context, pose, tip_pose, value):
@@ -170,8 +226,12 @@ class ReshapeStroke:
 
     def finish(self, context):
         if self.changed:
-            strokes.rebuild(self.obj, self.samples)
-            strokes.save(self.obj, self.samples)
+            # The bends changed: carry the frame along the new path again (no twist, no flips).
+            s = self.samples
+            guide = s["s"] if s["style"] == 'RIBBON' else None
+            s["s"] = strokes.stable_normals(s["p"], guide, strokes.TWIST_RATE / self.scale)
+            strokes.rebuild(self.obj, s)
+            strokes.save(self.obj, s)
 
 
 class EraseStrokes:

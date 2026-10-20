@@ -231,12 +231,13 @@ def _draw_rows(context, settings):
                      active=settings.mirror_z),
         vr_ui.button("mirror_here", "Here", lambda: _cursor_to_left_hand(context)),
     ])
-    out.append([
-        vr_ui.button("draw_pressure", f"Pressure: {'On' if settings.draw_pressure else 'Off'}",
-                     lambda: setattr(settings, "draw_pressure", not settings.draw_pressure),
-                     active=settings.draw_pressure),
-        vr_ui.button("undo_stroke", "Undo stroke", lambda: _undo_stroke(context), danger=True),
-    ])
+    items = [(i.identifier, i.name) for i in settings.bl_rna.properties["draw_thickness"].enum_items]
+    names = dict(items)
+    out.append([vr_ui.select(
+        "draw_thickness", "Thickness", names[settings.draw_thickness],
+        lambda: open_picker("Thickness", [Option(i, n) for i, n in items], settings.draw_thickness,
+                            lambda v: setattr(settings, "draw_thickness", v)))])
+    out.append([vr_ui.button("undo_stroke", "Undo stroke", lambda: _undo_stroke(context), danger=True)])
     return out
 
 
