@@ -23,6 +23,26 @@ lines = []
 failures = []
 
 
+HANDLES = []  # this script's own draw handlers
+
+
+def quit_cleanly():
+    """Quit Blender. vr_sculpt was registered by hand, so Blender won't disable it on exit: unregister it
+    first, or its GPU offscreens are freed after Blender's own teardown and the exit crashes. This
+    script's draw handlers go first, since Blender redraws once more before quitting and they could
+    render into a new offscreen."""
+    for h in HANDLES:
+        bpy.types.SpaceView3D.draw_handler_remove(h, 'WINDOW')
+    HANDLES.clear()
+    try:
+        import vr_sculpt
+        vr_sculpt.unregister()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+    bpy.ops.wm.quit_blender()
+
+
 def log(*a):
     s = " ".join(str(x) for x in a)
     print(s, flush=True)
@@ -139,7 +159,7 @@ def run():
             # Playback runs and can be stopped.
             check(anim.toggle_play(bpy.context) and anim.is_playing(bpy.context), "Play starts playback")
         state = {"start": scene.frame_current, "t": time.monotonic()}
-        bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW')
+        HANDLES.append(bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW'))
         bpy.app.timers.register(lambda: (after_play(win, area, region, state), None)[1], first_interval=0.6)
     except Exception:
         log(traceback.format_exc())
@@ -192,7 +212,7 @@ def done():
     log("RESULT:", "ALL PASSED" if not failures else f"FAILED {failures}")
     with open(LOG, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
-    bpy.ops.wm.quit_blender()
+    quit_cleanly()
 
 
 bpy.app.timers.register(lambda: (run(), None)[1], first_interval=1.5)

@@ -17,6 +17,18 @@ OUT = os.path.join(ROOT, "tests", "native_modal_result.txt")
 lines = []
 
 
+def quit_cleanly():
+    """Quit Blender. vr_sculpt was registered by hand, so Blender won't disable it on exit: unregister it
+    first, or its GPU offscreens are freed after Blender's own teardown and the exit crashes."""
+    try:
+        import vr_sculpt
+        vr_sculpt.unregister()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+    bpy.ops.wm.quit_blender()
+
+
 def log(*a):
     s = " ".join(str(x) for x in a)
     print(s)
@@ -96,7 +108,7 @@ def finish():
     vr_sculpt.unregister()
     with open(OUT, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
-    bpy.app.timers.register(lambda: (bpy.ops.wm.quit_blender(), None)[1], first_interval=0.2)
+    bpy.app.timers.register(lambda: (quit_cleanly(), None)[1], first_interval=0.2)
 
 
 def start():

@@ -19,6 +19,18 @@ sys.path.insert(0, ROOT)
 LOG = os.path.join(ROOT, "tests", "paint_batch_probe_result.txt")
 
 
+def quit_cleanly():
+    """Quit Blender. vr_sculpt was registered by hand, so Blender won't disable it on exit: unregister it
+    first, or its GPU offscreens are freed after Blender's own teardown and the exit crashes."""
+    try:
+        import vr_sculpt
+        vr_sculpt.unregister()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+    bpy.ops.wm.quit_blender()
+
+
 def log(*a):
     s = " ".join(str(x) for x in a)
     print(s, flush=True)
@@ -100,7 +112,7 @@ def run():
                 menus.set_object_mode(bpy.context, obj, 'OBJECT')
     except Exception:
         log(traceback.format_exc())
-    bpy.ops.wm.quit_blender()
+    quit_cleanly()
 
 
 bpy.app.timers.register(lambda: (run(), None)[1], first_interval=1.5)

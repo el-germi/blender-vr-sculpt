@@ -4,6 +4,7 @@ blender --factory-startup test_scene.blend --python tests/overlay_preview.py
 Saves tests/overlay_<name>.png for each scenario.
 """
 
+import math
 import os
 import sys
 import traceback
@@ -17,6 +18,26 @@ LOG = os.path.join(ROOT, "tests", "overlay_preview_result.txt")
 lines = []
 
 
+HANDLES = []  # this script's own draw handlers
+
+
+def quit_cleanly():
+    """Quit Blender. vr_sculpt was registered by hand, so Blender won't disable it on exit: unregister it
+    first, or its GPU offscreens are freed after Blender's own teardown and the exit crashes. This
+    script's draw handlers go first, since Blender redraws once more before quitting and they could
+    render into a new offscreen."""
+    for h in HANDLES:
+        bpy.types.SpaceView3D.draw_handler_remove(h, 'WINDOW')
+    HANDLES.clear()
+    try:
+        import vr_sculpt
+        vr_sculpt.unregister()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+    bpy.ops.wm.quit_blender()
+
+
 def log(*a):
     s = " ".join(str(x) for x in a)
     print(s)
@@ -27,8 +48,12 @@ class FakeSessionState:
     """Two controllers held in front of a viewer at the scene camera."""
     viewer_scale = 1.0
     viewer_pose_location = Vector((0.0, -0.6, 1.45))
+    viewer_pose_rotation = Quaternion((1, 0, 0), math.pi / 2)  # looking along +Y
+    navigation_scale = 1.0
 
     def __init__(self):
+        self.navigation_location = Vector((0.0, 0.0, 0.0))
+        self.navigation_rotation = Quaternion()
         down_forward = Quaternion((1, 0, 0), 0.9)  # tilt local -Z from straight down toward +Y
         self.aim_loc = [Vector((-0.18, -0.35, 1.2)), Vector((0.18, -0.35, 1.2))]
         self.aim_rot = [down_forward, down_forward]
@@ -148,7 +173,7 @@ def setup():
         rv3d.view_location = (0.0, -0.15, 1.25)
         rv3d.view_rotation = Quaternion((1, 0, 0), 1.45)
         rv3d.view_distance = 0.55
-        bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW')
+        HANDLES.append(bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW'))
         step(win, area, region, 0)
     except Exception:
         log(traceback.format_exc())
@@ -185,7 +210,7 @@ def shoot(win, area, region, i):
 def done():
     with open(LOG, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
-    bpy.ops.wm.quit_blender()
+    quit_cleanly()
 
 
 bpy.app.timers.register(lambda: (setup(), None)[1], first_interval=1.5)
