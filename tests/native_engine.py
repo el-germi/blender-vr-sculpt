@@ -18,6 +18,18 @@ OUT = os.path.join(ROOT, "tests", "native_engine_result.txt")
 lines = []
 
 
+def quit_cleanly():
+    """Quit Blender. vr_sculpt was registered by hand, so Blender won't disable it on exit: unregister it
+    first, or its GPU offscreens are freed after Blender's own teardown and the exit crashes."""
+    try:
+        import vr_sculpt
+        vr_sculpt.unregister()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+    bpy.ops.wm.quit_blender()
+
+
 def log(*a):
     s = " ".join(str(x) for x in a)
     print(s)
@@ -87,6 +99,26 @@ def main():
             d = np.linalg.norm(positions(obj) - start, axis=1)
             log(f"back side: {s.dabs} dabs, {s.dropped} dropped, moved {int((d > 1e-6).sum())} verts")
 
+            # Strength from the hand panel's slider: the same stroke at 1.0 and 0.2.
+            from vr_sculpt import menus, vr_ui
+            c.scene.vr_sculpt.engine = 'NATIVE'
+            c.scene.vr_sculpt.mode = 'SCULPT'  # The saved scene may be in another VR mode.
+            depth = {}
+            for strength, z0 in ((1.0, -0.75), (0.2, 0.75)):
+                widgets, _h = vr_ui.layout(menus.rows(c))
+                slider = vr_ui.find(widgets, "strength")
+                slider.on_change(strength)
+                s = native.NativeStroke(c, obj, 0.15)
+                start = positions(obj)
+                for i in range(20):
+                    a = -0.3 + i * 0.03
+                    s.update(Vector((np.sin(a), -np.cos(a), z0)).normalized() * 1.02, None, 1.0)
+                s.finish()
+                depth[strength] = float(np.linalg.norm(positions(obj) - start, axis=1).max())
+            log(f"strength slider: shown {native.get_strength(c):.2f}, max move at 1.0 {depth[1.0]:.4f}, "
+                f"at 0.2 {depth[0.2]:.4f}, ratio {depth[0.2] / max(depth[1.0], 1e-9):.2f}")
+            log("strength honored:", depth[0.2] < depth[1.0] * 0.6)
+
             # Brush cycling via essentials assets.
             names = []
             for _ in range(len(native.NATIVE_BRUSHES) + 1):
@@ -111,7 +143,7 @@ def main():
         vr_sculpt.unregister()
     with open(OUT, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
-    bpy.ops.wm.quit_blender()
+    quit_cleanly()
 
 
 bpy.app.timers.register(lambda: (main(), None)[1], first_interval=1.5)

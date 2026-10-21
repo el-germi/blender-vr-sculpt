@@ -45,6 +45,24 @@ def sculpt_brush(context):
     return context.tool_settings.sculpt.brush
 
 
+def get_strength(context):
+    """The native brush strength: the unified settings' when Unified Strength is on, else the brush's."""
+    sculpt = context.tool_settings.sculpt
+    ups = sculpt.unified_paint_settings if sculpt else None
+    if ups is not None and ups.use_unified_strength:
+        return ups.strength
+    brush = sculpt.brush if sculpt else None
+    return brush.strength if brush is not None else None
+
+
+def set_strength(context, value):
+    """Set it on both, like the size (5.4 Alpha reads some brush values from the unified settings)."""
+    sculpt = context.tool_settings.sculpt
+    for owner in (sculpt.unified_paint_settings, sculpt.brush) if sculpt else ():
+        if owner is not None:
+            owner.strength = value
+
+
 def activate_brush(context, name):
     window = context.window or context.window_manager.windows[0]
     view = largest_view3d(window)

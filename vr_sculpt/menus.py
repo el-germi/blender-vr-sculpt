@@ -313,6 +313,11 @@ def _sculpt_rows(context, settings):
     if settings.engine == 'PYTHON':
         out.append([vr_ui.slider("strength", "Strength", settings.strength, 0.0, 1.0,
                                  lambda v: setattr(settings, "strength", v), fmt=lambda v: f"{v:.2f}")])
+    else:
+        strength = native.get_strength(context)
+        if strength is not None:
+            out.append([vr_ui.slider("strength", "Strength", strength, 0.0, 1.0,
+                                     lambda v: native.set_strength(context, v), fmt=lambda v: f"{v:.2f}")])
     axes = symmetry.sculpt_axes(context)
     out.append([vr_ui.label("Symmetry:")] + [
         vr_ui.button("sym_" + a, a, (lambda i=i: symmetry.sculpt_toggle(context, i)), active=axes[i])
