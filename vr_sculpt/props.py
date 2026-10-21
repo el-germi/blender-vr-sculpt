@@ -251,6 +251,21 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     symmetry_y: BoolProperty(name="Y Symmetry", description="Mirror strokes across the object's local Y axis")
     symmetry_z: BoolProperty(name="Z Symmetry", description="Mirror strokes across the object's local Z axis")
     grab_rotate: BoolProperty(name="Grab Rotates", description="Grab follows controller rotation, not only position", default=True)
+    grab_deadzone: FloatProperty(
+        name="Grab Threshold",
+        description=(
+            "How far the hand has to move (meters, hand space) before a grabbed object or bone starts to follow, "
+            "so a trigger press meant to select doesn't nudge it. Turning the controller past a few degrees "
+            "counts too"
+        ),
+        default=0.015, min=0.0, soft_max=0.1, subtype='DISTANCE', unit='LENGTH')
+    grab_delay: FloatProperty(
+        name="Grab Delay",
+        description=(
+            "Holding the trigger this long (seconds) also starts the move, for small precise moves. "
+            "0 = only the threshold"
+        ),
+        default=0.35, min=0.0, soft_max=2.0, subtype='TIME_ABSOLUTE', unit='TIME_ABSOLUTE')
     left_inverts: BoolProperty(name="Left Hand Inverts", description="Left trigger subtracts with Draw and Inflate", default=True)
     tip_offset: FloatProperty(
         name="Tip Offset",

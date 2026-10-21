@@ -4,6 +4,9 @@ Each handler gets update(context, aim_pose, tip_pose, value) every frame while t
 held and finish(context) on release; `changed` decides whether an undo step is pushed.
 """
 
+import math
+import time
+
 from mathutils import Matrix, Vector
 
 from . import generic, grid, menus, primitives, vr_ui
@@ -110,17 +113,62 @@ class UIPress:
             context.view_layer.update()
 
 
+GATE_ANGLE = math.radians(8.0)  # turning the controller this far also starts a grab's move
+
+
+class DragGate:
+    """Keeps a grab still until the hand clearly means to move it: it moved past the Grab Threshold,
+    turned past GATE_ANGLE, or the trigger was held for the Grab Delay. Selecting needs a trigger
+    press, and without this the jitter of that press nudged what it selected.
+
+    The move then counts from the last pose that was still inside the threshold, so nothing jumps
+    when it starts and a fast move isn't lost.
+    """
+
+    def __init__(self, context, pose):
+        settings = context.scene.vr_sculpt
+        ss = context.window_manager.xr_session_state
+        self.distance = settings.grab_deadzone * (ss.viewer_scale if ss is not None else 1.0)
+        self.delay = settings.grab_delay
+        self.start = pose.copy()
+        self.inside = pose.copy()
+        self.t0 = time.monotonic()
+        self.open = False
+
+    def update(self, pose):
+        """The pose the move counts from, on the update that opens the gate; otherwise None."""
+        if self.open:
+            return None
+        moved = (pose.translation - self.start.translation).length > self.distance
+        turned = self.start.to_quaternion().rotation_difference(pose.to_quaternion()).angle > GATE_ANGLE
+        if moved or turned:
+            self.open = True
+            return self.inside
+        if self.delay > 0.0 and time.monotonic() - self.t0 >= self.delay:
+            self.open = True
+            return pose.copy()
+        self.inside = pose.copy()
+        return None
+
+
 class MoveObject:
-    """Grab an object with the controller: it follows the controller's position and rotation."""
+    """Grab an object with the controller: it follows the controller's position and rotation
+    (once the DragGate opens; until then the press only selects it)."""
 
     def __init__(self, context, obj, pose):
         self.obj = obj
         self.start = obj.matrix_world.copy()
         self.pose_inv = pose.inverted_safe()
+        self.gate = DragGate(context, pose)
         self.changed = False
         primitives.make_active(context, obj)
 
     def update(self, context, pose, tip_pose, value):
+        if not self.gate.open:
+            base = self.gate.update(tip_pose)
+            if base is None:
+                return
+            self.pose_inv = base.inverted_safe()
         new = tip_pose @ self.pose_inv @ self.start
         new.translation = grid.snap_if(context.scene.vr_sculpt, new.translation)
         if new != self.obj.matrix_world:

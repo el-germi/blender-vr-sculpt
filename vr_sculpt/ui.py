@@ -183,6 +183,10 @@ class VIEW3D_PT_vr_extras(bpy.types.Panel):
         row.active = settings.onion_mode == 'FRAMES'
         row.prop(settings, "onion_step")
 
+        col = layout.column(heading="Grabbing")
+        col.prop(settings, "grab_deadzone", text="Threshold")
+        col.prop(settings, "grab_delay", text="Delay")
+
         col = layout.column(heading="Grid")
         col.prop(settings, "grid_show", text="Show")
         col.prop(settings, "grid_snap", text="Snap")

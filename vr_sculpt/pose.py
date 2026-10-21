@@ -383,9 +383,11 @@ class Follow:
 
 
 class Grab:
-    """Trigger handler: pose the touched bone (FK or IK), or move the touched object, while held."""
+    """Trigger handler: pose the touched bone (FK or IK), or move the touched object, while held.
+    The press selects it; it only starts to move once the DragGate opens."""
 
     def __init__(self, context, settings, obj, pb, fraction, tip_pose):
+        from . import interactions
         if pb is not None:
             select_bone(obj, pb)
             if settings.pose_tool == 'IK':
@@ -395,14 +397,29 @@ class Grab:
         else:
             primitives.make_active(context, obj)
             kind = 'RIGID'
-        self.follow = Follow(obj, pb, tip_pose, kind, grab=tip_pose.translation, chain=settings.pose_chain,
-                             mirror=settings.pose_mirror)
+        self._follow_args = (obj, pb, kind, settings.pose_chain, settings.pose_mirror)
+        self.follow = None
+        self._start_follow(tip_pose)
+        self.gate = interactions.DragGate(context, tip_pose)
         self.written = {}
         self.changed = False
+
+    def _start_follow(self, pose):
         from . import puppet
+        obj, pb, kind, chain, mirror = self._follow_args
+        if self.follow is not None:
+            puppet.grab_ended(self.follow)
+        self.follow = Follow(obj, pb, pose, kind, grab=pose.translation, chain=chain, mirror=mirror)
         puppet.grab_started(self.follow)
 
     def update(self, context, pose, tip_pose, value):
+        if not self.gate.open:
+            base = self.gate.update(tip_pose)
+            if base is None:
+                return
+            if self.follow.target() is None:
+                return
+            self._start_follow(base)  # From where the hand was when the move began.
         written = self.follow.apply(tip_pose)
         if written:
             for k, location in written.items():

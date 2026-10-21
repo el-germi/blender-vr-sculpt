@@ -316,6 +316,69 @@ def test_objects(rig, body):
     return prop
 
 
+def test_drag_gate(rig, prop):
+    print("== grab threshold (a press selects without nudging)")
+    import time
+    ctx = bpy.context
+    settings = ctx.scene.vr_sculpt
+    settings.grab_deadzone, settings.grab_delay = 0.015, 0.0
+    from vr_sculpt import interactions
+    start = prop.matrix_world.translation.copy()
+    tip = start + Vector((0.0, 0.0, 0.05))
+    h = interactions.MoveObject(ctx, prop, at(tip))
+    check(ctx.view_layer.objects.active == prop, "the press selects the object")
+    for d in (0.004, -0.006, 0.008):  # Jitter of a trigger press.
+        drag(ctx, h, at(tip + Vector((d, 0.0, 0.0)), Quaternion((0, 0, 1), math.radians(3))))
+    check(near(prop.matrix_world.translation, start, 1e-6) and not h.changed, "jitter inside the threshold: it stays")
+    drag(ctx, h, at(tip + Vector((0.012, 0.0, 0.0))))
+    drag(ctx, h, at(tip + Vector((0.020, 0.0, 0.0))))
+    moved = prop.matrix_world.translation - start
+    check(h.changed and abs(moved.x - 0.008) < 1e-4,
+          f"past it, it moves from the last pose inside, without a jump ({moved.x * 1000:.1f} mm for 20)")
+    drag(ctx, h, at(tip + Vector((0.120, 0.0, 0.0))))
+    moved = prop.matrix_world.translation - start
+    check(abs(moved.x - 0.108) < 1e-4, "then follows the hand 1:1")
+    prop.matrix_world.translation = start
+
+    h = interactions.MoveObject(ctx, prop, at(tip))
+    drag(ctx, h, at(tip + Vector((0.3, 0.0, 0.0))))
+    check(near(prop.matrix_world.translation, start + Vector((0.3, 0.0, 0.0))), "a fast move isn't lost")
+    prop.matrix_world.translation = start
+
+    h = interactions.MoveObject(ctx, prop, at(tip))
+    drag(ctx, h, at(tip, Quaternion((0, 0, 1), math.radians(20))))
+    check(h.changed, "turning the controller past a few degrees starts it too")
+    prop.matrix_world = Matrix.Translation(start)
+
+    settings.grab_delay = 0.05
+    h = interactions.MoveObject(ctx, prop, at(tip))
+    drag(ctx, h, at(tip + Vector((0.003, 0.0, 0.0))))
+    check(not h.changed, "a short hold doesn't")
+    time.sleep(0.06)
+    drag(ctx, h, at(tip + Vector((0.004, 0.0, 0.0))))
+    drag(ctx, h, at(tip + Vector((0.009, 0.0, 0.0))))
+    moved = prop.matrix_world.translation - start
+    check(h.changed and abs(moved.x - 0.005) < 1e-4, f"held for the Grab Delay: small precise moves follow ({moved.x * 1000:.1f} mm)")
+    prop.matrix_world.translation = start
+
+    # Bones: the same gate.
+    settings.grab_delay = 0.0
+    pose.use_rig(ctx, rig)
+    rig.animation_data_clear()
+    pose.reset(rig.pose.bones)
+    ctx.view_layer.update()
+    h = grab(ctx, rig, (0.67, 0.0, 1.4))
+    drag(ctx, h, at((0.675, 0.004, 1.395)))
+    check(not h.changed and rig.pose.bones["Forearm.L"].rotation_quaternion.angle < 1e-6,
+          "a bone press with jitter selects it without turning it")
+    drag(ctx, h, at((0.4, 0.0, 1.13)))
+    check(near(world_tail(rig, "Forearm.L"), (0.4, 0.0, 1.1), 0.02), "then it poses as before")
+    h.finish(ctx)
+    pose.reset(rig.pose.bones)
+    ctx.view_layer.update()
+    pose.choose_rig(ctx, "")
+
+
 def test_puppet(rig, prop):
     print("== puppeteering")
     ctx = bpy.context
@@ -392,6 +455,8 @@ def main():
     vr_sculpt.register()
     try:
         ctx = bpy.context
+        # The geometry tests drag in single steps; the threshold has its own test.
+        ctx.scene.vr_sculpt.grab_delay = 0.0
         rig, body = make_rig(ctx)
         test_enter(rig, body)
         test_pick(rig)
@@ -401,6 +466,7 @@ def main():
         test_keys(rig)
         test_rows(rig)
         prop = test_objects(rig, body)
+        test_drag_gate(rig, prop)
         test_puppet(rig, prop)
     except Exception:
         traceback.print_exc()

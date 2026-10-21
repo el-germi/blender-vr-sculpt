@@ -26,6 +26,11 @@ Meta Quest over OpenXR.
 - **Model mode**: drag out any Add > Mesh primitive in empty space, grab
   objects to move and rotate them, and edit the primitive's settings
   afterwards. Primitives stay editable until you sculpt them.
+- **Selecting doesn't nudge**: a grabbed object or bone (Model and Pose
+  mode) only starts to follow once your hand moves past the Grab Threshold
+  (1.5 cm), turns past 8 degrees, or holds the trigger for the Grab Delay
+  (0.35 s, for small precise moves). The move counts from where your hand
+  was just before, so nothing jumps. Both are in VR Extras > Grabbing.
 - **Every Add > Mesh entry, including extensions.** The list is read from
   Blender's own Add > Mesh menu, so primitives that extensions add there show
   up too: with Extra Mesh Objects that's 42 entries (gears, pipe joints,
