@@ -13,8 +13,16 @@ driven by a controller's grip or the headset instead of the trigger.
 Writes go through Bone.convert_local_to_pose(invert=True), which turns a wanted armature-space
 matrix into the bone's local (basis) matrix given its parent's, so a whole IK chain is written
 in one pass without waiting for Blender to re-evaluate the pose.
+
+Limits (limited_basis): every write keeps the bone's rotation and location locks and its Limit
+Rotation / Limit Location constraints (Local Space, full influence: the ones that act on the
+bone's own channels). IK also keeps the bones' IK limits and IK locks (Bone > Inverse Kinematics),
+like Blender's own IK; FK doesn't, like Blender. In IK they're applied inside every CCD step, so
+the rest of the chain makes up for a joint that can't bend further. Other constraints still act
+on top, as Blender evaluates them.
 """
 
+import math
 import time
 
 import bpy
@@ -208,23 +216,142 @@ def set_location(pb, loc):
     pb.location = [old[i] if pb.lock_location[i] else loc[i] for i in range(3)]
 
 
-def apply_basis(pb, basis, location):
+# --- limits ------------------------------------------------------------------
+
+Y_AXIS = Vector((0.0, 1.0, 0.0))
+
+
+def _acts(con, kind):
+    """Whether constraint con is a kind we pre-apply: on, full influence, Local Space (the bone's own
+    channels, which is what we write)."""
+    enabled = getattr(con, "enabled", not con.mute)
+    return con.type == kind and enabled and con.influence > 0.999 and con.owner_space == 'LOCAL'
+
+
+def _euler_order(pb, con):
+    order = con.euler_order
+    if order == 'AUTO':
+        order = pb.rotation_mode if pb.rotation_mode not in {'QUATERNION', 'AXIS_ANGLE'} else 'XYZ'
+    return order
+
+
+def _clamp(v, lo, hi):
+    return min(max(v, lo), hi)
+
+
+def _ik_limits(pb, q):
+    """q kept within pb's IK limits and locks. Like Blender's IK: twist about the bone (Y) and swing
+    (X / Z, as the swing's rotation vector) are limited separately."""
+    locks = (pb.lock_ik_x, pb.lock_ik_y, pb.lock_ik_z)
+    uses = (pb.use_ik_limit_x, pb.use_ik_limit_y, pb.use_ik_limit_z)
+    if not any(locks) and not any(uses):
+        return q
+    t = _twist(q, Y_AXIS)
+    twist = 2.0 * math.atan2(t.y, t.w)
+    twist = (twist + math.pi) % (2.0 * math.pi) - math.pi
+    swing = q @ t.inverted()
+    axis, angle = swing.to_axis_angle()
+    values = [axis.x * angle, twist, axis.z * angle]
+    for i, a in enumerate("xyz"):
+        if locks[i]:
+            values[i] = 0.0
+        elif uses[i]:
+            values[i] = _clamp(values[i], getattr(pb, "ik_min_" + a), getattr(pb, "ik_max_" + a))
+    sv = Vector((values[0], 0.0, values[2]))
+    swing = Quaternion(sv.normalized(), sv.length) if sv.length > 1e-9 else Quaternion()
+    return swing @ Quaternion(Y_AXIS, values[1])
+
+
+def _rotation_locks(pb, q):
+    """q with pb's locked rotation channels kept at their current values (as set_rotation writes)."""
+    locks = tuple(pb.lock_rotation)
+    mode = pb.rotation_mode
+    if mode == 'QUATERNION':
+        lock_w = pb.lock_rotation_w if pb.lock_rotations_4d else False
+        if not (lock_w or any(locks)):
+            return q
+        q = q.copy()
+        q.make_compatible(pb.rotation_quaternion)
+        old = pb.rotation_quaternion
+        new = [old[i] if locked else q[i] for i, locked in enumerate((lock_w,) + locks)]
+        return Quaternion(new).normalized()
+    if mode == 'AXIS_ANGLE' or not any(locks):
+        return q
+    e = q.to_euler(mode, pb.rotation_euler)
+    old = pb.rotation_euler
+    for i in range(3):
+        if locks[i]:
+            e[i] = old[i]
+    return e.to_quaternion()
+
+
+def limit_rotation(pb, q, ik=False):
+    """The local rotation q kept within pb's limits: IK limits (with ik), Limit Rotation constraints
+    and rotation locks."""
+    q = q.normalized()
+    if ik:
+        q = _ik_limits(pb, q)
+    for con in pb.constraints:
+        if _acts(con, 'LIMIT_ROTATION'):
+            order = _euler_order(pb, con)
+            e = q.to_euler(order)
+            for i, a in enumerate("xyz"):
+                if getattr(con, "use_limit_" + a):
+                    e[i] = _clamp(e[i], getattr(con, "min_" + a), getattr(con, "max_" + a))
+            q = e.to_quaternion()
+    return _rotation_locks(pb, q)
+
+
+def limit_location(pb, loc):
+    """The local location loc kept within pb's Limit Location constraints and location locks."""
+    loc = Vector(loc)
+    for con in pb.constraints:
+        if _acts(con, 'LIMIT_LOCATION'):
+            for i, a in enumerate("xyz"):
+                if getattr(con, "use_min_" + a):
+                    loc[i] = max(loc[i], getattr(con, "min_" + a))
+                if getattr(con, "use_max_" + a):
+                    loc[i] = min(loc[i], getattr(con, "max_" + a))
+    old = pb.location
+    return Vector([old[i] if pb.lock_location[i] else loc[i] for i in range(3)])
+
+
+def limited_basis(pb, basis, location=False, ik=False):
+    """The basis pb actually gets for a wanted one: limited rotation, and the wanted location
+    (limited) only if it moves (location), else its current one. Scale is left alone."""
     loc, rot, _scale = basis.decompose()
-    set_rotation(pb, rot)
+    rot = limit_rotation(pb, rot, ik)
+    loc = limit_location(pb, loc) if location else pb.location.copy()
+    return Matrix.LocRotScale(loc, rot, pb.scale)
+
+
+def pose_for(pb, basis, parent_matrix):
+    """The armature-space matrix a basis puts pb at, given its parent's (basis_for's inverse)."""
+    bone = pb.bone
+    if pb.parent is None:
+        return bone.convert_local_to_pose(basis, bone.matrix_local)
+    return bone.convert_local_to_pose(basis, bone.matrix_local, parent_matrix=parent_matrix,
+                                      parent_matrix_local=pb.parent.bone.matrix_local)
+
+
+def apply_basis(pb, basis, location, ik=False):
+    b = limited_basis(pb, basis, location, ik)
+    set_rotation(pb, b.to_quaternion())
     if location:
-        set_location(pb, loc)
+        set_location(pb, b.translation)
 
 
 def mirror_bone(obj, pb, location):
-    """Copy pb's local transform, mirrored across X, to its .L/.R counterpart. Returns it or None."""
+    """Copy pb's local transform, mirrored across X, to its .L/.R counterpart (within its own
+    limits). Returns it or None."""
     other = obj.pose.bones.get(bpy.utils.flip_name(pb.name))
     if other is None or other == pb:
         return None
     q = rotation(pb)
-    set_rotation(other, Quaternion((q.w, q.x, -q.y, -q.z)))
+    set_rotation(other, limit_rotation(other, Quaternion((q.w, q.x, -q.y, -q.z))))
     if location:
         loc = pb.location
-        set_location(other, (-loc.x, loc.y, loc.z))
+        set_location(other, limit_location(other, (-loc.x, loc.y, loc.z)))
     return other
 
 
@@ -261,11 +388,13 @@ def _about(point, q):
     return Matrix.Translation(point) @ q.to_matrix().to_4x4() @ Matrix.Translation(-point)
 
 
-def solve_ccd(mats, effector, target, iterations=CCD_ITERATIONS):
+def solve_ccd(mats, effector, target, iterations=CCD_ITERATIONS, constrain=None):
     """Turn the chain so the effector reaches target (Cyclic Coordinate Descent), in place.
 
     mats: armature-space matrices, the effector's bone first, then its parents in order;
-    effector: a point fixed in mats[0]'s bone space. Returns the effector's final position.
+    effector: a point fixed in mats[0]'s bone space. constrain(j, matrix, mats), if given, returns
+    the matrix bone j can actually take instead of matrix (its limits); the bones below it follow.
+    Returns the effector's final position.
     """
     for _ in range(iterations):
         for j in range(len(mats)):
@@ -274,12 +403,25 @@ def solve_ccd(mats, effector, target, iterations=CCD_ITERATIONS):
             a, b = eff - head, target - head
             if a.length < 1e-7 or b.length < 1e-7:
                 continue
-            r = _about(head, a.rotation_difference(b))
+            new = _about(head, a.rotation_difference(b)) @ mats[j]
+            if constrain is not None:
+                new = constrain(j, new, mats)
+            delta = new @ mats[j].inverted_safe()
             for k in range(j + 1):
-                mats[k] = r @ mats[k]
+                mats[k] = delta @ mats[k]
         if (mats[0] @ effector - target).length < CCD_TOLERANCE:
             break
     return mats[0] @ effector
+
+
+def chain_limits(chain):
+    """A solve_ccd constrain callback for pose bones chain (effector's bone first): each step keeps
+    the bone within its IK limits, Limit constraints and locks."""
+    def constrain(j, matrix, mats):
+        pb = chain[j]
+        parent = mats[j + 1] if j + 1 < len(chain) else (pb.parent.matrix if pb.parent else None)
+        return pose_for(pb, limited_basis(pb, basis_for(pb, matrix, parent), ik=True), parent)
+    return constrain
 
 
 class Follow:
@@ -364,14 +506,14 @@ class Follow:
             mats = [c.matrix.copy() for c in chain]
             effector = mats[0].inverted_safe() @ pb.head
             wanted = carry @ self.start
-            solve_ccd(mats, effector, mwi @ wanted.translation)
+            solve_ccd(mats, effector, mwi @ wanted.translation, constrain=chain_limits(chain))
             # Root of the chain first: each bone's basis is relative to its parent's new matrix.
             for i in range(len(chain) - 1, -1, -1):
                 c = chain[i]
                 parent = mats[i + 1] if i + 1 < len(chain) else (c.parent.matrix if c.parent else None)
-                apply_basis(c, basis_for(c, mats[i], parent), False)
+                apply_basis(c, basis_for(c, mats[i], parent), False, ik=True)
                 written[c] = False
-            apply_basis(pb, basis_for(pb, mwi @ wanted, mats[0]), False)
+            apply_basis(pb, basis_for(pb, mwi @ wanted, mats[0]), False, ik=True)
             written[pb] = False
         if self.mirror:
             for b, location in list(written.items()):
