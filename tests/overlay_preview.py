@@ -96,19 +96,22 @@ def scenario_native(ctx):
 
 
 def scenario_model(ctx):
-    from vr_sculpt import interactions, menus, primitives, vr_ui
+    from vr_sculpt import hud, menus, primitives, radial
     menus.set_mode(ctx, 'MODEL')
     cube = primitives.create(ctx, 'CUBE', (-0.05, -0.1, 1.3))
     cube.vr_prim.size = (0.12, 0.08, 0.1)
     ctx.view_layer.update()
-    # Left tip inside the cube (bounds highlight), right ray on the "Size Y" slider.
+    # Left tip inside the cube (bounds highlight); the object pie (A) open at the right hand, on Shape > Size Y.
     fake.aim_loc[0] = Vector((-0.05, -0.1, 1.3)) - fake.aim_rot[0] @ Vector((0, 0, -ctx.scene.vr_sculpt.tip_offset))
-    matrix, widgets, height = interactions.panel_frame(ctx, fake)
-    w = vr_ui.find(widgets, "size_Y")
-    target = matrix @ Vector(((w.rect[0] + w.rect[2]) / 2, (w.rect[1] + w.rect[3]) / 2, 0.0))
-    normal = (matrix.to_3x3() @ Vector((0, 0, 1))).normalized()
-    fake.aim_loc[1] = target + normal * 0.25 + Vector((0.12, 0, -0.08))
-    fake.aim_rot[1] = (target - fake.aim_loc[1]).to_track_quat('-Z', 'Y')
+    level = menus.object_level(ctx)
+    pie = radial.Pie('OBJECT', 1, level, hud.billboard(fake.aim_loc[1], fake.viewer_pose_location, 1.0),
+                     Quaternion())
+    pie.t0 -= 10.0
+    pie.hover = [i.id for i in level.items].index("page_shape")
+    pie.open(level.items[pie.hover])
+    pie.hover = [i.id for i in pie.level.items].index("size_Y")
+    pie.pointer = Vector((0.0, -0.03))
+    radial.pie = pie
 
 
 def scenario_draw(ctx):
@@ -154,7 +157,6 @@ def scenario_draw(ctx):
     note.points.add(len(pts))
     for p, c in zip(note.points, pts):
         p.co = c
-    s.show_panel = True
 
 
 SCENARIOS = [("python", scenario_python), ("native", scenario_native), ("model", scenario_model),
@@ -185,6 +187,8 @@ def step(win, area, region, i):
         done()
         return
     name, fn = SCENARIOS[i]
+    from vr_sculpt import radial
+    radial.reset()  # A pie left open by the last scenario points at its (deleted) objects.
     try:
         with bpy.context.temp_override(window=win, area=area, region=region):
             fn(bpy.context)

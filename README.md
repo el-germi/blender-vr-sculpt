@@ -4,7 +4,12 @@ Sculpt, model, draw, paint, pose, puppeteer and measure with VR controllers insi
 extension, no Blender fork. Built and tested on **Blender 5.4.0 Alpha** with a
 Meta Quest over OpenXR.
 
-![Brush rings and the brush card, native engine](docs/overlay_native.png)
+![The pies at the hand](docs/ui_radial_levels.png)
+
+**This branch is UI rework A, radial**: no hand panel. Everything is in pie menus at the hand
+(hold Y / B / A / X), values are turned by twisting the controller, and a small badge at the right
+hand shows the tool. See [docs/ui_radial.md](docs/ui_radial.md) for the design, the full map of
+where every feature lives, and what to try in the headset.
 
 ## Features
 
@@ -19,8 +24,9 @@ Meta Quest over OpenXR.
     Inflate/Deflate, Crease Sharp, Flatten/Contrast.
 - **Brush cursor in the headset**: rings at each controller tip, colored per
   brush (blue when that hand inverts).
-- **Brush card** above the right controller: brush icon and name, plus a
-  one-line description for a few seconds after switching.
+- **Tool status** above the right controller: a small badge with the tool's
+  icon in the tool's color, ringed in the mode's color; its name shows beside it
+  for a moment after switching.
 - **Haptics** on contact with the surface.
 - One undo step per stroke (Python engine).
 - **Model mode**: drag out any Add > Mesh primitive in empty space, grab
@@ -79,24 +85,24 @@ Meta Quest over OpenXR.
   stroke), Taper (thin tips ramping to full width over a share of the
   stroke's length), or fixed. Edit pulls part of a stroke into a new shape; Erase sweeps
   strokes and notes away. Mirror on X / Y / Z around the 3D cursor (editing
-  one side updates the other), a stabilizer, 8 colors, and B to undo the last
-  stroke.
+  one side updates the other), a stabilizer, 8 colors, and a B tap to undo the
+  last stroke.
 - **Paint mode**: texture painting with Blender's own texture paint
   brushes (Hard, Soft, Airbrush, Blur, Smear, Erase), pressure-sensitive.
   **Contact** paints where the tip touches the surface, like a brush;
   **Spray** paints where the controller points, at any distance. The left
   hand paints the second color. 8 swatches, hue / saturation / value
-  sliders, Swap, and **Pick color** (an eyedropper on the texture). B takes
+  dials, Swap, and **Pick color** (an eyedropper on the texture). A B tap takes
   back the whole last stroke. **Set up for painting** gives a mesh UVs
   (Smart UV Project, if it has none) and a 1K / 2K / 4K image.
 - **Tools mode**:
   - **Tape measure**: drag to measure. Ends snap to nearby mesh vertices (or
     the grid), labels use the scene's units, and measurements stay until you
-    remove them (B removes the last one).
+    remove them (a B tap removes the last one).
   - **Scene camera**: hold the trigger and the camera follows your controller
     (it looks where you point), with a live **camera preview** above your
-    hand. Switch or add cameras and set the lens from the panel. The preview
-    can also be pinned next to the hand panel in every mode.
+    hand. Switch or add cameras and set the lens from the object pie (A). The
+    preview can also be pinned above the left hand in every mode.
 - **3D grid and snapping**: a lattice of points around the controller tips,
   in scene units. Snap to Grid snaps new primitives, grabbed objects and tape
   ends. In Model mode, **Surface** makes a grabbed object sit on the mesh
@@ -125,12 +131,12 @@ Meta Quest over OpenXR.
   stick = scroll wheel. A virtual keyboard (sticky Shift / Ctrl / Alt) opens
   from the screen's title bar; drag the title bar to move the screen. It
   travels with you when you move. On other systems the screen is view only.
-- **Animation**: a timeline strip next to the hand panel, in every mode:
-  a frame scrubber with the selection's keys marked, play / stop, frame
+- **Animation**: the time pie (hold X), in every mode: twist to scrub frames
+  (the selection's keys are ticked on the gauge), play / stop (X tap), frame
   and key stepping, Key / Delete key, **Auto** (Blender's Auto Keying, which
   also keys objects and the camera when you let go of a VR grab), the
-  interpolation of the keys on this frame, and Start / End to set the range
-  here. Tools > Hand panel: **Timeline** shows or hides the strip from VR.
+  interpolation of the keys on this frame, Start / End to set the range here,
+  and Blender's Undo / Redo.
   - **Motion paths in 3D**: the selection's paths with a tick per frame
     (so spacing shows) and a marker on every location key. Grab a marker
     and drag to move that key; the path follows.
@@ -173,12 +179,12 @@ Meta Quest over OpenXR.
   the range. A take only replaces what it records, so takes layer: the head
   first, then each hand.
 - **Passthrough** toggle (Blender's own; needs a runtime that supports it).
-- **Hand panel** above the left controller: Sculpt / Model / Draw / Paint /
-  Pose / Tools tabs, engine and brush buttons, radius and strength sliders, primitive
-  settings, Duplicate and Delete. Point at it with the right controller and
-  pull the trigger.
-
-![Brush cards](docs/brush_cards.png)
+- **Pie menus at the hand** instead of a panel: hold Y for the modes, B for the
+  mode's tools, A for the selected object (or bone, strokes, camera), X for time.
+  Move the hand toward a slice (or flick the stick) and let go; push through a
+  slice with a chevron to open its pie. Twist the controller on a value to turn
+  it like a knob; the stick clicks are knobs too (right: size, left: amount).
+  Haptic ticks on hover, open, confirm and each step.
 
 ## Controls
 
@@ -186,15 +192,27 @@ Meta Quest over OpenXR.
 |---|---|---|---|---|---|---|
 | Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Grab a bone (FK / IK), or an object without a rig | Measure / aim the camera |
 | Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Same as right | Same as right |
-| Right trigger, pointing at the hand panel | Press buttons, drag sliders | Same | Same | Same | Same | Same |
-| Y (left) | Next mode (Sculpt, Model, Draw, Paint, Pose, Tools) | Same | Same | Same | Same | Same |
-| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Switch FK / IK | Remove the last measurement / next camera |
+| Either trigger, while a pie is open | Choose the hovered slice | Same | Same | Same | Same | Same |
+| Y (left), hold | Mode pie (each mode opens its tools), View, Help | Same | Same | Same | Same | Same |
+| Y (left), tap | Back to the previous mode | Same | Same | Same | Same | Same |
+| B (right), hold | Tool pie: brushes, Strength, Radius | Add, New as, Mark, Snap | Tube / Ribbon / Note, Edit, Erase, Color, Width | Brush, Color, Contact / Spray, Pick, Swap, Strength, Radius | FK / IK, IK chain, Mirror X, Bones, Rig | Measure / Camera, Grid, Snap, Grid size |
+| B (right), tap | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Switch FK / IK | Remove the last measurement / next camera |
+| A (right), hold | Object pie: symmetry, engine | Shape, Cuts, Finish, Array, Mirror, Solidify, Duplicate, Delete | Mirror, Thickness, Smoothing, Undo stroke | Hue / Saturation / Value, Swap, Undo stroke | Reset bone / pose, Bind L / R / head, Unbind, Rec | Measurements, or cameras, New here, Pin preview, Lens |
+| A (right), tap | Repeat the last pie action | Same | Same | Same | Same | Same |
+| X (left), hold | Time pie: twist to scrub, keys, play, Undo | Same | Same | Same | Same | Same |
+| X (left), tap | Play / stop | Same | Same | Same | Same | Same |
 | Left stick | Walk / fly (move) | Same | Same | Same | Same | Same |
 | Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same | Same |
-| Left stick click | Show / hide the hand panel | Same | Same | Same | Same | Same |
-| Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Next IK chain length (1-4) | Same |
+| Left stick click, hold + twist | Strength | Frame | Smoothing | Strength | Frame | Frame |
+| Left stick click, tap | Show the controls | Same | Same | Same | Same | Same |
+| Right stick click, hold + twist | Radius | The last value turned on the object (grid size before) | Width | Radius | IK chain | Lens (camera) / grid size |
+| Right stick click, tap | Next radius (1, 2, 4, 8, 16 cm) | - | Next width (2-32 mm) | Next paint radius | Next IK chain length (1-4) | - |
 | Right trigger on a motion path key | Drag the key | Same | Same | Same | Same | Same |
-| Grip, A / X | Blender's stock VR navigation (unchanged) | Same | Same | Same | Same | Same |
+| Grip | Blender's stock VR navigation (unchanged) | Same | Same | Same | Same | Same |
+
+While a pie or a stick-click knob is held on a hand, that hand's stick picks
+slices instead of moving you. Stock A / X (reset the view) is Y > View > More >
+Reset view.
 
 Pointing at the desktop screen (in any mode, unless the tip is touching
 something you're working on): right trigger = left mouse button, left
@@ -220,8 +238,8 @@ blender --background --command extension install-file -r user_default -e dist/vr
 Then in the 3D View: **Sidebar (N) > VR > Start VR Session**. The **VR
 Authoring** panel in the same tab has the engine, brush, radius, strength, tip
 offset and display options; **VR Extras** has the grid, navigation, camera, desktop
-window, passthrough and tracking settings (including hiding the hand panel's
-"New here" camera button).
+window, passthrough and tracking settings (including hiding the camera pie's
+"New here" slice).
 
 - Python engine: select a mesh in **Object Mode**.
 - Native engine: select a mesh in **Sculpt Mode** and keep it visible in the
@@ -234,8 +252,9 @@ window, passthrough and tracking settings (including hiding the hand panel's
   `xr_session_start_pre` handler, inserted before the stock add-on's, edits
   the stock `blender_default` action map: it copies the teleport trigger
   bindings for every controller profile into a `vrsculpt_stroke` action
-  (modal operator), and copies B/Y and stick-click bindings for brush and
-  radius cycling ([actions.py](vr_sculpt/actions.py)).
+  (modal operator), the B / Y, A / X (stock navigation reset) and stick-click
+  bindings into modal pie and knob actions, so holds and taps can be told
+  apart ([actions.py](vr_sculpt/actions.py)).
 - **Strokes.** [operators.py](vr_sculpt/operators.py) runs a modal operator
   per hand. XR modal events arrive every frame while the trigger is held; a
   90 Hz timer that polls the controller pose is a fallback. Errors end the
@@ -248,7 +267,7 @@ window, passthrough and tracking settings (including hiding the hand panel's
   controller tip.
 - **Model mode** ([interactions.py](vr_sculpt/interactions.py),
   [primitives.py](vr_sculpt/primitives.py)): the same trigger operator picks
-  a handler per press: hand panel, grab, or create. Primitive settings are a
+  a handler per press: an open pie, grab, or create. Primitive settings are a
   property group on the object whose update callbacks rebuild the mesh with
   bmesh. Booleans, finish, arrays and solidify are modifiers managed by
   [hardsurface.py](vr_sculpt/hardsurface.py); a cutter is found from the
@@ -278,7 +297,12 @@ window, passthrough and tracking settings (including hiding the hand panel's
   turn toward the controller only when its side axis clearly stands across
   the stroke (judged over the last 2 cm, so jitter doesn't count), at most
   half a turn per 10 cm, and never flip.
-- **Hand panel** ([vr_ui.py](vr_sculpt/vr_ui.py), [menus.py](vr_sculpt/menus.py)):
+- **Pies** ([radial.py](vr_sculpt/radial.py), [menus.py](vr_sculpt/menus.py),
+  [radial_draw.py](vr_sculpt/radial_draw.py)): a pie is centered where the hand was when its button
+  went down, in a plane facing the headset; the hand's offset in that plane (or the stick's direction)
+  picks the slice, its twist about the aim axis (accumulated frame to frame) turns dials. Pies are
+  pure state and math, tested without a headset. The desktop screen's title bar and keyboard still
+  use the card toolkit ([vr_ui.py](vr_sculpt/vr_ui.py)):
   rows of buttons, sliders and selects on a card that faces the headset; the
   right controller's aim ray is intersected with the card's plane. A select
   opens a picker page (categories first, then a paged grid).
@@ -373,11 +397,11 @@ window, passthrough and tracking settings (including hiding the hand panel's
   state at 90 Hz and reads the input values with `action_state_get`; custom
   property changes are followed by `update_tag()` so drivers re-run.
 - **Undo.** Every trigger action that changed something (a stroke, a grab,
-  a panel press, a measurement, a pose) is one step in Blender's own undo
+  a pie choice, a knob turn, a measurement, a pose) is one step in Blender's own undo
   history: the trigger operator is an undo operator. B's quick undos in Draw
   mode (a regular undo step that deletes the last stroke) and Paint mode (the
   add-on's own per-stroke image history, which a Blender undo or redo
-  resets) work on top of it. A puppet take is one step, as are the panel
+  resets) work on top of it. A puppet take is one step, as are the pie
   presses around it. Undo, redo and loading a file replace Blender's data
   with new copies, so anything a held trigger action kept from before (the
   scene's settings, objects, meshes, F-curves) would point at freed memory:
@@ -485,12 +509,16 @@ blender --background --factory-startup --python tests/test_ik_limits.py
 blender --background --factory-startup --python tests/test_hard_surface.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_radial.py
+```
+
 `test_generic.py` enables Extra Mesh Objects for its own run (factory
 settings, so your preferences aren't touched) and checks all 42 entries.
 
 Windowed (opens Blender briefly, writes `tests/*_result.txt`):
 `native_engine.py`, `native_modal.py`, `native_transform.py`. The
-`overlay_preview.py`, `panel_preview.py`, `hud_preview.py` and
+`overlay_preview.py`, `radial_preview.py` (the pies, dials, badge and hints) and
 `tools_preview.py` scripts render the overlay to PNG; `probe_capture.py`
 checks region capture and offscreen camera rendering. `anim_preview.py`
 checks motion paths, key dragging, onion ghosts on a rig and playback.
@@ -498,7 +526,7 @@ checks motion paths, key dragging, onion ghosts on a rig and playback.
 held (that crashed Blender before the undo guard).
 `hard_surface_preview.py` builds a beveled plate with a drilled hole, a
 slot, a union boss and a radial ring of bolts, and renders it with the VR
-overlay, the Model panel's pages and the Mark tool's edge highlights
+overlay, the Model object pie's pages and the Mark tool's edge highlights
 (`probe_hard_surface*.py` measured the
 boolean solvers and how the finish stack shades).
 `pose_preview.py` enters Pose Mode the way VR does (no area), records a
@@ -554,7 +582,7 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
 - Paint mode needs a desktop 3D view (it paints through it) and briefly moves
   that view for each dab. In Blender's own undo history every dab is a step;
   B in VR undoes whole strokes. Clone, Fill and Mask brushes aren't on the
-  hand panel (pick them on the desktop; they need extra setup).
+  pies (pick them on the desktop; they need extra setup).
 - Hand tracking isn't possible from an add-on: Blender's VR layer doesn't
   enable OpenXR's hand tracking or hand interaction extensions, so drawing
   uses controllers.

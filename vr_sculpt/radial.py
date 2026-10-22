@@ -132,12 +132,14 @@ class Item:
     it (or dwelling) opens the children (e.g. a mode: switch to it, or open its tools)."""
 
     def __init__(self, id, label, icon=None, action=None, children=None, dial=None, active=False, danger=False,
-                 swatch=None, repeat=True, push=True):
+                 swatch=None, repeat=True, push=True, enabled=True):
         self.id, self.label, self.icon = id, label, icon or id
         self.action, self.children, self.dial = action, children, dial
         self.active, self.danger, self.swatch = active, danger, swatch
         self.repeat = repeat and not danger and dial is None  # A tap repeats the last repeatable action.
         self.push = push  # running it is an undo step (not for Undo / Redo themselves)
+        # A disabled slice keeps its place (so every slice keeps its direction) but does nothing.
+        self.enabled = enabled
 
     @property
     def kind(self):
@@ -147,7 +149,7 @@ class Item:
 
     def text(self):
         """Label, with a dial's current value."""
-        return f"{self.label} {self.dial.text()}" if self.dial is not None else self.label
+        return f"{self.label} {self.dial.text()}" if self.dial is not None and self.enabled else self.label
 
 
 class Level:
@@ -309,7 +311,7 @@ class Pie:
         self._set_hover(hover, now, events)
 
         item = self.hovered()
-        if item is None:
+        if item is None or not item.enabled:
             return events
         if item.children is not None and item.dial is None:
             pushed = not self.by_stick and rel.length > PUSH
@@ -383,6 +385,8 @@ class Pie:
 
     def _choose(self, item, now=None):
         """Run item's action; a branch without one opens and stays open (sticky)."""
+        if not item.enabled:
+            return self._end('cancel')
         if item.action is not None:
             item.action()
             self.ran = item

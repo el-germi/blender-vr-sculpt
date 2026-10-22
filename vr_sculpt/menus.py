@@ -135,8 +135,9 @@ def _percent(v):
 
 # --- item helpers ---------------------------------------------------------------
 
-def _act(id, label, icon, fn, active=False, danger=False, swatch=None, repeat=True, push=True):
-    return Item(id, label, icon, action=fn, active=active, danger=danger, swatch=swatch, repeat=repeat, push=push)
+def _act(id, label, icon, fn, active=False, danger=False, swatch=None, repeat=True, push=True, enabled=True):
+    return Item(id, label, icon, action=fn, active=active, danger=danger, swatch=swatch, repeat=repeat, push=push,
+                enabled=enabled)
 
 
 def _toggle(id, label, icon, owner, prop):
@@ -148,8 +149,8 @@ def _choice(id, label, icon, owner, prop, value):
     return Item(id, label, icon, action=lambda: setattr(owner, prop, value), active=getattr(owner, prop) == value)
 
 
-def _dial(id, label, icon, get, set, lo, hi, scale='LINEAR', fmt=None, **kw):
-    return Item(id, label, icon, dial=Dial(label, get, set, lo, hi, scale, fmt, **kw))
+def _dial(id, label, icon, get, set, lo, hi, scale='LINEAR', fmt=None, enabled=True, **kw):
+    return Item(id, label, icon, dial=Dial(label, get, set, lo, hi, scale, fmt, **kw), enabled=enabled)
 
 
 def _branch(id, label, icon, build, action=None, active=False):
@@ -209,7 +210,7 @@ def view_level(context=None):
     xs = context.window_manager.xr_session_settings
     items = [
         _act("show_desktop", "Desktop", 'desktop', lambda: _show_desktop(C()), active=settings.show_desktop),
-        _act("bring_desktop", "Bring here", 'bring', lambda: _bring_desktop(C())) if settings.show_desktop else None,
+        _act("bring_desktop", "Bring here", 'bring', lambda: _bring_desktop(C())),
         _act("passthrough", "Passthrough", 'passthrough', lambda: _passthrough(C()),
              active=bool(xs and xs.show_passthrough)),
         _toggle("camera_preview", "Preview", 'preview', settings, "camera_preview"),
@@ -259,6 +260,9 @@ def _show_desktop(context):
 
 
 def _bring_desktop(context):
+    if not context.scene.vr_sculpt.show_desktop:
+        _show_desktop(context)  # Shows it in front of you.
+        return
     ss = context.window_manager.xr_session_state
     if ss is not None:
         desktop.place_in_front(context, ss)
@@ -467,6 +471,12 @@ def _hsv_item(context, which):
         return paint.get_hsv(C())[index]
 
     def set_value(x):
+        if which == 'h':
+            _h, sat, val = paint.get_hsv(C())
+            if sat < 0.05:
+                # A gray has no hue to turn: turning it picks a full color.
+                paint.set_hsv(C(), h=x, s=1.0, v=max(val, 0.5))
+                return
         paint.set_hsv(C(), **{which: x})
 
     def gradient(f):
@@ -649,12 +659,11 @@ def _mirror_level(context, obj):
 def _solidify_level(obj):
     solid = hardsurface.solidify(obj) is not None
     items = [_act("solidify_toggle", "On" if not solid else "Off", 'on' if not solid else 'off',
-                  lambda: hardsurface.set_solidify(obj, not solid), active=solid)]
-    if solid:
-        items.append(_model_dial(_dial("solidify_thickness", "Thickness", 'thickness',
-                                       lambda: hardsurface.solidify_thickness(obj),
-                                       lambda v: hardsurface.set_solidify_thickness(obj, v), 0.0005,
-                                       max(0.05, 0.5 * max(obj.dimensions)), 'LOG', fmt=_meters), obj))
+                  lambda: hardsurface.set_solidify(obj, not solid), active=solid),
+             _model_dial(_dial("solidify_thickness", "Thickness", 'thickness',
+                               lambda: hardsurface.solidify_thickness(obj),
+                               lambda v: hardsurface.set_solidify_thickness(obj, v), 0.0005,
+                               max(0.05, 0.5 * max(obj.dimensions)), 'LOG', fmt=_meters, enabled=solid), obj)]
     return Level("Solidify", items)
 
 
@@ -697,22 +706,21 @@ def _finish_level(context, settings, obj):
     items = [_act("shade_" + ident.lower(), name, "shade_" + ident,
                   (lambda i=ident: shading.set_mode(obj, None if shading.mode(obj) == i else i)), active=current == ident)
              for ident, name in shading.MODES]
-    if current == 'AUTO':
-        items.append(_model_dial(_dial("shade_angle", "Angle", 'angle', lambda: shading.angle(obj),
-                                       lambda v: shading.set_angle(obj, v), math.radians(1.0), math.radians(180.0),
-                                       fmt=_degrees), obj))
+    # Eight slices whatever is on: what doesn't apply yet is greyed out, so nothing moves.
+    items.append(_model_dial(_dial("shade_angle", "Angle", 'angle', lambda: shading.angle(obj),
+                                   lambda v: shading.set_angle(obj, v), math.radians(1.0), math.radians(180.0),
+                                   fmt=_degrees, enabled=current == 'AUTO'), obj))
     items.append(_branch("mark", "Mark", 'mark', lambda: _mark_level(S()), active=settings.model_mark != 'NONE'))
     on = hardsurface.has_bevel(obj)
     items.append(_act("bevel", "Bevel", 'bevel', lambda: hardsurface.set_bevel(obj, not on), active=on))
-    if on:
-        dims = [d for d in obj.dimensions if d > 1e-6]
-        hi = max(0.25 * min(dims), 0.002) if dims else 0.02
-        items.append(_model_dial(_dial("bevel_width", "Width", 'width', lambda: hardsurface.bevel_width(obj),
-                                       lambda v: hardsurface.set_bevel_width(obj, v), 0.0002, hi, 'LOG',
-                                       fmt=_meters), obj))
-        items.append(_model_dial(_dial("bevel_segments", "Segments", 'segments', lambda: hardsurface.bevel(obj).segments,
-                                       lambda v: setattr(hardsurface.bevel(obj), "segments", int(v)), 1, 8, 'STEP'),
-                                 obj))
+    dims = [d for d in obj.dimensions if d > 1e-6]
+    hi = max(0.25 * min(dims), 0.002) if dims else 0.02
+    items.append(_model_dial(_dial("bevel_width", "Width", 'width', lambda: hardsurface.bevel_width(obj),
+                                   lambda v: hardsurface.set_bevel_width(obj, v), 0.0002, hi, 'LOG',
+                                   fmt=_meters, enabled=on), obj))
+    items.append(_model_dial(_dial("bevel_segments", "Segments", 'segments', lambda: hardsurface.bevel(obj).segments,
+                                   lambda v: setattr(hardsurface.bevel(obj), "segments", int(v)), 1, 8, 'STEP',
+                                   enabled=on), obj))
     return Level("Finish", items)
 
 
@@ -721,25 +729,24 @@ def _array_level(context, obj):
     items = [_model_dial(_dial("array_count", "Count", 'array_count', lambda: hardsurface.array_count(obj),
                                lambda v: hardsurface.set_array_count(C(), obj, v), 1, 24, 'STEP',
                                fmt=lambda v: "Off" if int(v) <= 1 else str(int(v))), obj)]
-    if count <= 1:
-        return Level("Array", items)
-    mode = hardsurface.array_mode(obj)
-    axis = hardsurface.array_axis(obj)
+    on = count > 1  # Without copies the rest is greyed out (in place, so nothing moves when it turns on).
+    mode = hardsurface.array_mode(obj) if on else 'LINEAR'
+    axis = hardsurface.array_axis(obj) if on else -1
     items += [
         _act("array_linear", "Linear", 'array_LINEAR', lambda: hardsurface.set_array_mode(C(), obj, 'LINEAR'),
-             active=mode == 'LINEAR'),
+             active=on and mode == 'LINEAR', enabled=on),
         _act("array_radial", "Radial", 'array_RADIAL', lambda: hardsurface.set_array_mode(C(), obj, 'RADIAL'),
-             active=mode == 'RADIAL'),
+             active=on and mode == 'RADIAL', enabled=on),
     ]
     items += [_act("array_axis_" + a, ("Around " if mode == 'RADIAL' else "Along ") + a, "axis_" + a,
-                   (lambda i=i: hardsurface.set_array_axis(C(), obj, i)), active=axis == i)
+                   (lambda i=i: hardsurface.set_array_axis(C(), obj, i)), active=axis == i, enabled=on)
               for i, a in enumerate(symmetry.AXES)]
     if mode == 'RADIAL':
         items.append(_act("array_center", "Center here", 'here', lambda: _array_center_here(C(), obj)))
     else:
         items.append(_model_dial(_dial("array_gap", "Gap", 'gap', lambda: hardsurface.array_gap(obj),
                                        lambda v: hardsurface.set_array_gap(C(), obj, v), -0.5, 2.0,
-                                       fmt=_percent), obj))
+                                       fmt=_percent, enabled=on), obj))
     return Level("Array", items)
 
 
@@ -917,7 +924,7 @@ def frame_item(context):
     start, end = scene.frame_start, scene.frame_end
     span = max(end - start, 1)
     dial = Dial("Frame", lambda: C().scene.frame_current, lambda v: anim.set_frame(C(), v), start, end, 'STEP',
-                fmt=lambda v: f"{int(v)} / {end}", step_angle=math.radians(5.0))
+                fmt=lambda v: str(int(v)), step_angle=math.radians(5.0))
     dial.ticks = lambda: [(f - start) / span for f in anim.key_frames(anim.selection(C())) if start <= f <= end]
     return Item("frame", "Frame", 'frame', dial=dial)
 

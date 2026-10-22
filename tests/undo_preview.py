@@ -79,7 +79,6 @@ def run():
             screen = None
 
         settings = ctx.scene.vr_sculpt
-        settings.show_panel = False
         settings.show_desktop = False
         menus.set_mode(ctx, 'TOOLS')
         settings.tool = 'MEASURE'

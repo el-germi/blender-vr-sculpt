@@ -99,15 +99,13 @@ def main():
             d = np.linalg.norm(positions(obj) - start, axis=1)
             log(f"back side: {s.dabs} dabs, {s.dropped} dropped, moved {int((d > 1e-6).sum())} verts")
 
-            # Strength from the hand panel's slider: the same stroke at 1.0 and 0.2.
-            from vr_sculpt import menus, vr_ui
+            # Strength from the tool pie's dial: the same stroke at 1.0 and 0.2.
+            from vr_sculpt import menus
             c.scene.vr_sculpt.engine = 'NATIVE'
             c.scene.vr_sculpt.mode = 'SCULPT'  # The saved scene may be in another VR mode.
             depth = {}
             for strength, z0 in ((1.0, -0.75), (0.2, 0.75)):
-                widgets, _h = vr_ui.layout(menus.rows(c))
-                slider = vr_ui.find(widgets, "strength")
-                slider.on_change(strength)
+                menus.find(c, "strength").dial.set(strength)
                 s = native.NativeStroke(c, obj, 0.15)
                 start = positions(obj)
                 for i in range(20):

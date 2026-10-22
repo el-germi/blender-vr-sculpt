@@ -128,29 +128,29 @@ def draw_pie(pie, now=None):
         appear = min(max((now - pie.t0 - 0.04) / 0.1, 0.0), 1.0) if not pie.used else 1.0
         if appear <= 0.0:
             return
-        for parent, child in zip(pie.frames, pie.frames[1:]):
-            _draw_crumb(parent, child, appear)
+        if len(pie.frames) > 1:
+            _draw_trail(pie, appear)
         _draw_level(pie, appear)
     finally:
         gpu.matrix.pop()
         gpu.state.blend_set('NONE')
 
 
-def _draw_crumb(parent, child, alpha):
-    """Where a sub-pie came from: a small disc with the slice's icon, and a line to the new center."""
-    p, c = parent.center, child.center
-    level = parent.level
-    item = level.items[child.via] if child.via is not None and 0 <= child.via < len(level.items) else None
-    d = (c - p)
-    if d.length > CENTER_R * 2:
-        n = Vector((-d.y, d.x)).normalized() * 0.0007
-        a, b = p + d.normalized() * 0.011, c - d.normalized() * (CENTER_R + 0.002)
-        _tris([a + n, b + n, b - n, a + n, b - n, a - n], _with_alpha(DIM, 0.35 * alpha))
-    _tris(_disc(p.x, p.y, 0.011), _with_alpha(DISC, 0.8 * alpha))
-    color = level.color or INK
-    if item is not None and not icons.draw(item.icon, p.x, p.y, 0.0065, _with_alpha((*color[:3], 1.0), 0.8 * alpha),
-                                           0.0002):
-        _text(p.x, p.y - 0.002, item.label[:3], 0.004, _with_alpha(INK, 0.8 * alpha), 'CENTER')
+def _draw_trail(pie, alpha):
+    """How this pie was reached: "Mode > Draw > Color" above the ring, and a dot where the parent pie was
+    centered (bring the hand back there to go up a level)."""
+    names = [pie.frames[0].level.title]
+    for parent, child in zip(pie.frames, pie.frames[1:]):
+        level = parent.level
+        if child.via is not None and 0 <= child.via < len(level.items):
+            names.append(level.items[child.via].label)
+    c = pie.center
+    _text(c.x, c.y + radial.RING_OUTER + 0.019, "  \u203a  ".join(names), 0.0046, _with_alpha(DIM, alpha), 'CENTER',
+          max_width=0.13)
+    p = pie.frames[-2].center
+    if (c - p).length > 2 * radial.BACK:
+        _tris(_disc(p.x, p.y, 0.0032, 16), _with_alpha(DIM, 0.55 * alpha), -0.0001)
+        _tris(_disc(p.x, p.y, 0.0018, 16), _with_alpha(DISC, 0.8 * alpha))
 
 
 def _draw_level(pie, alpha):
@@ -166,11 +166,13 @@ def _draw_level(pie, alpha):
         mid = radial.slice_angle(i, n)
         hot = hover == i
         is_grabbed = grabbed is item
-        a = (fade if not is_grabbed else 1.0) * alpha
+        a = (fade if not is_grabbed else 1.0) * alpha * (1.0 if item.enabled else 0.4)
+        if not item.enabled:
+            hot = False
         r1 = radial.RING_OUTER + (0.005 if hot or is_grabbed else 0.0)
         a0, a1 = mid - half + GAP / 2, mid + half - GAP / 2
         if n == 1:
-            a0, a1 = mid - math.pi + GAP, mid + math.pi - GAP
+            a0, a1 = mid - math.pi, mid + math.pi
         hot_color = (*DANGER, 1.0) if item.danger else accent
         if item.swatch is not None:
             fill = (*item.swatch[:3], 1.0)
@@ -184,7 +186,7 @@ def _draw_level(pie, alpha):
         if hot and item.swatch is not None:
             _tris(_sector(cx, cy, radial.RING_INNER, radial.RING_INNER + 0.0025, a0, a1), _with_alpha(INK, a), 0.0001)
         ix, iy = cx + R_MID * math.cos(mid), cy + R_MID * math.sin(mid)
-        if item.dial is not None:
+        if item.dial is not None and item.enabled:
             # Its value, as a thin arc along the outer edge.
             f = item.dial.fraction()
             span = (a1 - a0) * f
@@ -241,11 +243,11 @@ def _draw_center(pie, level, accent, alpha):
         r0, r1 = (CENTER_R + 0.0035, CENTER_R + 0.0075) if big else (CENTER_R - 0.0028, CENTER_R - 0.001)
         _gauge(cx, cy, r0, r1, dial.fraction(), accent, dial.gradient, alpha,
                ticks=dial.ticks() if dial.ticks is not None else ())
-        _text(cx, cy - 0.0015, dial.text(), 0.0068 if big else 0.0056, _with_alpha(INK, alpha), 'CENTER',
-              max_width=CENTER_R * 1.75)
-        _text(cx, cy + 0.0052, dial.label, 0.0042, _with_alpha(DIM, alpha), 'CENTER', max_width=CENTER_R * 1.6)
+        _text(cx, cy - 0.0032, dial.text(), 0.0066 if big else 0.0056, _with_alpha(INK, alpha), 'CENTER',
+              max_width=CENTER_R * 1.7)
+        _text(cx, cy + 0.0052, dial.label, 0.0038, _with_alpha(DIM, alpha), 'CENTER', max_width=CENTER_R * 1.5)
         if not big:
-            _text(cx, cy - 0.0095, "twist", 0.0036, _with_alpha(DIM, 0.8 * alpha), 'CENTER')
+            _text(cx, cy - 0.0108, "twist", 0.0032, _with_alpha(DIM, 0.8 * alpha), 'CENTER')
     elif hovered is not None:
         _text(cx, cy - 0.0022, hovered.label, 0.0056, _with_alpha(INK, alpha), 'CENTER', max_width=CENTER_R * 1.8)
     else:
@@ -279,8 +281,8 @@ def draw_knob(knob, matrix, color):
         _tris(_disc(0.0, 0.0, 0.019), DISC)
         _gauge(0.0, 0.0, 0.0205, 0.0245, dial.fraction(), accent, dial.gradient,
                ticks=dial.ticks() if dial.ticks is not None else ())
-        _text(0.0, -0.0018, dial.text(), 0.0068, INK, 'CENTER', max_width=0.034)
-        _text(0.0, 0.0055, dial.label, 0.0042, DIM, 'CENTER', max_width=0.03)
+        _text(0.0, -0.0034, dial.text(), 0.0068, INK, 'CENTER', max_width=0.033)
+        _text(0.0, 0.0058, dial.label, 0.004, DIM, 'CENTER', max_width=0.028)
         if not knob.grabbed:
             _text(0.0, -0.034, "twist to change", 0.0045, DIM, 'CENTER')
     finally:
@@ -304,7 +306,7 @@ def draw_status(matrix, icon, color, ring_color, title, recording=None, title_al
     gpu.matrix.multiply_matrix(matrix)
     try:
         _tris(_disc(0.0, 0.0, BADGE_R + 0.0016), (*ring_color[:3], 0.95))
-        _tris(_disc(0.0, 0.0, BADGE_R), DISC, 0.0001)
+        _tris(_disc(0.0, 0.0, BADGE_R), (*DISC[:3], 1.0), 0.0001)
         if recording is not None:
             pulse = 0.6 + 0.4 * math.sin(time.monotonic() * 6.0)
             _tris(_disc(0.0, 0.0, BADGE_R * 0.55), (1.0, 0.25, 0.25, pulse), 0.0002)
@@ -333,10 +335,10 @@ def _label_pill(text, color, alpha):
 
 # --- hints -----------------------------------------------------------------------------
 
-LEFT_HINTS = (("Y", "Modes", "tap: last mode"), ("X", "Time", "tap: play / stop"),
-              ("Stick click", "Amount knob", "hold + twist"), ("Stick", "Move", ""), ("Trigger", "Do it", "opposite"))
-RIGHT_HINTS = (("B", "Tool", "tap: quick action"), ("A", "Object", "tap: again"),
-               ("Stick click", "Size knob", "hold + twist"), ("Stick", "Turn", ""), ("Trigger", "Do it", ""))
+LEFT_HINTS = (("Y", "Modes", "tap: last mode"), ("X", "Time", "tap: play"),
+              ("Stick click", "Amount", "hold + twist"), ("Stick", "Move", ""), ("Trigger", "Do it", ""))
+RIGHT_HINTS = (("B", "Tool", "tap: quick"), ("A", "Object", "tap: again"),
+               ("Stick click", "Size", "hold + twist"), ("Stick", "Turn", ""), ("Trigger", "Do it", ""))
 
 
 def draw_hints(matrix, rows, alpha, right_aligned=False):
@@ -350,7 +352,7 @@ def draw_hints(matrix, rows, alpha, right_aligned=False):
     try:
         line = 0.0105
         h = 0.0062
-        width = 0.105
+        width = 0.112
         x0 = -width if right_aligned else 0.0
         top = line * len(rows) / 2
         _tris([(x0 - 0.004, -top - 0.004), (x0 + width, -top - 0.004), (x0 + width, top + 0.003),
@@ -358,10 +360,10 @@ def draw_hints(matrix, rows, alpha, right_aligned=False):
               _with_alpha(DISC, 0.8 * alpha))
         for i, (button, what, extra) in enumerate(rows):
             y = top - line * (i + 1) + 0.002
-            _text(x0, y, button, h, _with_alpha((1.0, 0.82, 0.35, 1.0), alpha), max_width=0.034)
-            _text(x0 + 0.036, y, what, h, _with_alpha(INK, alpha), max_width=0.03)
+            _text(x0, y, button, h, _with_alpha((1.0, 0.82, 0.35, 1.0), alpha), max_width=0.036)
+            _text(x0 + 0.038, y, what, h, _with_alpha(INK, alpha), max_width=0.034)
             if extra:
-                _text(x0 + 0.067, y, extra, 0.0044, _with_alpha(DIM, alpha), max_width=0.036)
+                _text(x0 + 0.074, y, extra, 0.0044, _with_alpha(DIM, alpha), max_width=0.036)
     finally:
         gpu.matrix.pop()
         gpu.state.blend_set('NONE')

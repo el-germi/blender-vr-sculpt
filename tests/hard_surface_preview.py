@@ -75,12 +75,12 @@ state = {"overlay": True}
 
 
 def draw():
-    from vr_sculpt import draw as vr_draw, vr_ui
+    from vr_sculpt import draw as vr_draw, radial_draw
     try:
         if state["overlay"]:
             vr_draw.draw_overlay(bpy.context, fake)
-        for m, widgets, height in panels:
-            vr_ui.draw_panel(m, widgets, height)
+        for pie in panels:
+            radial_draw.draw_pie(pie)
     except Exception:
         if not errors:
             log(traceback.format_exc())
@@ -92,7 +92,7 @@ def build(ctx):
     for o in list(bpy.data.objects):
         bpy.data.objects.remove(o)
     s = ctx.scene.vr_sculpt
-    s.show_desktop = s.show_timeline = s.grid_show = False
+    s.show_desktop = s.grid_show = False
     menus.set_mode(ctx, 'MODEL')
 
     plate = primitives.create(ctx, 'CUBE', Vector((0.0, 0.0, 0.0)))
@@ -142,7 +142,7 @@ def build(ctx):
 
 def setup():
     import vr_sculpt
-    from vr_sculpt import hardsurface, menus, native, primitives, snapping, vr_ui
+    from vr_sculpt import hardsurface, menus, native, primitives, snapping
     try:
         vr_sculpt.register()
         ctx = bpy.context
@@ -155,24 +155,27 @@ def setup():
         plate, hole, slot, boss, bolt = build(ctx)
         s = ctx.scene.vr_sculpt
 
-        # The static panels: Shape (plate), Cuts (plate), Finish (bolt), Array (bolt, radial).
+        # The object pie (A) at each page: Shape (plate), Cuts (plate), Finish (bolt), Array (bolt, radial).
+        from vr_sculpt import hud, radial
+
         def add(i, obj, page):
             primitives.make_active(ctx, obj)
-            s.model_page = page
-            widgets, height = vr_ui.layout(menus.rows(ctx))
+            level = menus.object_level(ctx)
             x = PANEL_X + (i - 1.5) * 0.2
-            m = vr_ui.panel_matrix(Vector((x, 0.0, 0.0)), Vector((x, -0.6, 0.0)), 1.0)
-            panels.append((m, widgets, height))
-            log(f"panel {page} for {obj.name}: {len(widgets)} widgets, height {height:.3f}")
-        add(0, plate, 'SHAPE')
-        add(1, plate, 'BOOLEAN')
-        add(2, bolt, 'FINISH')
-        add(3, bolt, 'ARRAY')
+            pie = radial.Pie('OBJECT', 1, level, hud.billboard(Vector((x, 0.0, 0.0)), Vector((x, -0.6, 0.0)), 1.0),
+                             Quaternion())
+            pie.t0 -= 10.0
+            pie.hover = [it.id for it in level.items].index("page_" + page)
+            pie.open(level.items[pie.hover])
+            panels.append(pie)
+            log(f"pie {page} for {obj.name}: {len(pie.level.items)} slices")
+        add(0, plate, 'shape')
+        add(1, plate, 'boolean')
+        add(2, bolt, 'finish')
+        add(3, bolt, 'array')
 
-        # The live overlay: making cuts, the slot cutter selected (its page), a snap ring by the boss.
+        # The live overlay: making cuts, the slot cutter selected, a snap ring by the boss.
         s.model_add_as = 'DIFFERENCE'
-        s.model_page = 'BOOLEAN'
-        s.show_panel = True
         primitives.make_active(ctx, slot)
         snapping.last_hit = (Vector((0.0, -0.05, 0.03)), Vector((0.0, 0.0, 1.0)))
 
@@ -246,7 +249,6 @@ def set_up_marks(ctx, area):
     primitives.make_active(ctx, plate)
     s = ctx.scene.vr_sculpt
     s.model_add_as = 'OBJECT'
-    s.model_page = 'FINISH'
     s.model_mark = 'SOFT'
     for obj, point, how in ((plate, (0.0, -0.1, 0.03), 'SOFT'), (boss, (0.11, -0.04, 0.045), 'HARD')):
         near = shading._near(shading._edge_segments(obj), np.array(point), 0.01)

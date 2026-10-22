@@ -279,7 +279,7 @@ def walk_ids(level):
     for item in radial.walk(level):
         ids.append(item.id)
         item.text()
-        if item.dial is not None:
+        if item.dial is not None and item.enabled:
             item.dial.fraction()
             item.dial.text()
     return set(ids)
@@ -628,6 +628,15 @@ def test_drawing():
     unknown = sorted(n for n in used if not icons.exists(n) and not n.startswith(("opt_", "param_", "cat_")))
     check(len(unknown) <= 3, f"slices have icons (label fallback for: {unknown})")
     check(len(radial_draw._sector(0, 0, 0.02, 0.06, 0.0, 1.0)) % 3 == 0, "wedges are triangles")
+
+    # A greyed-out slice keeps its place but does nothing.
+    t = time.monotonic()
+    ran = []
+    level = Level("L", [Item("a", "A", action=lambda: ran.append("a"), enabled=False),
+                        Item("b", "B", action=lambda: ran.append("b"))])
+    p = pie(level, t)
+    p.update(at(0.0, 0.03), Quaternion(), now=t + 0.1)
+    check(p.hover == 0 and p.release(now=t + 0.3) == 'cancel' and not ran, "a disabled slice can't be chosen")
 
 
 def main():

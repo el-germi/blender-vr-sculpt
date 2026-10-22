@@ -282,7 +282,6 @@ def run():
 
             # Overlay screenshot: Contact cursor near the ball, panel up.
             settings.paint_reach = 'CONTACT'
-            settings.show_panel = True
             paint.set_color(bpy.context, (1.0, 0.45, 0.1))
             n = Vector((0.3, -1.0, 0.2)).normalized()
             fake.aim_loc[1] = center + n * (r + 0.01 + settings.tip_offset)
