@@ -26,6 +26,41 @@ Meta Quest over OpenXR.
 - **Model mode**: drag out any Add > Mesh primitive in empty space, grab
   objects to move and rotate them, and edit the primitive's settings
   afterwards. Primitives stay editable until you sculpt them.
+- **Hard surface modeling** (Model mode). It's all modifiers, so primitives
+  stay editable and nothing is final until you apply it:
+  - **Live booleans**: set New to **Cut**, **Union** or **Intersect** and drag
+    a primitive on or near the selected object. It becomes a cutter: a
+    wireframe in the "VR Cutters" collection, parented to that object (it
+    moves with it), with a Boolean modifier pointing at it. Grab a cutter, or
+    change its size, and the cut follows live. The Manifold solver is used
+    when both meshes are closed (about 13 ms for a 10k-vertex target, fast
+    enough to follow a drag), Exact otherwise. The **Cuts** page switches a
+    cutter's operation, applies or removes it, and on the object: hides all
+    cutters (they keep cutting), Apply all, and the solver.
+  - **Shading** (Finish page): **Flat**, **Smooth**, or **Auto** (smooth
+    except edges sharper than an Angle slider, 30 degrees to start). It's a
+    small "VR Shading" Geometry Nodes modifier, so it holds through primitive
+    rebuilds and the flat faces that cutters bring into a cut.
+  - **Hard and soft edges**: Mark **Hard** / **Soft** turns the trigger into
+    a tool that marks the edges it touches (right hand marks, left hand
+    clears; **Clear** clears with the right hand too). Hard edges stay sharp
+    in Smooth and Auto, and soft edges stay smooth in Auto whatever their
+    angle. It works on the object and its cutters, and a cutter's marks carry
+    into the cut. Marks are edge attributes: Blender's own `sharp_edge` (Mark
+    Sharp) for hard, `vrs_soft` for soft. They're drawn in blue and orange on
+    the Finish page, and the edges in reach of each tip light up.
+  - **Bevel**: an angle-limited Bevel with Harden Normals, Width and Segments
+    sliders (the width in world units). If the object has no VR shading
+    yet, the bevel turns on Auto shading, so flat faces stay flat and curved
+    ones shade round.
+  - **Array**: Linear (along X / Y / Z, with a Gap) or Radial (around a
+    center you set at your left hand, about X / Y / Z), up to 24 copies.
+  - **Solidify** with a Thickness slider (on the Shape page).
+  - Our modifiers keep one order whatever order you add them in: Solidify,
+    Booleans, Array, Mirror, Shading, Bevel. So cuts happen once,
+    arrays and the mirror repeat them, and the bevel rounds the cut edges.
+    Other modifiers stay where you put them. Duplicating an object copies
+    its cutters and array; deleting it deletes them.
 - **Selecting doesn't nudge**: a grabbed object or bone (Model and Pose
   mode) only starts to follow once your hand moves past the Grab Threshold
   (1.5 cm), turns past 8 degrees, or holds the trigger for the Grab Delay
@@ -64,7 +99,11 @@ Meta Quest over OpenXR.
     can also be pinned next to the hand panel in every mode.
 - **3D grid and snapping**: a lattice of points around the controller tips,
   in scene units. Snap to Grid snaps new primitives, grabbed objects and tape
-  ends.
+  ends. In Model mode, **Surface** makes a grabbed object sit on the mesh
+  surface near it (within 3 cm), its Z turned to the surface normal: an
+  object stands on it, a cutter sinks halfway in (so a cylinder drills a
+  hole). Twisting still turns it about the normal; pull away and it's free.
+  **15°** turns grabbed objects in 15 degree steps.
 - **Symmetry**: Model mode mirrors the selected object on X / Y / Z with a
   live Mirror modifier around a "VR Mirror Center" empty (Here puts it at
   your left hand). Sculpt mode has X / Y / Z symmetry for both engines (the
@@ -137,7 +176,7 @@ Meta Quest over OpenXR.
 
 | Input | Sculpt mode | Model mode | Draw mode | Paint mode | Pose mode | Tools mode |
 |---|---|---|---|---|---|---|
-| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab | Draw / Edit / Erase | Paint / pick color | Grab a bone (FK / IK), or an object without a rig | Measure / aim the camera |
+| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Grab a bone (FK / IK), or an object without a rig | Measure / aim the camera |
 | Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Same as right | Same as right |
 | Right trigger, pointing at the hand panel | Press buttons, drag sliders | Same | Same | Same | Same | Same |
 | Y (left) | Next mode (Sculpt, Model, Draw, Paint, Pose, Tools) | Same | Same | Same | Same | Same |
@@ -203,7 +242,17 @@ window, passthrough and tracking settings (including hiding the hand panel's
   [primitives.py](vr_sculpt/primitives.py)): the same trigger operator picks
   a handler per press: hand panel, grab, or create. Primitive settings are a
   property group on the object whose update callbacks rebuild the mesh with
-  bmesh.
+  bmesh. Booleans, finish, arrays and solidify are modifiers managed by
+  [hardsurface.py](vr_sculpt/hardsurface.py); a cutter is found from the
+  Boolean modifiers that point at it, so the .blend stays plain Blender data.
+  [shading.py](vr_sculpt/shading.py) builds the "VR Shading" node group
+  once per file. Faces are set smooth (or flat), and edges sharp where
+  (angle > Angle or `sharp_edge`) and not `vrs_soft`. Blender's Smooth by
+  Angle wouldn't do: it keeps flat faces flat, and its Ignore Sharpness also
+  drops hand-marked edges.
+  Surface snapping ([snapping.py](vr_sculpt/snapping.py)) builds BVH trees
+  of the meshes near a grabbed object on first use and keeps them for the
+  grab.
 - **Draw mode** ([strokes.py](vr_sculpt/strokes.py), [drawing.py](vr_sculpt/drawing.py)):
   each stroke object keeps its raw samples (position, width, the
   controller's side vector) as an ID property in object space. The mesh is
@@ -420,6 +469,10 @@ blender --background --factory-startup --python tests/test_anim.py
 blender --background --factory-startup --python tests/test_pose.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_hard_surface.py
+```
+
 `test_generic.py` enables Extra Mesh Objects for its own run (factory
 settings, so your preferences aren't touched) and checks all 42 entries.
 
@@ -431,6 +484,11 @@ checks region capture and offscreen camera rendering. `anim_preview.py`
 checks motion paths, key dragging, onion ghosts on a rig and playback.
 `undo_preview.py` runs real undos while a tape measure and a pose grab are
 held (that crashed Blender before the undo guard).
+`hard_surface_preview.py` builds a beveled plate with a drilled hole, a
+slot, a union boss and a radial ring of bolts, and renders it with the VR
+overlay, the Model panel's pages and the Mark tool's edge highlights
+(`probe_hard_surface*.py` measured the
+boolean solvers and how the finish stack shades).
 `pose_preview.py` enters Pose Mode the way VR does (no area), records a
 puppet take while the timeline really plays, and draws the Pose page and
 bones (`probe_pose.py` checked the pose API).
@@ -446,7 +504,18 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
 - The native engine's undo granularity in VR hasn't been checked.
 - Creation is aligned to the world axes. Only Cube and Cylinder (our own
   versions) size non-uniformly to the drag box; other primitives keep their
-  proportions.
+  proportions. Surface snapping works when you grab, not while you drag out
+  a new primitive.
+- Hard surface: the Manifold solver needs closed meshes (an open cutter, like
+  a plane, gets Exact, which is about 2.5x slower). Apply bakes the cut into
+  the mesh, so the object stops being an editable primitive. Edge marks on a
+  primitive survive resizing it, but not changing its segments or
+  subdivisions (different edges). Edges a cut creates can't be marked
+  themselves (they don't exist in the mesh); mark the cutter's edges, or
+  let the Auto angle decide. The bevel follows its own 30 degree limit, not
+  the hard / soft marks. Bevel width is in world units when you set it; it
+  scales with the object after that. Slice (cut and keep the piece) isn't
+  there yet.
 - Geometry-node asset primitives in Add > Mesh aren't listed yet.
 - Using the desktop window from VR needs Windows; elsewhere it's view only,
   without menus and popups (they are temporary regions). It moves your real

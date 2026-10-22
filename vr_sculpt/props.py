@@ -224,6 +224,47 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     mirror_x: BoolProperty(name="Mirror X", description="Mirror strokes across the 3D cursor's X plane")
     mirror_y: BoolProperty(name="Mirror Y", description="Mirror strokes across the 3D cursor's Y plane")
     mirror_z: BoolProperty(name="Mirror Z", description="Mirror strokes across the 3D cursor's Z plane")
+    model_add_as: EnumProperty(
+        name="New As",
+        description="What a primitive dragged out in Model mode becomes",
+        items=(
+            ('OBJECT', "Object", "A new object"),
+            ('DIFFERENCE', "Cut", "A cutter that cuts its shape out of the selected object (live Boolean)"),
+            ('UNION', "Union", "A cutter whose shape is added to the selected object (live Boolean)"),
+            ('INTERSECT', "Intersect", "A cutter that keeps only where it overlaps the selected object (live Boolean)"),
+        ),
+        default='OBJECT',
+    )
+    model_page: EnumProperty(
+        name="Page",
+        description="Which settings of the selected object the hand panel shows",
+        items=(
+            ('SHAPE', "Shape", "Primitive settings, mirror and solidify"),
+            ('BOOLEAN', "Cuts", "Cutters and booleans"),
+            ('FINISH', "Finish", "Bevel and smooth shading"),
+            ('ARRAY', "Array", "Linear and radial arrays"),
+        ),
+        default='SHAPE',
+    )
+    model_mark: EnumProperty(
+        name="Mark Edges",
+        description="While on, the trigger marks the edges it touches on the selected object instead of grabbing "
+                    "or creating (left hand clears)",
+        items=(
+            ('NONE', "Off", "The trigger grabs and creates"),
+            ('HARD', "Hard", "Touched edges shade sharp, even below the Auto angle"),
+            ('SOFT', "Soft", "Touched edges shade smooth, even above the Auto angle"),
+            ('CLEAR', "Clear", "Touched edges go back to following the shading mode"),
+        ),
+        default='NONE',
+    )
+    snap_surface: BoolProperty(
+        name="Snap to Surface",
+        description="A grabbed object near another mesh sits on its surface, turned to its normal "
+                    "(a cutter sinks halfway in)",
+    )
+    snap_angle: BoolProperty(
+        name="Snap Rotation", description="Grabbed objects turn in 15 degree steps")
     primitive: StringProperty(
         name="Add",
         default="mesh.primitive_cube_add",

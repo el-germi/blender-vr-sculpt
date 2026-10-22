@@ -34,6 +34,17 @@ NATIVE_COLORS = {
 }
 
 MODEL_COLOR = (0.55, 0.9, 0.85)
+CUT_COLORS = {'DIFFERENCE': (1.0, 0.4, 0.35), 'UNION': (0.45, 0.9, 0.45), 'INTERSECT': (0.95, 0.75, 0.3)}
+MARK_INFO = {
+    'HARD': ("Mark Hard Edges", "Touch edges to make them sharp. Left hand clears"),
+    'SOFT': ("Mark Soft Edges", "Touch edges to make them smooth. Left hand clears"),
+    'CLEAR': ("Clear Edge Marks", "Touch edges to clear their hard or soft mark"),
+}
+CUT_INFO = {
+    'DIFFERENCE': ("Cut with", "Drag on the selected object to cut into it. Touch a cutter to move it"),
+    'UNION': ("Union with", "Drag on the selected object to add to it. Touch a cutter to move it"),
+    'INTERSECT': ("Intersect with", "Drag on the selected object: only the overlap stays"),
+}
 CAMERA_COLOR = (0.6, 0.75, 1.0)
 MEASURE_COLOR = (1.0, 0.82, 0.25)
 POSE_COLORS = {'FK': (0.55, 0.85, 1.0), 'IK': (1.0, 0.6, 0.85)}
@@ -141,10 +152,19 @@ def card_content(settings, sculpt_brush, colors):
         title, desc = TOOLS_INFO[settings.tool]
         content = (title, desc, CAMERA_COLOR if settings.tool == 'CAMERA' else MEASURE_COLOR, None)
     elif settings.mode == 'MODEL':
-        from . import primitives
-        title = "Add " + primitives.label(settings.primitive)
-        content = (title, "Drag in empty space to create. Touch an object to grab it",
-                   MODEL_COLOR, None)
+        from . import hardsurface, primitives, shading
+        op = settings.model_add_as
+        if settings.model_mark != 'NONE':
+            title, desc = MARK_INFO[settings.model_mark]
+            color = {'HARD': shading.HARD_COLOR, 'SOFT': shading.SOFT_COLOR}.get(settings.model_mark, (1.0, 1.0, 1.0))
+            content = (title, desc, color, None)
+        elif op in CUT_INFO and hardsurface.cut_target(bpy_context()) is not None:
+            verb, desc = CUT_INFO[op]
+            content = (f"{verb} {primitives.label(settings.primitive)}", desc, CUT_COLORS[op], None)
+        else:
+            title = "Add " + primitives.label(settings.primitive)
+            content = (title, "Drag in empty space to create. Touch an object to grab it",
+                       MODEL_COLOR, None)
     elif settings.engine == 'NATIVE':
         name = sculpt_brush.name if sculpt_brush else "No brush"
         content = (name, NATIVE_INFO.get(name, ""), NATIVE_COLORS.get(name, (0.9, 0.9, 0.9)),

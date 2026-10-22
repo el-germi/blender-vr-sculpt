@@ -9,7 +9,7 @@ import time
 
 from mathutils import Matrix, Vector
 
-from . import generic, grid, menus, primitives, vr_ui
+from . import generic, grid, hardsurface, menus, primitives, snapping, vr_ui
 
 # Widget the right trigger is holding down, for drawing.
 pressed_id = None
@@ -153,14 +153,17 @@ class DragGate:
 
 class MoveObject:
     """Grab an object with the controller: it follows the controller's position and rotation
-    (once the DragGate opens; until then the press only selects it)."""
+    (once the DragGate opens; until then the press only selects it). With Snap to Surface it sits
+    on the surface near it; with Snap Rotation it turns in steps (snapping.py)."""
 
-    def __init__(self, context, obj, pose):
+    def __init__(self, context, obj, pose, scale=1.0):
         self.obj = obj
         self.start = obj.matrix_world.copy()
         self.pose_inv = pose.inverted_safe()
         self.gate = DragGate(context, pose)
         self.changed = False
+        self.scale = scale
+        self.surface = None
         primitives.make_active(context, obj)
 
     def update(self, context, pose, tip_pose, value):
@@ -169,25 +172,49 @@ class MoveObject:
             if base is None:
                 return
             self.pose_inv = base.inverted_safe()
+        settings = context.scene.vr_sculpt
         new = tip_pose @ self.pose_inv @ self.start
-        new.translation = grid.snap_if(context.scene.vr_sculpt, new.translation)
+        placed = None
+        if settings.snap_surface:
+            if self.surface is None:
+                self.surface = snapping.SurfaceSnap(context, self.obj, self.scale)
+            placed = self.surface.place(context, new, settings.snap_angle)
+        if placed is not None:
+            new = placed
+        else:
+            if settings.snap_angle:
+                loc, _rot, size = new.decompose()
+                new = snapping.snap_rotation(new.to_3x3().normalized()).to_4x4() @ Matrix.Diagonal((*size, 1.0))
+                new.translation = loc
+            new.translation = grid.snap_if(settings, new.translation)
         if new != self.obj.matrix_world:
             self.obj.matrix_world = new
             self.changed = True
 
+    def abandon(self):
+        snapping.clear()
+
     def finish(self, context):
+        snapping.clear()
         if self.changed:
             from . import anim
             anim.auto_key(context, self.obj)
 
 
 class CreatePrimitive:
-    """Drag out a box from the press point; the primitive fills it. A click makes a default size."""
+    """Drag out a box from the press point; the primitive fills it. A click makes a default size.
+
+    With New as Cut / Union / Intersect and an object selected, the primitive is a cutter on that
+    object from the start, so the cut shows while you drag (hardsurface.py)."""
 
     def __init__(self, context, key, tip, scale):
-        self.start = grid.snap_if(context.scene.vr_sculpt, tip)
+        settings = context.scene.vr_sculpt
+        self.start = grid.snap_if(settings, tip)
         self.scale = scale
+        self.target = hardsurface.cut_target(context) if settings.model_add_as != 'OBJECT' else None
         self.obj = primitives.create_from_entry(context, key, self.start)
+        if self.target is not None:
+            hardsurface.make_cutter(context, self.obj, self.target, settings.model_add_as, parent=False)
         self._fit(context, self.start)
         self.changed = True
 
@@ -209,5 +236,9 @@ class CreatePrimitive:
         self._fit(context, tip_pose.translation)
 
     def finish(self, context):
+        if self.target is not None:
+            # Placed in world space while dragging; from now on it moves with its target.
+            hardsurface.attach(self.obj, self.target)
+            hardsurface.refresh_solver(self.obj)
         # Refresh bounds now, so the new object can be grabbed right away.
         context.view_layer.update()

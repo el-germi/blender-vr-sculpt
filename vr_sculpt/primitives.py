@@ -63,9 +63,12 @@ def rebuild(obj):
     prim = obj.vr_prim
     if prim.kind not in {'CUBE', 'CYLINDER'} or obj.type != 'MESH':
         return
+    from . import shading
+    marks = shading.save_marks(obj.data)  # Hard / soft edges survive a resize (same edges).
     bm = build_bmesh(prim)
     bm.to_mesh(obj.data)
     bm.free()
+    shading.restore_marks(obj.data, marks)
     obj.data.update()
 
 

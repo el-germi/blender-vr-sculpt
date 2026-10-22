@@ -4,8 +4,8 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty
 from mathutils import Matrix, Quaternion, Vector
 
-from . import (actions, brushes, camera, catalog, desktop, drawing, interactions, measure, menus, native,
-               paint, paths, primitives, strokes, symmetry, vr_ui)
+from . import (actions, brushes, camera, catalog, desktop, drawing, hardsurface, interactions, measure, menus,
+               native, paint, paths, primitives, shading, snapping, strokes, symmetry, vr_ui)
 from . import pose as pose_mode  # "pose" is the controller pose in the handlers below
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
@@ -30,6 +30,7 @@ def _on_data_swap(*_args):
     global data_generation
     data_generation += 1
     drop_state()
+    snapping.clear()
     brushes.forget_caches()
     strokes.forget_caches()
     pose_mode.forget_caches()
@@ -120,10 +121,16 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         key = paths.nearest_key(context, tip_pose.translation, scale)
         if key is not None:
             return paths.KeyDrag(context, key[0], key[1], tip_pose.translation)
+    if settings.mode == 'MODEL' and settings.model_mark != 'NONE' and shading.mark_targets(context):
+        how = 'CLEAR' if hand == actions.HANDS[0] else settings.model_mark
+        return shading.EdgeMark(context, how, scale)
     if settings.mode == 'MODEL':
         obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale)
-        if obj is not None:
-            return interactions.MoveObject(context, obj, tip_pose)
+        # Making cutters, a press on the object being cut starts a new cutter there (anything else
+        # in reach, e.g. one of its cutters, is grabbed).
+        cutting = settings.model_add_as != 'OBJECT' and obj is not None and obj == hardsurface.cut_target(context)
+        if obj is not None and not cutting:
+            return interactions.MoveObject(context, obj, tip_pose, scale)
         return interactions.CreatePrimitive(context, settings.primitive, tip_pose.translation, scale)
     if settings.mode == 'DRAW':
         return drawing.pick(context, settings, tip_pose, value, scale)

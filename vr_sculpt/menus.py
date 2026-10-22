@@ -4,8 +4,8 @@ import math
 
 import bpy
 
-from . import (anim, camera, catalog, desktop, generic, measure, native, paint, pose, primitives, puppet, strokes,
-               symmetry, vr_ui)
+from . import (anim, camera, catalog, desktop, generic, hardsurface, measure, native, paint, pose, primitives, puppet,
+               shading, strokes, symmetry, vr_ui)
 from .props import BRUSH_ITEMS
 
 NATIVE_SHORT = {
@@ -44,6 +44,7 @@ def set_mode(context, mode):
     if settings.mode == 'POSE' and mode != 'POSE':
         pose.leave(context)
     settings.mode = mode
+    settings.model_mark = 'NONE'
     obj = context.view_layer.objects.active
     if mode in {'MODEL', 'DRAW', 'TOOLS'}:
         set_object_mode(context, obj, 'OBJECT')
@@ -216,27 +217,40 @@ def rows(context):
     return out
 
 
-def _cursor_to_left_hand(context):
-    """Put the 3D cursor (the mirror center) at the left controller's tip."""
+def _left_tip(context):
+    """Where the left controller's tip is, or None outside VR."""
     ss = context.window_manager.xr_session_state
     if ss is None:
-        return
+        return None
     from . import operators
     pose = operators.controller_pose(ss.controller_aim_location_get(context, 0),
                                      ss.controller_aim_rotation_get(context, 0))
-    tip = operators.brush_tip(pose, context.scene.vr_sculpt.tip_offset * ss.viewer_scale)
-    symmetry.move_center(context, tip)
+    return operators.brush_tip(pose, context.scene.vr_sculpt.tip_offset * ss.viewer_scale)
+
+
+def _cursor_to_left_hand(context):
+    """Put the 3D cursor (the mirror center) at the left controller's tip."""
+    tip = _left_tip(context)
+    if tip is not None:
+        symmetry.move_center(context, tip)
 
 
 def _toggle(settings, prop):
     return lambda: setattr(settings, prop, not getattr(settings, prop))
 
 
-def _grid_rows(settings):
-    out = [[
+def _grid_rows(settings, model=False):
+    row = [
         vr_ui.button("grid_show", "Grid", _toggle(settings, "grid_show"), active=settings.grid_show),
-        vr_ui.button("grid_snap", "Snap to grid", _toggle(settings, "grid_snap"), active=settings.grid_snap),
-    ]]
+        vr_ui.button("grid_snap", "Snap" if model else "Snap to grid", _toggle(settings, "grid_snap"),
+                     active=settings.grid_snap),
+    ]
+    if model:  # Plus the grab snaps, in the same row.
+        row += [
+            vr_ui.button("snap_surface", "Surface", _toggle(settings, "snap_surface"), active=settings.snap_surface),
+            vr_ui.button("snap_angle", "15\u00b0", _toggle(settings, "snap_angle"), active=settings.snap_angle),
+        ]
+    out = [row]
     if settings.grid_show or settings.grid_snap:
         out.append([vr_ui.slider("grid_size", "Grid size", settings.grid_size, 0.005, 0.5,
                                  lambda v: setattr(settings, "grid_size", v), fmt=_meters)])
@@ -380,42 +394,182 @@ def _operator_rows(context, obj):
     return out
 
 
+ADD_AS = (('OBJECT', "Object"), ('DIFFERENCE', "Cut"), ('UNION', "Union"), ('INTERSECT', "Intersect"))
+MODEL_PAGES = (('SHAPE', "Shape"), ('BOOLEAN', "Cuts"), ('FINISH', "Finish"), ('ARRAY', "Array"))
+
+
 def _model_rows(context, settings):
-    out = [[vr_ui.select("add", "Add", primitives.label(settings.primitive), lambda: open_add_picker(context))]] + _grid_rows(settings)
+    out = [
+        [vr_ui.select("add", "Add", primitives.label(settings.primitive), lambda: open_add_picker(context))],
+        [vr_ui.button("add_as_" + ident.lower(), name, (lambda i=ident: setattr(settings, "model_add_as", i)),
+                      active=settings.model_add_as == ident) for ident, name in ADD_AS],
+    ] + _grid_rows(settings, model=True)
     obj = context.view_layer.objects.active
     if obj is None or not obj.select_get():
         out.append([vr_ui.label("Drag in empty space to add")])
         return out
-    prim = obj.vr_prim if obj.type == 'MESH' else None
-    out.append([vr_ui.label(obj.name)])
-    if prim is not None and prim.kind == 'CUBE':
+    out.append([vr_ui.label(f"{obj.name} (cutter)" if hardsurface.is_cutter(obj) else obj.name)])
+    if obj.type == 'MESH':
+        out.append([vr_ui.button("page_" + ident.lower(), name, (lambda i=ident: _set_model_page(settings, i)),
+                                 active=settings.model_page == ident) for ident, name in MODEL_PAGES])
+        page = settings.model_page
+        if page == 'BOOLEAN':
+            out += _boolean_rows(context, obj)
+        elif page == 'FINISH':
+            out += _finish_rows(context, settings, obj)
+        elif page == 'ARRAY':
+            out += _array_rows(context, obj)
+        else:
+            out += _shape_rows(context, obj)
+    out.append([
+        vr_ui.button("duplicate", "Duplicate", lambda: hardsurface.duplicate(context, obj)),
+        vr_ui.button("delete", "Delete", lambda: hardsurface.delete(context, obj), danger=True),
+    ])
+    return out
+
+
+def _set_model_page(settings, page):
+    settings.model_page = page
+    if page != 'FINISH':
+        settings.model_mark = 'NONE'  # Its buttons are on the Finish page; don't leave it on unseen.
+
+
+def _shape_rows(context, obj):
+    prim = obj.vr_prim
+    out = []
+    if prim.kind == 'CUBE':
         for i, axis in enumerate("XYZ"):
             out.append([vr_ui.slider(f"size_{axis}", f"Size {axis}", prim.size[i], 0.01, 1.0,
                                      _setter(obj, "size", i), fmt=_meters)])
         out.append([vr_ui.slider("subdivisions", "Subdivisions", prim.subdivisions, 0, 16,
                                  _setter(obj, "subdivisions"), integer=True)])
-    elif prim is not None and prim.kind == 'CYLINDER':
+    elif prim.kind == 'CYLINDER':
         out.append([vr_ui.slider("radius_prim", "Radius", prim.radius, 0.005, 0.5,
                                  _setter(obj, "radius"), fmt=_meters)])
         out.append([vr_ui.slider("height", "Height", prim.height, 0.01, 1.0,
                                  _setter(obj, "height"), fmt=_meters)])
         out.append([vr_ui.slider("segments", "Segments", prim.segments, 3, 64,
                                  _setter(obj, "segments"), integer=True)])
-    elif prim is not None and prim.kind == 'OPERATOR':
+    elif prim.kind == 'OPERATOR':
         out += _operator_rows(context, obj)
     else:
         out.append([vr_ui.label("Plain mesh (sculpted or not a VR primitive)")])
-    if obj.type == 'MESH':
-        axes = symmetry.model_axes(obj)
-        out.append([vr_ui.label("Mirror:")] + [
-            vr_ui.button("mirror_" + a, a, (lambda i=i: symmetry.model_toggle(context, obj, i)), active=axes[i])
-            for i, a in enumerate(symmetry.AXES)] + [
-            vr_ui.button("mirror_here", "Here", lambda: _cursor_to_left_hand(context))])
-    out.append([
-        vr_ui.button("duplicate", "Duplicate", lambda: primitives.duplicate(context, obj)),
-        vr_ui.button("delete", "Delete", lambda: primitives.delete(context, obj), danger=True),
-    ])
+    axes = symmetry.model_axes(obj)
+    out.append([vr_ui.label("Mirror:")] + [
+        vr_ui.button("mirror_" + a, a, (lambda i=i: symmetry.model_toggle(context, obj, i)), active=axes[i])
+        for i, a in enumerate(symmetry.AXES)] + [
+        vr_ui.button("mirror_here", "Here", lambda: _cursor_to_left_hand(context))])
+    solid = hardsurface.solidify(obj) is not None
+    out.append([vr_ui.button("solidify", "Solidify", lambda: hardsurface.set_solidify(obj, not solid), active=solid)])
+    if solid:
+        out.append([vr_ui.slider("solidify_thickness", "Thickness", hardsurface.solidify_thickness(obj), 0.0005,
+                                 max(0.05, 0.5 * max(obj.dimensions)),
+                                 lambda v: hardsurface.set_solidify_thickness(obj, v), fmt=_meters)])
     return out
+
+
+def _boolean_rows(context, obj):
+    if hardsurface.is_cutter(obj):
+        target = hardsurface.target_of(obj)
+        mod = hardsurface.modifier_of(obj)
+        if target is None or mod is None:
+            return [[vr_ui.label("Cuts nothing (its object is gone)")]]
+        return [
+            [vr_ui.label(f"Cuts {target.name}")],
+            [vr_ui.button("bool_" + ident.lower(), name, (lambda i=ident: hardsurface.set_operation(obj, i)),
+                          active=mod.operation == ident) for ident, name in hardsurface.OPERATIONS],
+            [
+                vr_ui.button("bool_target", "Select object", lambda: primitives.make_active(context, target)),
+                vr_ui.button("bool_apply", "Apply", lambda: hardsurface.apply_cutter(context, obj)),
+                vr_ui.button("bool_remove", "Remove", lambda: hardsurface.delete(context, obj), danger=True),
+            ],
+        ]
+    mods = hardsurface.booleans(obj)
+    if not mods:
+        return [[vr_ui.label("No cuts yet: pick Cut above,")], [vr_ui.label("then drag on or near this object")]]
+    visible = hardsurface.cutters_visible(context)
+    exact = all(m.solver == 'EXACT' for m in mods)
+
+    def set_solver(solver):
+        for m in hardsurface.booleans(obj):
+            m.solver = solver
+
+    return [
+        [vr_ui.label(f"{len(mods)} cutter{'s' if len(mods) != 1 else ''}")],
+        [
+            vr_ui.button("cutters_show", "Show cutters", lambda: hardsurface.set_cutters_visible(context, not visible),
+                         active=visible),
+            vr_ui.button("bool_apply_all", "Apply all", lambda: hardsurface.apply_all(context, obj), danger=True),
+        ],
+        [
+            vr_ui.label("Solver:"),
+            vr_ui.button("solver_fast", "Fast", lambda: set_solver('MANIFOLD'), active=not exact),
+            vr_ui.button("solver_exact", "Exact", lambda: set_solver('EXACT'), active=exact),
+        ],
+    ]
+
+
+MARKS = (('HARD', "Hard"), ('SOFT', "Soft"), ('CLEAR', "Clear"))
+
+
+def _finish_rows(context, settings, obj):
+    current = shading.mode(obj)
+    out = [[vr_ui.label("Shading:")] + [
+        vr_ui.button("shade_" + ident.lower(), name,
+                     (lambda i=ident: shading.set_mode(obj, None if current == i else i)), active=current == ident)
+        for ident, name in shading.MODES]]
+    if current == 'AUTO':
+        out.append([vr_ui.slider("shade_angle", "Angle", shading.angle(obj), math.radians(1.0), math.radians(180.0),
+                                 lambda v: shading.set_angle(obj, v), fmt=_degrees)])
+    out.append([vr_ui.label("Mark:")] + [
+        vr_ui.button("mark_" + ident.lower(), name,
+                     (lambda i=ident: setattr(settings, "model_mark", 'NONE' if settings.model_mark == i else i)),
+                     active=settings.model_mark == ident)
+        for ident, name in MARKS])
+    on = hardsurface.has_bevel(obj)
+    out.append([vr_ui.button("bevel", "Bevel", lambda: hardsurface.set_bevel(obj, not on), active=on)])
+    if on:
+        mod = hardsurface.bevel(obj)
+        dims = [d for d in obj.dimensions if d > 1e-6]
+        hi = max(0.25 * min(dims), 0.002) if dims else 0.02
+        out.append([vr_ui.slider("bevel_width", "Width", hardsurface.bevel_width(obj), 0.0002, hi,
+                                 lambda v: hardsurface.set_bevel_width(obj, v), fmt=_meters)])
+        out.append([vr_ui.slider("bevel_segments", "Segments", mod.segments, 1, 8,
+                                 lambda v: setattr(mod, "segments", int(v)), integer=True)])
+    return out
+
+
+def _array_rows(context, obj):
+    count = hardsurface.array_count(obj)
+    out = [[vr_ui.slider("array_count", "Count", count, 1, 24,
+                         lambda v: hardsurface.set_array_count(context, obj, v), integer=True,
+                         fmt=lambda v: "Off" if int(v) <= 1 else str(int(v)))]]
+    if count <= 1:
+        return out
+    mode = hardsurface.array_mode(obj)
+    axis = hardsurface.array_axis(obj)
+    out.append([
+        vr_ui.button("array_linear", "Linear", lambda: hardsurface.set_array_mode(context, obj, 'LINEAR'),
+                     active=mode == 'LINEAR'),
+        vr_ui.button("array_radial", "Radial", lambda: hardsurface.set_array_mode(context, obj, 'RADIAL'),
+                     active=mode == 'RADIAL'),
+    ])
+    out.append([vr_ui.label("Around:" if mode == 'RADIAL' else "Along:")] + [
+        vr_ui.button("array_axis_" + a, a, (lambda i=i: hardsurface.set_array_axis(context, obj, i)), active=axis == i)
+        for i, a in enumerate(symmetry.AXES)])
+    if mode == 'RADIAL':
+        out.append([vr_ui.button("array_center", "Center at left hand", lambda: _array_center_here(context, obj))])
+    else:
+        out.append([vr_ui.slider("array_gap", "Gap", hardsurface.array_gap(obj), -0.5, 2.0,
+                                 lambda v: hardsurface.set_array_gap(context, obj, v),
+                                 fmt=lambda v: f"{v * 100:.0f}%")])
+    return out
+
+
+def _array_center_here(context, obj):
+    tip = _left_tip(context)
+    if tip is not None:
+        hardsurface.set_array_center(context, obj, tip)
 
 
 def _passthrough(context):
