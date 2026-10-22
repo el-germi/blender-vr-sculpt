@@ -23,6 +23,7 @@ ARC = math.radians(104.0)  # the belt's span in front of you
 TOKEN_SIZE = 0.017  # hand-space meters, a token's half size
 REACH = 0.034  # hand-space meters from a token's center that still take it
 WAKE = 0.3  # hand-space meters: a tip this close wakes the dock (labels, trays, full color)
+CHOOSE = 0.1  # hand-space meters: a tip this close is picking a tool (the hands' cards step aside)
 FOLLOW_DISTANCE = 0.4  # hand-space meters the headset may move before the belt catches up
 FOLLOW_ANGLE = math.radians(55.0)  # how far you may turn before the belt turns with you
 GLIDE = 5.0  # 1/seconds: how fast it catches up
@@ -138,17 +139,28 @@ def _near_slots(origin, yaw, scale, tip):
     return any((Vector(tip) - p).length < WAKE * scale for _t, p in slots_at(origin, yaw, scale))
 
 
-def awake(ss, tips):
-    """How far the dock has woken up for these tips: 1 with a tip in it, fading out to 0 at WAKE."""
-    scale = ss.viewer_scale
+def distance(ss, tips):
+    """Hand-space meters from the nearest tip to the nearest token (None without tips)."""
     best = None
     for _t, p in slots(ss, tips):
         for tip in tips:
-            d = (Vector(tip) - p).length / scale
+            d = (Vector(tip) - p).length / ss.viewer_scale
             best = d if best is None else min(best, d)
+    return best
+
+
+def awake(ss, tips):
+    """How far the dock has woken up for these tips: 1 with a tip in it, fading out to 0 at WAKE."""
+    best = distance(ss, tips)
     if best is None:
         return 0.0
     return min(max((WAKE - best) / (WAKE * 0.5), 0.0), 1.0)
+
+
+def choosing(ss, tips):
+    """A tip is in among the tokens: you're picking a tool."""
+    best = distance(ss, tips)
+    return best is not None and best < CHOOSE
 
 
 def token_at(ss, tip, tips=()):

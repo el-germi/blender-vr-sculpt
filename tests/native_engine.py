@@ -105,7 +105,7 @@ def main():
             c.scene.vr_sculpt.mode = 'SCULPT'  # The saved scene may be in another VR mode.
             depth = {}
             for strength, z0 in ((1.0, -0.75), (0.2, 0.75)):
-                widgets, _h = vr_ui.layout(menus.rows(c))
+                widgets, _h = vr_ui.layout(menus.tag_rows(c))
                 slider = vr_ui.find(widgets, "strength")
                 slider.on_change(strength)
                 s = native.NativeStroke(c, obj, 0.15)

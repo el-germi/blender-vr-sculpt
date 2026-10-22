@@ -34,28 +34,32 @@ Meta Quest over OpenXR.
     moves with it), with a Boolean modifier pointing at it. Grab a cutter, or
     change its size, and the cut follows live. The Manifold solver is used
     when both meshes are closed (about 13 ms for a 10k-vertex target, fast
-    enough to follow a drag), Exact otherwise. The **Cuts** page switches a
-    cutter's operation, applies or removes it, and on the object: hides all
-    cutters (they keep cutting), Apply all, and the solver.
-  - **Shading** (Finish page): **Flat**, **Smooth**, or **Auto** (smooth
+    enough to follow a drag), Exact otherwise. A selected cutter's chips
+    switch its operation, apply or remove it; the object's chips (under More):
+    hide all cutters (they keep cutting), Apply all, and the solver.
+  - **Shading** (chips beside the object): **Flat**, **Smooth**, or **Auto** (smooth
     except edges sharper than an Angle slider, 30 degrees to start). It's a
     small "VR Shading" Geometry Nodes modifier, so it holds through primitive
     rebuilds and the flat faces that cutters bring into a cut.
-  - **Hard and soft edges**: Mark **Hard** / **Soft** turns the trigger into
-    a tool that marks the edges it touches (right hand marks, left hand
+  - **Hard and soft edges**: the **Hard** / **Soft** edge markers (on the
+    Model token's tray) turn the trigger into a tool that marks the edges it touches (right hand marks, left hand
     clears; **Clear** clears with the right hand too). Hard edges stay sharp
     in Smooth and Auto, and soft edges stay smooth in Auto whatever their
     angle. It works on the object and its cutters, and a cutter's marks carry
     into the cut. Marks are edge attributes: Blender's own `sharp_edge` (Mark
     Sharp) for hard, `vrs_soft` for soft. They're drawn in blue and orange on
-    the Finish page, and the edges in reach of each tip light up.
-  - **Bevel**: an angle-limited Bevel with Harden Normals, Width and Segments
-    sliders (the width in world units). If the object has no VR shading
+    the edges while you work on the object, and the edges in reach of each tip
+    light up.
+  - **Bevel**: an angle-limited Bevel with Harden Normals. Pull the bevel bead
+    on the object's top edge in along the corner to set the width (world
+    units; back out to the edge to remove it); a Segments chip. If the object has no VR shading
     yet, the bevel turns on Auto shading, so flat faces stay flat and curved
     ones shade round.
-  - **Array**: Linear (along X / Y / Z, with a Gap) or Radial (around a
-    center you set at your left hand, about X / Y / Z), up to 24 copies.
-  - **Solidify** with a Thickness slider (on the Shape page).
+  - **Array**: drag an arrow out of a side of the object and copies follow
+    it (Linear, along that axis); the bead on the first copy sets the Gap.
+    Radial (a chip): a ring around a center cross you can move, about X / Y /
+    Z; drag the ring's bead around to set the count. Up to 24 copies.
+  - **Solidify** with a Thickness chip (under More).
   - Our modifiers keep one order whatever order you add them in: Solidify,
     Booleans, Array, Mirror, Shading, Bevel. So cuts happen once,
     arrays and the mirror repeat them, and the bevel rounds the cut edges.
@@ -69,7 +73,7 @@ Meta Quest over OpenXR.
 - **Every Add > Mesh entry, including extensions.** The list is read from
   Blender's own Add > Mesh menu, so primitives that extensions add there show
   up too: with Extra Mesh Objects that's 42 entries (gears, pipe joints,
-  gemstones, torus knots, rocks, ...). Their settings panels are built from
+  gemstones, torus knots, rocks, ...). Their settings chips are built from
   the operators' own properties.
 - **Draw mode**: freehand 3D strokes that become real meshes, like Gravity
   Sketch. Tube (round, never twists) and Ribbon (flat, follows your wrist's
@@ -95,8 +99,8 @@ Meta Quest over OpenXR.
     remove them (B removes the last one).
   - **Scene camera**: hold the trigger and the camera follows your controller
     (it looks where you point), with a live **camera preview** above your
-    hand. Switch or add cameras and set the lens from the panel. The preview
-    can also be pinned next to the hand panel in every mode.
+    hand. Switch or add cameras and set the lens from the camera's tag. The
+    preview can also be pinned beside the timeline strip in every mode.
 - **3D grid and snapping**: a lattice of points around the controller tips,
   in scene units. Snap to Grid snaps new primitives, grabbed objects and tape
   ends. In Model mode, **Surface** makes a grabbed object sit on the mesh
@@ -105,8 +109,8 @@ Meta Quest over OpenXR.
   hole). Twisting still turns it about the normal; pull away and it's free.
   **15°** turns grabbed objects in 15 degree steps.
 - **Symmetry**: Model mode mirrors the selected object on X / Y / Z with a
-  live Mirror modifier around a "VR Mirror Center" empty (Here puts it at
-  your left hand). Sculpt mode has X / Y / Z symmetry for both engines (the
+  live Mirror modifier around a "VR Mirror Center" empty (grab its diamond
+  to move it). Sculpt mode has X / Y / Z symmetry for both engines (the
   native engine uses the mesh's own symmetry flags).
 - **Walk and Fly navigation** on the thumbsticks, switchable while in VR.
   Walk keeps you level, follows floors, slopes and stairs under you (but not
@@ -125,12 +129,13 @@ Meta Quest over OpenXR.
   stick = scroll wheel. A virtual keyboard (sticky Shift / Ctrl / Alt) opens
   from the screen's title bar; drag the title bar to move the screen. It
   travels with you when you move. On other systems the screen is view only.
-- **Animation**: a timeline strip next to the hand panel, in every mode:
+- **Animation**: a timeline strip above the tool dock, in every mode (a
+  faint scrubber until a hand comes near):
   a frame scrubber with the selection's keys marked, play / stop, frame
   and key stepping, Key / Delete key, **Auto** (Blender's Auto Keying, which
   also keys objects and the camera when you let go of a VR grab), the
   interpolation of the keys on this frame, and Start / End to set the range
-  here. Tools > Hand panel: **Timeline** shows or hides the strip from VR.
+  here. The drawer's **Timeline** chip shows or hides the strip from VR.
   - **Motion paths in 3D**: the selection's paths with a tick per frame
     (so spacing shows) and a marker on every location key. Grab a marker
     and drag to move that key; the path follows.
@@ -173,10 +178,14 @@ Meta Quest over OpenXR.
   the range. A take only replaces what it records, so takes layer: the head
   first, then each hand.
 - **Passthrough** toggle (Blender's own; needs a runtime that supports it).
-- **Hand panel** above the left controller: Sculpt / Model / Draw / Paint /
-  Pose / Tools tabs, engine and brush buttons, radius and strength sliders, primitive
-  settings, Duplicate and Delete. Point at it with the right controller and
-  pull the trigger.
+- **Spatial UI** (see [docs/ui_spatial.md](docs/ui_spatial.md)): no menu
+  panel. Tools are 3D tokens on a **dock** around your waist: reach in with a
+  tip and pull the trigger to take one (its variants fan out above it; touch
+  the empty socket to put it back). Settings live where they belong:
+  **handles** on the selected object, **chips** beside it, the **tool's tag**
+  above your right hand (pressed with the left), the **palette** on your left
+  hand, a **drawer** for the rest. Pull the other hand's **brush ring** to
+  resize it. A light buzz when a tip touches any of it.
 
 ![Brush cards](docs/brush_cards.png)
 
@@ -186,12 +195,13 @@ Meta Quest over OpenXR.
 |---|---|---|---|---|---|---|
 | Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Grab a bone (FK / IK), or an object without a rig | Measure / aim the camera |
 | Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Same as right | Same as right |
-| Right trigger, pointing at the hand panel | Press buttons, drag sliders | Same | Same | Same | Same | Same |
-| Y (left) | Next mode (Sculpt, Model, Draw, Paint, Pose, Tools) | Same | Same | Same | Same | Same |
+| Either trigger, tip in a dock token, chip or handle | Take the tool / press the chip, drag the slider / drag the handle | Same | Same | Same | Same | Same |
+| Either trigger, tip on the other hand's brush ring | Pull the ring: radius | Same | Pull: stroke width | Pull: paint radius | Same | Same |
+| Y (left) | Next tool on the dock (Sculpt, Model, Draw, Paint, Pose, Tools) | Same | Same | Same | Same | Same |
 | B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Switch FK / IK | Remove the last measurement / next camera |
 | Left stick | Walk / fly (move) | Same | Same | Same | Same | Same |
 | Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same | Same |
-| Left stick click | Show / hide the hand panel | Same | Same | Same | Same | Same |
+| Left stick click | Show / hide the UI (dock, tags, chips, gizmos) | Same | Same | Same | Same | Same |
 | Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Next IK chain length (1-4) | Same |
 | Right trigger on a motion path key | Drag the key | Same | Same | Same | Same | Same |
 | Grip, A / X | Blender's stock VR navigation (unchanged) | Same | Same | Same | Same | Same |
@@ -220,8 +230,8 @@ blender --background --command extension install-file -r user_default -e dist/vr
 Then in the 3D View: **Sidebar (N) > VR > Start VR Session**. The **VR
 Authoring** panel in the same tab has the engine, brush, radius, strength, tip
 offset and display options; **VR Extras** has the grid, navigation, camera, desktop
-window, passthrough and tracking settings (including hiding the hand panel's
-"New here" camera button).
+window, passthrough and tracking settings (including hiding the camera tag's
+"New here" chip).
 
 - Python engine: select a mesh in **Object Mode**.
 - Native engine: select a mesh in **Sculpt Mode** and keep it visible in the
@@ -248,7 +258,7 @@ window, passthrough and tracking settings (including hiding the hand panel's
   controller tip.
 - **Model mode** ([interactions.py](vr_sculpt/interactions.py),
   [primitives.py](vr_sculpt/primitives.py)): the same trigger operator picks
-  a handler per press: hand panel, grab, or create. Primitive settings are a
+  a handler per press: the spatial UI, grab, or create. Primitive settings are a
   property group on the object whose update callbacks rebuild the mesh with
   bmesh. Booleans, finish, arrays and solidify are modifiers managed by
   [hardsurface.py](vr_sculpt/hardsurface.py); a cutter is found from the
@@ -278,10 +288,15 @@ window, passthrough and tracking settings (including hiding the hand panel's
   turn toward the controller only when its side axis clearly stands across
   the stroke (judged over the last 2 cm, so jitter doesn't count), at most
   half a turn per 10 cm, and never flip.
-- **Hand panel** ([vr_ui.py](vr_sculpt/vr_ui.py), [menus.py](vr_sculpt/menus.py)):
-  rows of buttons, sliders and selects on a card that faces the headset; the
-  right controller's aim ray is intersected with the card's plane. A select
-  opens a picker page (categories first, then a paged grid).
+- **Spatial UI** ([spatial.py](vr_sculpt/spatial.py), [dock.py](vr_sculpt/dock.py),
+  [gizmos.py](vr_sculpt/gizmos.py), [chips.py](vr_sculpt/chips.py),
+  [menus.py](vr_sculpt/menus.py), [shapes.py](vr_sculpt/shapes.py)): a trigger press
+  goes to what the tip is in (a chip, a dock token, the other hand's ring, a
+  gizmo handle), before the scene. Chip cards are vr_ui rows laid out on
+  billboards and hit by the tip's position in the card's plane (within 3 cm
+  of it), not a ray. Tokens and handles are small meshes built once and
+  drawn with one lit shader. The dock follows the headset lazily (it stays
+  put while a tip is in it). Hover haptics run in the app timer.
 - **Primitive catalog** ([catalog.py](vr_sculpt/catalog.py)): runs the Add >
   Mesh menu's draw functions (including ones extensions appended) against a
   recording layout, collecting each `layout.operator(...)` with its preset
@@ -485,12 +500,17 @@ blender --background --factory-startup --python tests/test_ik_limits.py
 blender --background --factory-startup --python tests/test_hard_surface.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_spatial.py
+```
+
 `test_generic.py` enables Extra Mesh Objects for its own run (factory
 settings, so your preferences aren't touched) and checks all 42 entries.
 
 Windowed (opens Blender briefly, writes `tests/*_result.txt`):
 `native_engine.py`, `native_modal.py`, `native_transform.py`. The
-`overlay_preview.py`, `panel_preview.py`, `hud_preview.py` and
+`overlay_preview.py`, `spatial_preview.py` (the dock, tags, gizmos, an array
+drag, a ring pull, the drawer and the palette, from a headset-like view), `hud_preview.py` and
 `tools_preview.py` scripts render the overlay to PNG; `probe_capture.py`
 checks region capture and offscreen camera rendering. `anim_preview.py`
 checks motion paths, key dragging, onion ghosts on a rig and playback.
@@ -498,11 +518,11 @@ checks motion paths, key dragging, onion ghosts on a rig and playback.
 held (that crashed Blender before the undo guard).
 `hard_surface_preview.py` builds a beveled plate with a drilled hole, a
 slot, a union boss and a radial ring of bolts, and renders it with the VR
-overlay, the Model panel's pages and the Mark tool's edge highlights
+overlay, the object chips and the Mark tool's edge highlights
 (`probe_hard_surface*.py` measured the
 boolean solvers and how the finish stack shades).
 `pose_preview.py` enters Pose Mode the way VR does (no area), records a
-puppet take while the timeline really plays, and draws the Pose page and
+puppet take while the timeline really plays, and draws the Pose chips and
 bones (`probe_pose.py` checked the pose API).
 `paint_preview.py`
 paints real Contact and Spray strokes with simulated controllers and checks
@@ -554,7 +574,7 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
 - Paint mode needs a desktop 3D view (it paints through it) and briefly moves
   that view for each dab. In Blender's own undo history every dab is a step;
   B in VR undoes whole strokes. Clone, Fill and Mask brushes aren't on the
-  hand panel (pick them on the desktop; they need extra setup).
+  Paint tray (pick them on the desktop; they need extra setup).
 - Hand tracking isn't possible from an add-on: Blender's VR layer doesn't
   enable OpenXR's hand tracking or hand interaction extensions, so drawing
   uses controllers.

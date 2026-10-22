@@ -34,6 +34,7 @@ CARD_WAKE = 0.26  # ... and to the selection's chips
 REACH_MAX = 0.55  # hand-space meters from the headset: farther chips are pulled in to here
 RING_RIM = 0.015  # hand-space meters around a brush ring's rim that still pull it
 RING_STEP = 0.005  # hand-space meters between the ticks you feel while pulling a ring
+HEADER_SCALE = 0.7  # the tool's name above the right hand, smaller than the old brush card
 CACHE_SECONDS = 0.006  # both eyes of one headset frame (and the hover tick) reuse the cards
 
 _drawer = {"open": False}
@@ -112,16 +113,18 @@ def _centered(card, anchor, viewer, scale):
 
 
 def object_anchor(obj, viewer, scale):
-    """Beside the selected object, on your right, pulled in to arm's reach if it's far."""
+    """Beside the selected object (and its copies), on your left: your right hand, working on the object,
+    carries its own tag above it. Pulled in to arm's reach if it's far."""
     lo, hi = gizmos.local_box(obj)
     corners = [obj.matrix_world @ Vector((x, y, z)) for x in (lo.x, hi.x) for y in (lo.y, hi.y) for z in (lo.z, hi.z)]
-    center = sum(corners, Vector()) / 8
+    corners += [obj.matrix_world @ Vector(c) for c in obj.bound_box]  # array copies, mirror
+    center = obj.matrix_world @ ((lo + hi) / 2)
     to = center - viewer
-    right = Vector((to.y, -to.x, 0.0))
-    right = right.normalized() if right.length > 1e-9 else Vector((1.0, 0.0, 0.0))
-    reach = max((c - center).dot(right) for c in corners)
+    left = Vector((-to.y, to.x, 0.0))
+    left = left.normalized() if left.length > 1e-9 else Vector((-1.0, 0.0, 0.0))
+    reach = max((c - center).dot(left) for c in corners)
     top = max(c.z for c in corners)
-    anchor = center + right * (reach + 0.03 * scale)
+    anchor = center + left * (reach + 0.03 * scale)
     anchor.z = (center.z + top) / 2
     d = anchor - viewer
     if d.length > REACH_MAX * scale:
@@ -187,14 +190,17 @@ def _build(context, ss):
                           TIMELINE_WIDTH, alpha=1.0 if full else 0.55)
         out.append(_above(card, anchor, viewer, scale))
 
-    rows = menus.tag_rows(context)
+    # Reaching into the dock you're choosing a tool, and pulling a ring or a handle you're at work: the
+    # cards on your hands step aside.
+    choosing = (dock.choosing(ss, tl) or _pull["handler"] is not None or _drag["handler"] is not None)         and pressed not in {"tag", "palette"}
+    rows = [] if choosing else menus.tag_rows(context)
     if rows:
         anchor = tag_anchor(context, ss)
         alpha = 1.0 if pressed == "tag" else _fade((tl[0] - anchor).length / scale, HAND_WAKE)
         card = chips.Card("tag", Matrix.Identity(4), rows, TAG_WIDTH, owner=1, alpha=alpha,
                           accent=hud_accent(context))
         out.append(_above(card, anchor, viewer, scale, 0.05))
-    rows = menus.palette_rows(context)
+    rows = [] if choosing else menus.palette_rows(context)
     if rows:
         anchor = palette_anchor(context, ss)
         alpha = 1.0 if pressed == "palette" else max(_fade((tl[1] - anchor).length / scale, HAND_WAKE), 0.35)
@@ -205,7 +211,7 @@ def _build(context, ss):
     if obj is not None:
         card = chips.Card("object", Matrix.Identity(4), menus.object_rows(context, obj), OBJECT_WIDTH)
         _centered(card, object_anchor(obj, viewer, scale), viewer, scale)
-        card.matrix = card.matrix @ Matrix.Translation((card.width / 2, 0.0, 0.0))
+        card.matrix = card.matrix @ Matrix.Translation((-card.width / 2, 0.0, 0.0))  # its right edge at the anchor
         card._inv = None
         d = min(min((t - card.center()).length, _box_distance(obj, t)) for t in tl) / scale
         card.alpha = 1.0 if pressed == "object" else _fade(d, CARD_WAKE)
@@ -532,9 +538,14 @@ def draw(context, ss, xr=True):
         cursor = cursor_handle(context, ss)
         if cursor is not None:
             _draw_cursor_handle(ss, cursor, hot == "cursor" or (drag is not None and drag.handle.id == "cursor"))
-    if settings.show_brush_card:
-        _draw_tag_header(context, ss, viewer, scale)
-    for card in cards(context, ss, cached=True):
+    all_cards = cards(context, ss, cached=True)
+    busy = settings.show_panel and (dock.choosing(ss, tl) or _drag["handler"] is not None
+                                    or _pull["handler"] is not None or hover(context, ss, 1, tl[1], tl) is not None)
+    if settings.show_brush_card and not busy:
+        # Its name steps aside while the right hand works on the UI; its description, while the tag is open.
+        tag = next((c for c in all_cards if c.id == "tag"), None)
+        _draw_tag_header(context, ss, viewer, scale, tag is None or tag.alpha < 0.5)
+    for card in all_cards:
         hover_id, cursor = None, None
         for i in range(2):
             if card.owner == i:
@@ -553,7 +564,7 @@ def draw(context, ss, xr=True):
         _draw_pull(ss, tl, pull)
 
 
-def _draw_tag_header(context, ss, viewer, scale):
+def _draw_tag_header(context, ss, viewer, scale, describe=True):
     """The name of what's in your right hand (with its token as the icon), above the controller."""
     from . import draw as vr_draw
     settings = context.scene.vr_sculpt
@@ -562,11 +573,12 @@ def _draw_tag_header(context, ss, viewer, scale):
     held = dock.held_token(settings)
     if held is not None and content[3] is None:
         content = (content[0], content[1], content[2], "token")
-    icon = hud.draw_card(tag_anchor(context, ss), viewer, scale, content)
+    icon = hud.draw_card(tag_anchor(context, ss), viewer, scale * HEADER_SCALE, content,
+                         None if describe else False)
     if held is not None and content[3] == "token" and icon is not None:
         shapes.begin_solid()
         gpu_state_none()
-        m = dock.token_matrix(icon, viewer, scale, (time.monotonic() * 0.8) % (2 * math.pi), hud.ICON_SIZE * 0.33)
+        m = dock.token_matrix(icon, viewer, scale, (time.monotonic() * 0.8) % (2 * math.pi), hud.ICON_SIZE * 0.33 * HEADER_SCALE)
         shapes.draw_shape("token_" + held.id, dock.parts(held.id), m, shapes.light_from(viewer, icon), 1.0, 0.0,
                           dock.tint(context, held))
         shapes.end_solid()
@@ -600,9 +612,9 @@ def _draw_pull(ss, tl, pull):
     batch.draw(shader)
     gpu.state.blend_set('NONE')
     if pull.label:
-        m = hud.billboard((a + b) / 2 + Vector((0.0, 0.0, 0.02 * ss.viewer_scale)), Vector(ss.viewer_pose_location),
-                          ss.viewer_scale)
-        chips.draw_label(m, 0.0, 0.0, pull.label, 0.009, (1.0, 1.0, 1.0, 1.0))
+        lift = (a - b).length + 0.015 * ss.viewer_scale  # above the rings
+        m = hud.billboard((a + b) / 2 + Vector((0.0, 0.0, lift)), Vector(ss.viewer_pose_location), ss.viewer_scale)
+        chips.draw_label(m, 0.0, 0.0, pull.label, 0.011, (1.0, 1.0, 1.0, 1.0))
 
 
 def preview_matrix(context, ss):

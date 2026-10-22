@@ -24,7 +24,7 @@ from . import grid, hardsurface, hud, primitives, shapes, symmetry
 REACH = 0.02  # hand-space meters from a handle that still grab it
 NEAR = 0.2  # hand-space meters: gizmos show when a tip is this close to the object's box
 ARROW_OUT = 0.05  # hand-space meters from a face to its array arrow
-HANDLE_SIZE = 0.0055  # hand-space meters
+HANDLE_SIZE = 0.0065  # hand-space meters
 MIN_SIZE = 0.002  # world meters, the smallest a drag makes a side
 MAX_COUNT = 24
 AXIS_COLORS = ((1.0, 0.36, 0.38), (0.5, 0.9, 0.35), (0.35, 0.6, 1.0))
@@ -568,7 +568,7 @@ def draw(context, ss, tips, hot=None, drag=None):
     if drag is not None and drag.label:
         from . import chips
         m = hud.billboard(drag.position + Vector((0.0, 0.0, 0.018 * scale)), viewer, scale)
-        chips.draw_label(m, 0.0, 0.0, drag.label, 0.009, (1.0, 1.0, 1.0, 1.0))
+        chips.draw_label(m, 0.0, 0.0, drag.label, 0.012, (1.0, 1.0, 1.0, 1.0))
 
 
 def clear():

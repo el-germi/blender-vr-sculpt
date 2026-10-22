@@ -155,23 +155,22 @@ def setup():
         plate, hole, slot, boss, bolt = build(ctx)
         s = ctx.scene.vr_sculpt
 
-        # The static panels: Shape (plate), Cuts (plate), Finish (bolt), Array (bolt, radial).
-        def add(i, obj, page):
+        # The static cards: the chips of the plate (More open), the slot cutter, the bolt (radial).
+        def add(i, obj, more):
             primitives.make_active(ctx, obj)
-            s.model_page = page
-            widgets, height = vr_ui.layout(menus.rows(ctx))
+            menus._set_expanded(obj, more)
+            widgets, height = vr_ui.layout(menus.object_rows(ctx, obj))
             x = PANEL_X + (i - 1.5) * 0.2
             m = vr_ui.panel_matrix(Vector((x, 0.0, 0.0)), Vector((x, -0.6, 0.0)), 1.0)
             panels.append((m, widgets, height))
-            log(f"panel {page} for {obj.name}: {len(widgets)} widgets, height {height:.3f}")
-        add(0, plate, 'SHAPE')
-        add(1, plate, 'BOOLEAN')
-        add(2, bolt, 'FINISH')
-        add(3, bolt, 'ARRAY')
+            log(f"chips for {obj.name}: {len(widgets)} widgets, height {height:.3f}")
+        add(0, plate, True)
+        add(1, plate, False)
+        add(2, slot, False)
+        add(3, bolt, False)
 
         # The live overlay: making cuts, the slot cutter selected (its page), a snap ring by the boss.
         s.model_add_as = 'DIFFERENCE'
-        s.model_page = 'BOOLEAN'
         s.show_panel = True
         primitives.make_active(ctx, slot)
         snapping.last_hit = (Vector((0.0, -0.05, 0.03)), Vector((0.0, 0.0, 1.0)))
@@ -246,7 +245,6 @@ def set_up_marks(ctx, area):
     primitives.make_active(ctx, plate)
     s = ctx.scene.vr_sculpt
     s.model_add_as = 'OBJECT'
-    s.model_page = 'FINISH'
     s.model_mark = 'SOFT'
     for obj, point, how in ((plate, (0.0, -0.1, 0.03), 'SOFT'), (boss, (0.11, -0.04, 0.045), 'HARD')):
         near = shading._near(shading._edge_segments(obj), np.array(point), 0.01)

@@ -96,19 +96,15 @@ def scenario_native(ctx):
 
 
 def scenario_model(ctx):
-    from vr_sculpt import interactions, menus, primitives, vr_ui
+    from vr_sculpt import menus, primitives
     menus.set_mode(ctx, 'MODEL')
     cube = primitives.create(ctx, 'CUBE', (-0.05, -0.1, 1.3))
     cube.vr_prim.size = (0.12, 0.08, 0.1)
     ctx.view_layer.update()
-    # Left tip inside the cube (bounds highlight), right ray on the "Size Y" slider.
-    fake.aim_loc[0] = Vector((-0.05, -0.1, 1.3)) - fake.aim_rot[0] @ Vector((0, 0, -ctx.scene.vr_sculpt.tip_offset))
-    matrix, widgets, height = interactions.panel_frame(ctx, fake)
-    w = vr_ui.find(widgets, "size_Y")
-    target = matrix @ Vector(((w.rect[0] + w.rect[2]) / 2, (w.rect[1] + w.rect[3]) / 2, 0.0))
-    normal = (matrix.to_3x3() @ Vector((0, 0, 1))).normalized()
-    fake.aim_loc[1] = target + normal * 0.25 + Vector((0.12, 0, -0.08))
-    fake.aim_rot[1] = (target - fake.aim_loc[1]).to_track_quat('-Z', 'Y')
+    # Left tip inside the cube (bounds highlight), right tip on its +X face handle (its chips show).
+    offset = Vector((0, 0, -ctx.scene.vr_sculpt.tip_offset))
+    fake.aim_loc[0] = Vector((-0.05, -0.1, 1.3)) - fake.aim_rot[0] @ offset
+    fake.aim_loc[1] = Vector((0.01, -0.1, 1.3)) - fake.aim_rot[1] @ offset
 
 
 def scenario_draw(ctx):

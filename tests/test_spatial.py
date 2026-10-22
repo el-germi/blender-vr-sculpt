@@ -261,8 +261,7 @@ def test_object_chips():
     ss.aim_loc[1] = Vector((0.0, 0.3, 1.32))  # A tip over the cube.
     c = card(ctx, ss, "object")
     check(c.alpha > 0.9 and c.find("shade_auto") is not None, "a tip near it brings them up")
-    to_right = Vector((1.0, 0.0, 0.0))
-    check((c.center() - cube.location).dot(to_right) > 0.05, "on your right of the object")
+    check(c.center().x < cube.location.x - 0.05, "on your left of the object (your right hand's tag is on the right)")
     op, r = press_chip(ctx, ss, 1, "object", "shade_flat")
     from vr_sculpt import shading
     check(type(op.handler).__name__ == "ChipPress" and shading.mode(cube) == 'FLAT', "pressing Flat by touch")
