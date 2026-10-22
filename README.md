@@ -130,7 +130,7 @@ Meta Quest over OpenXR.
   and key stepping, Key / Delete key, **Auto** (Blender's Auto Keying, which
   also keys objects and the camera when you let go of a VR grab), the
   interpolation of the keys on this frame, and Start / End to set the range
-  here.
+  here. Tools > Hand panel: **Timeline** shows or hides the strip from VR.
   - **Motion paths in 3D**: the selection's paths with a tick per frame
     (so spacing shows) and a marker on every location key. Grab a marker
     and drag to move that key; the path follows.

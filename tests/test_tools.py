@@ -557,6 +557,10 @@ def test_tools_page():
     vr_ui.find(widgets, "passthrough").on_press()
     check(xs.show_passthrough != before, "Passthrough button toggles the session setting")
     xs.show_passthrough = before
+    shown = settings.show_timeline
+    vr_ui.find(widgets, "show_timeline").on_press()
+    check(settings.show_timeline != shown, "Timeline button shows / hides the timeline strip")
+    settings.show_timeline = shown
     settings.grid_show = False
     settings.nav_mode = 'WALK'
 

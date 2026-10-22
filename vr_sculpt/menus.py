@@ -645,6 +645,10 @@ def _tools_rows(context, settings):
     out += _grid_rows(settings)
     xs = context.window_manager.xr_session_settings
     out.append([
+        vr_ui.label("Hand panel:"),
+        vr_ui.button("show_timeline", "Timeline", _toggle(settings, "show_timeline"), active=settings.show_timeline),
+    ])
+    out.append([
         vr_ui.button("show_desktop", "Desktop", lambda: _show_desktop(context, settings),
                      active=settings.show_desktop),
         vr_ui.button("bring_desktop", "Bring here", lambda: _bring_desktop(context))
