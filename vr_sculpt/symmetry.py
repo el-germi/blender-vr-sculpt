@@ -51,6 +51,8 @@ def model_toggle(context, obj, axis):
         mod.use_axis = (False, False, False)
         mod.use_mirror_merge = True
         mod.mirror_object = center(context)
+        from . import hardsurface
+        hardsurface.sort_stack(obj)  # Mirror after the booleans and arrays, before the bevel.
     flags = list(mod.use_axis)
     flags[axis] = not flags[axis]
     if any(flags):

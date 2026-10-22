@@ -194,6 +194,8 @@ def regenerate(context, obj):
     fresh = objs[0]
     old = obj.data
     if fresh.type == obj.type:
+        from . import shading
+        shading.restore_marks(fresh.data, shading.save_marks(old))  # Kept when the edges are the same.
         obj.data = fresh.data
     for o in objs:
         bpy.data.objects.remove(o)

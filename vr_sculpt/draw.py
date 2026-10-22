@@ -8,8 +8,8 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-from . import (camera, desktop, drawing, grid, hud, interactions, measure, onion, operators, paint, paths,
-               primitives, puppet, strokes, symmetry, vr_ui)
+from . import (camera, desktop, drawing, grid, hardsurface, hud, interactions, measure, onion, operators, paint,
+               paths, primitives, puppet, shading, snapping, strokes, symmetry, vr_ui)
 from . import pose as pose_mode  # "pose" is a controller pose below
 
 COLORS = {
@@ -98,7 +98,9 @@ def _draw_cursors(context, ss, settings, xr):
         radius = {'EDIT': drawing.EDIT_RADIUS, 'ERASE': drawing.ERASE_MARGIN}.get(
             settings.draw_tool, settings.draw_width / 2) * scale
     else:
-        radius = (pose_mode.REACH if posing else interactions.TOUCH_MARGIN if model or tools else
+        marking = model and settings.model_mark != 'NONE'
+        radius = (pose_mode.REACH if posing else shading.MARK_REACH if marking else
+                  interactions.TOUCH_MARGIN if model or tools else
                   settings.paint_radius if painting else settings.radius) * scale
     offset = settings.tip_offset * scale
 
@@ -125,8 +127,12 @@ def _draw_cursors(context, ss, settings, xr):
                 near = strokes.nearest(context, tip, reach)
                 if near is not None:
                     _draw_bounds(shader, near, (*color, 0.9))
+        elif model and settings.model_mark != 'NONE':
+            color = {'HARD': shading.HARD_COLOR, 'SOFT': shading.SOFT_COLOR}.get(settings.model_mark, (1.0, 1.0, 1.0))
+            if idx == 0:
+                color = (1.0, 1.0, 1.0)  # The left hand clears.
         elif model:
-            color = hud.MODEL_COLOR
+            color = hud.CUT_COLORS.get(settings.model_add_as, hud.MODEL_COLOR)                 if hardsurface.cut_target(context) is not None else hud.MODEL_COLOR
             touched = primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale)
             if touched is not None:
                 _draw_bounds(shader, touched, (1.0, 0.85, 0.3, 0.9))
@@ -151,12 +157,25 @@ def _draw_cursors(context, ss, settings, xr):
         active = context.view_layer.objects.active
         if active is not None and active.select_get() and active.visible_get():
             _draw_bounds(shader, active, (1.0, 1.0, 1.0, 0.35))
+            target = hardsurface.cut_target(context)
+            if target is not None and hardsurface.cutters_visible(context):
+                # The cuts of the object being worked on (cutters are wireframes, easy to lose).
+                for mod in hardsurface.booleans(target):
+                    if mod.object is not None and mod.object.visible_get():
+                        c = hud.CUT_COLORS.get(mod.operation, hud.MODEL_COLOR)
+                        _draw_bounds(shader, mod.object, (*c, 0.9 if mod.object == active else 0.45))
             bits = symmetry.model_bits(active)
             mod = active.modifiers.get(symmetry.MODIFIER)
             if bits and mod is not None:
                 center = mod.mirror_object.matrix_world.translation if mod.mirror_object else \
                     active.matrix_world.translation
                 _draw_mirror_planes(shader, bits, center, scale)
+        snapping.draw(shader, scale)
+        if settings.model_page == 'FINISH' or settings.model_mark != 'NONE':
+            tips = [operators.brush_tip(operators.controller_pose(ss.controller_aim_location_get(context, i),
+                                                                  ss.controller_aim_rotation_get(context, i)), offset)
+                    for i in range(2)]
+            shading.draw(shader, context, tips, scale, settings.model_mark != 'NONE')
     if sketch:
         _draw_mirror_planes(shader, drawing.mirror_bits(settings), context.scene.cursor.location, scale)
     gpu.state.blend_set('NONE')
