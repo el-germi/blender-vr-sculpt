@@ -1,4 +1,4 @@
-"""Background tests for Model mode: primitives, the hand panel, and trigger interactions.
+"""Background tests for Model mode: primitives, chip cards, and trigger interactions.
 
 blender --background --factory-startup --python tests/test_model.py
 """
@@ -15,7 +15,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import vr_sculpt  # noqa: E402
-from vr_sculpt import actions, interactions, menus, operators, primitives, vr_ui  # noqa: E402
+from vr_sculpt import actions, dock, menus, operators, primitives, spatial, vr_ui  # noqa: E402
 
 failures = []
 
@@ -80,6 +80,7 @@ class FakeWM:
         self.xr_session_state = ss
         self.timers = set()
         self.windows = bpy.context.window_manager.windows
+        self.xr_session_settings = bpy.context.window_manager.xr_session_settings
 
     def event_timer_add(self, step, window=None):
         t = object()
@@ -222,22 +223,30 @@ def test_layout():
 
 
 def test_menus():
-    print("== menus")
+    print("== chip cards")
     ctx = bpy.context
     settings = ctx.scene.vr_sculpt
     for mode in ('SCULPT', 'MODEL'):
         for engine in ('PYTHON', 'NATIVE'):
             settings.mode, settings.engine = mode, engine
-            widgets, _ = vr_ui.layout(menus.rows(ctx))
-            ids = {w.id for w in widgets}
-            check({"mode_sculpt", "mode_model"} <= ids, f"{mode}/{engine}: mode tabs present")
+            ids = spatial.ids(ctx, menus.tray_rows(ctx, "sculpt"))
+            check({"brush_DRAW", "brush_SMOOTH", "native_Clay Strips", "native_Smooth"} <= set(ids),
+                  f"{mode}/{engine}: the Sculpt token's tray has both engines' brushes")
+    settings.mode, settings.engine = 'SCULPT', 'PYTHON'
+    tag = spatial.ids(ctx, menus.tag_rows(ctx))
+    check({"strength", "sym_X"} <= set(tag), "the Sculpt tool's tag: strength and symmetry")
     settings.mode = 'MODEL'
+    tag = spatial.ids(ctx, menus.tag_rows(ctx))
+    check({"add_as_object", "add_as_difference", "snap_surface"} <= set(tag), "the Model tool's tag: New as and snaps")
     cyl = primitives.create(ctx, 'CYLINDER', (0, 0, 0))
-    ids = {w.id for w in vr_ui.layout(menus.rows(ctx))[0]}
-    check({"radius_prim", "height", "segments", "duplicate", "delete"} <= ids, "cylinder settings shown when selected")
-    seg = vr_ui.find(vr_ui.layout(menus.rows(ctx))[0], "segments")
+    ids = spatial.ids(ctx, menus.object_rows(ctx, cyl))
+    check({"shade_smooth", "duplicate", "delete", "more"} <= set(ids) and "segments" not in ids,
+          "the cylinder's chips: shading, Duplicate, Delete, More")
+    ids["more"].on_press()
+    seg = spatial.ids(ctx, menus.object_rows(ctx, cyl)).get("segments")
+    check(seg is not None, "More shows its Segments")
     seg.on_change(8)
-    check(cyl.vr_prim.segments == 8 and len(cyl.data.vertices) == 16, "panel slider edits the primitive")
+    check(cyl.vr_prim.segments == 8 and len(cyl.data.vertices) == 16, "the Segments chip edits the primitive")
     primitives.delete(ctx, cyl)
     settings.mode = 'SCULPT'
     settings.engine = 'PYTHON'
@@ -292,38 +301,24 @@ def test_trigger():
     ss.aim_rot[1] = Quaternion()
     check(abs(obj.matrix_world.to_euler().z - 1.5708) < 1e-3, "grab follows controller rotation")
 
-    # Pointing at the panel and pressing "Sculpt" switches mode instead of creating.
-    matrix, widgets, height = interactions.panel_frame(ctx, ss)
-    tab = vr_ui.find(widgets, "mode_sculpt")
-    target = matrix @ Vector(((tab.rect[0] + tab.rect[2]) / 2, (tab.rect[1] + tab.rect[3]) / 2, 0.0))
-    normal = (matrix.to_3x3() @ Vector((0, 0, 1))).normalized()
-    origin, rot = aim_at(target, normal)
+    # Reaching into the Sculpt token on the dock takes that tool instead of creating.
+    spatial.reset()
+    token = dict((t.id, p) for t, p in dock.slots(ss))["sculpt"]
     n = len(bpy.data.objects)
-    op, r = press(ctx, ss, 1, [origin], rot)
-    check(type(op.handler).__name__ == "UIPress", "trigger aimed at the panel goes to the panel")
-    check(settings.mode == 'SCULPT' and len(bpy.data.objects) == n, "pressing 'Sculpt' switched mode, nothing created")
+    op, r = press(ctx, ss, 1, [token])
+    check(type(op.handler).__name__ == "TokenPick", "trigger in a dock token goes to the dock")
+    check(settings.mode == 'SCULPT' and len(bpy.data.objects) == n, "taking the Sculpt token switched mode, "
+          "nothing created")
 
-    # Drag the radius slider from its left end to its right end.
-    matrix, widgets, height = interactions.panel_frame(ctx, ss)
-    s = vr_ui.find(widgets, "radius")
-    y = (s.rect[1] + s.rect[3]) / 2
-    left = matrix @ Vector((s.rect[0] + vr_ui.PAD, y, 0.0))
-    right = matrix @ Vector((s.rect[2] - vr_ui.PAD, y, 0.0))
-    o1, r1 = aim_at(left, normal)
-    ss.trigger = 1.0
-    ss.aim_loc[1], ss.aim_rot[1] = o1, r1
-    op = harness()
-    op.invoke(ctx, FakeEvent('XR_ACTION', 'PRESS', FakeXR(o1, r1)))
-    check(abs(settings.radius - 0.005) < 1e-3, f"pressing the slider's left end sets the minimum ({settings.radius:.4f})")
-    # Keep the controller in place but turn it to point at the right end.
-    ss.aim_rot[1] = (right - o1).to_track_quat('-Z', 'Y')
-    time.sleep(0.01)
-    op.modal(ctx, FakeEvent('TIMER'))
-    check(abs(settings.radius - 0.2) < 1e-3, f"dragging to the right end sets the maximum ({settings.radius:.4f})")
-    ss.trigger = 0.0
-    time.sleep(0.01)
-    r = op.modal(ctx, FakeEvent('TIMER'))
-    check(r == {'FINISHED'} and interactions.pressed_id is None, "slider release finishes and clears the press")
+    # Pull the right hand's brush ring with the left tip: the radius follows the distance between tips.
+    settings.radius = 0.04
+    ss.aim_loc[1], ss.aim_rot[1] = Vector((2.0, 0.0, 1.0)), Quaternion()
+    op, r = press(ctx, ss, 0, [(2.04, 0.0, 1.0), (2.07, 0.0, 1.0), (2.12, 0.0, 1.0)])
+    check(type(op.handler).__name__ == "RingPull", "the left tip on the right ring's rim pulls it")
+    check(abs(settings.radius - 0.12) < 1e-4 and r == {'FINISHED'},
+          f"spreading the hands to 12 cm makes a 12 cm radius ({settings.radius:.4f})")
+    op, r = press(ctx, ss, 0, [(2.0, 0.0, 1.0), (2.01, 0.0, 1.0)])
+    check(type(op.handler).__name__ != "RingPull", "a tip inside the ring (not on its rim) doesn't pull it")
 
     # In Sculpt mode, sculpting a primitive turns it into a plain mesh.
     settings.engine = 'PYTHON'

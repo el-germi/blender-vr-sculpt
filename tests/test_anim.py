@@ -1,5 +1,5 @@
 """Background tests for animation: keys, interpolation, frame stepping and jumping, the timeline
-rows, auto-key after a VR grab, key dragging on motion paths, and onion skin ghosts on a small
+strip, auto-key after a VR grab, key dragging on motion paths, and onion skin ghosts on a small
 rigged character.
 
 blender --background --factory-startup --python tests/test_anim.py
@@ -12,7 +12,7 @@ import traceback
 
 import bpy
 import numpy as np
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -130,26 +130,43 @@ def test_timeline_rows(cube):
     class SS:
         viewer_scale = 1.0
         viewer_pose_location = Vector((0.0, -0.6, 1.5))
+        tips = [Vector((-0.2, 0.5, 1.1)), Vector((0.2, 0.5, 1.1))]  # Hands away from the dock.
 
         def controller_grip_location_get(self, context, i):
             return Vector((-0.2, -0.3, 1.1))
-    frames = interactions.panel_frames(ctx, SS())
-    check(len(frames) == 2 and frames[1][3] > vr_ui.WIDTH, "the timeline is a wider strip beside the hand panel")
-    main_height = frames[0][2]
-    check((frames[1][0].translation - frames[0][0].translation).length > vr_ui.WIDTH / 2,
-          "next to it, not on top of it")
-    widgets, height = frames[1][1], frames[1][2]
+
+        def controller_aim_location_get(self, context, i):
+            return self.tips[i]
+
+        def controller_aim_rotation_get(self, context, i):
+            return Quaternion()
+
+    from vr_sculpt import spatial
+    settings.tip_offset = 0.0
+    ss = SS()
+    spatial.reset()
+
+    def strip():
+        return next((c for c in spatial.cards(ctx, ss) if c.id == "timeline"), None)
+    card = strip()
+    check(card is not None and {w.id for w in card.widgets} == {"frame"} and card.alpha < 1.0,
+          "with the hands away, the timeline is a faint scrubber above the dock")
+    origin, _yaw, _scale = spatial.dock.frame(ss)
+    check(card.matrix.translation.z > origin.z + 0.1 and (card.matrix.translation - origin).length < 0.7,
+          "above the dock, in front of you")
+    ss.tips[1] = card.center()
+    card = strip()
+    widgets = card.widgets
     ids = {w.id for w in widgets}
     need = {"frame", "key_prev", "frame_prev", "play", "frame_next", "key_next", "key_insert", "key_delete",
             "autokey", "interp", "range_start", "range_end", "show_paths", "onion"}
-    check(need <= ids, f"timeline rows (missing {sorted(need - ids)})")
+    check(need <= ids and card.alpha == 1.0, f"a hand near it opens the whole strip (missing {sorted(need - ids)})")
     frame = vr_ui.find(widgets, "frame")
     check(len(frame.ticks) == 2 and all(0 <= t <= 1 for t in frame.ticks), f"key ticks on the scrubber ({frame.ticks})")
     frame.on_change(40)
     check(ctx.scene.frame_current == 40, "scrubbing sets the frame")
     settings.show_timeline = False
-    frames2 = interactions.panel_frames(ctx, SS())
-    check(len(frames2) == 1 and abs(frames2[0][2] - main_height) < 1e-9, "Timeline off hides it (panel unchanged)")
+    check(strip() is None, "Timeline off hides it")
     settings.show_timeline = True
     tool = ctx.scene.tool_settings
     tool.use_keyframe_insert_auto = False

@@ -4,8 +4,8 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty
 from mathutils import Matrix, Quaternion, Vector
 
-from . import (actions, brushes, camera, catalog, desktop, drawing, hardsurface, interactions, measure, menus,
-               native, paint, paths, primitives, shading, snapping, strokes, symmetry, vr_ui)
+from . import (actions, brushes, camera, catalog, desktop, drawing, gizmos, hardsurface, interactions, measure, menus,
+               native, paint, paths, primitives, shading, snapping, spatial, strokes, symmetry)
 from . import pose as pose_mode  # "pose" is the controller pose in the handlers below
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
@@ -34,6 +34,7 @@ def _on_data_swap(*_args):
     brushes.forget_caches()
     strokes.forget_caches()
     pose_mode.forget_caches()
+    gizmos.forget_caches()
 
 
 def get_state(obj):
@@ -92,7 +93,7 @@ def _tip_engaged(context, settings, tip, scale):
     """Whether the tip is at work on something, so a desktop screen behind it doesn't take the trigger."""
     if settings.mode == 'SCULPT':
         return primitives.touching(context, tip, settings.radius * scale) is not None
-    if settings.mode == 'MODEL':
+    if settings.mode in {'MODEL', 'HAND'}:
         return primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale) is not None
     if settings.mode == 'DRAW' and settings.draw_tool in {'EDIT', 'ERASE'}:
         return strokes.nearest(context, tip, drawing.EDIT_RADIUS * scale) is not None
@@ -106,13 +107,12 @@ def _tip_engaged(context, settings, tip, scale):
 
 
 def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
-    """Panel press, grab, create or draw for this trigger press; None means sculpt (or nothing)."""
+    """UI touch, grab, create or draw for this trigger press; None means sculpt (or nothing)."""
     ss = context.window_manager.xr_session_state
-    if settings.show_panel and hand == actions.HANDS[1] and ss is not None:
-        widgets, hit, _m, _h = interactions.panel_pointer(context, ss, pose)
-        if hit is not None:
-            # A press anywhere on the panel belongs to the panel, even between widgets.
-            return interactions.UIPress(context, ss, vr_ui.hit_test(widgets, *hit), hit)
+    # The spatial UI first: a chip, a dock token, a brush ring or a gizmo handle the tip is in.
+    handler = spatial.pick(context, settings, hand, pose, tip_pose, scale)
+    if handler is not None:
+        return handler
     if settings.show_desktop and ss is not None and not _tip_engaged(context, settings, tip_pose.translation, scale):
         handler = desktop.pick(context, ss, hand, pose)
         if handler is not None:
@@ -124,6 +124,10 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
     if settings.mode == 'MODEL' and settings.model_mark != 'NONE' and shading.mark_targets(context):
         how = 'CLEAR' if hand == actions.HANDS[0] else settings.model_mark
         return shading.EdgeMark(context, how, scale)
+    if settings.mode == 'HAND':
+        # An empty hand (its tool is back on the dock) grabs and moves what it touches.
+        obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale)
+        return interactions.MoveObject(context, obj, tip_pose, scale) if obj is not None else None
     if settings.mode == 'MODEL':
         obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale)
         # Making cutters, a press on the object being cut starts a new cutter there (anything else
@@ -146,7 +150,7 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
 
 
 class VRSCULPT_OT_stroke(bpy.types.Operator):
-    """Sculpt, model or use the hand panel with a VR controller while the trigger is held"""
+    """Sculpt, model, draw, paint, pose or use the spatial UI with a VR controller while the trigger is held"""
     bl_idname = "vrsculpt.stroke"
     bl_label = "VR Trigger"
     bl_options = {'UNDO', 'INTERNAL'}
@@ -374,6 +378,8 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
         if self.left_hand:
             i = MODE_CYCLE.index(settings.mode) if settings.mode in MODE_CYCLE else -1
             menus.set_mode(context, MODE_CYCLE[(i + 1) % len(MODE_CYCLE)])
+        elif settings.mode == 'HAND':
+            pass  # Nothing in the hand.
         elif settings.mode == 'DRAW':
             undo_last_stroke(context)
         elif settings.mode == 'PAINT':
@@ -410,9 +416,10 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
 
 
 class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
-    """Right stick click: next brush radius (Pose: IK chain length). Left stick click: show or hide the hand panel"""
+    """Right stick click: next brush radius (Pose: IK chain length). Left stick click: show or hide the VR UI
+    (dock, tags, chips and gizmos)"""
     bl_idname = "vrsculpt.cycle_radius"
-    bl_label = "VR Next Radius / Toggle Panel"
+    bl_label = "VR Next Radius / Toggle UI"
     bl_options = {'INTERNAL'}
 
     left_hand: BoolProperty(name="Left Hand", options={'SKIP_SAVE'})
@@ -421,6 +428,7 @@ class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
         settings = context.scene.vr_sculpt
         if self.left_hand:
             settings.show_panel = not settings.show_panel
+            spatial.invalidate()
             return {'FINISHED'}
         if settings.mode == 'POSE':
             settings.pose_chain = settings.pose_chain % 4 + 1
@@ -481,13 +489,14 @@ class VRSCULPT_OT_clear_measures(bpy.types.Operator):
 
 
 class VRSCULPT_OT_set_mode(bpy.types.Operator):
-    """Switch the VR tools between Sculpt, Model, Draw, Paint, Pose and Tools mode"""
+    """Switch the VR tools between Sculpt, Model, Draw, Paint, Pose and Tools mode, or an empty hand"""
     bl_idname = "vrsculpt.set_mode"
     bl_label = "Set VR Mode"
     bl_options = {'INTERNAL'}
 
     mode: EnumProperty(items=(('SCULPT', "Sculpt", ""), ('MODEL', "Model", ""), ('DRAW', "Draw", ""),
-                              ('PAINT', "Paint", ""), ('POSE', "Pose", ""), ('TOOLS', "Tools", "")))
+                              ('PAINT', "Paint", ""), ('POSE', "Pose", ""), ('TOOLS', "Tools", ""),
+                              ('HAND', "Hand", "")))
 
     def execute(self, context):
         menus.set_mode(context, self.mode)

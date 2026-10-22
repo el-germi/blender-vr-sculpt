@@ -276,18 +276,18 @@ def test_keys(rig):
 
 
 def test_rows(rig):
-    print("== hand panel")
+    print("== Pose chips: the tray and the tool's tag")
     ctx = bpy.context
     settings = ctx.scene.vr_sculpt
     settings.pose_tool = 'IK'
-    widgets, _h = vr_ui.layout(menus.rows(ctx))
-    ids = {w.id for w in widgets}
-    need = {"mode_sculpt", "mode_pose", "mode_tools", "pose_rig", "pose_fk", "pose_ik", "pose_mirror", "pose_bones",
+    tray, _h = vr_ui.layout(menus.tray_rows(ctx, "pose"))
+    widgets, _h = vr_ui.layout(menus.tag_rows(ctx))
+    ids = {w.id for w in tray + widgets}
+    need = {"pose_rig", "pose_fk", "pose_ik", "pose_mirror", "pose_bones",
             "pose_chain", "pose_reset", "pose_reset_all", "bind_left", "bind_right", "bind_head", "puppet_rec"}
-    check(need <= ids, f"Pose rows (missing {sorted(need - ids)})")
-    tabs = [w for w in widgets if w.id.startswith("mode_")]
-    check(len(tabs) == 6 and len({round(w.rect[1], 5) for w in tabs}) == 2, "six mode tabs on two rows")
-    vr_ui.find(widgets, "pose_fk").on_press()
+    check(need <= ids, f"Pose chips (missing {sorted(need - ids)})")
+    check(vr_ui.find(tray, "pose_ik").active and not vr_ui.find(tray, "pose_fk").active, "the tray shows IK taken")
+    vr_ui.find(tray, "pose_fk").on_press()
     check(settings.pose_tool == 'FK', "FK button")
     pb = rig.pose.bones["Spine"]
     pb.rotation_quaternion = Quaternion((1, 0, 0), 0.3)
@@ -295,8 +295,8 @@ def test_rows(rig):
     vr_ui.find(widgets, "pose_reset").on_press()
     check(pb.rotation_quaternion.angle < 1e-6, "Reset bone")
     pose.choose_rig(ctx, "")
-    widgets, _h = vr_ui.layout(menus.rows(ctx))
-    check(rig.mode == 'OBJECT' and vr_ui.find(widgets, "pose_fk") is None and vr_ui.find(widgets, "bind_left"),
+    widgets, _h = vr_ui.layout(menus.tag_rows(ctx))
+    check(rig.mode == 'OBJECT' and vr_ui.find(widgets, "pose_reset") is None and vr_ui.find(widgets, "bind_left"),
           "rig picker: Objects (no rig) leaves Pose Mode, Bind stays")
 
 

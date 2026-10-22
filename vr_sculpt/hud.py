@@ -76,6 +76,7 @@ PYTHON_INFO = {
 
 # Sizes in meters, in hand space (scaled by the VR viewer scale).
 _ICON = 0.032
+ICON_SIZE = _ICON
 _PAD = 0.005
 _TITLE_H = 0.011
 _DESC_H = 0.0065
@@ -148,6 +149,9 @@ def card_content(settings, sculpt_brush, colors):
         else:
             title, desc = POSE_INFO[settings.pose_tool]
             content = (title, desc, POSE_COLORS[settings.pose_tool], None)
+    elif settings.mode == 'HAND':
+        content = ("Empty hand", "Touch an object to grab and move it. Take a tool from your belt",
+                   (0.92, 0.92, 0.95), None)
     elif settings.mode == 'TOOLS':
         title, desc = TOOLS_INFO[settings.tool]
         content = (title, desc, CAMERA_COLOR if settings.tool == 'CAMERA' else MEASURE_COLOR, None)
@@ -221,6 +225,8 @@ def draw_text(m, x, y, text, height, color):
 
 
 def draw_card(anchor, viewer, scale, content, with_description=None):
+    """Draw the card; returns the icon's center (world). texture "token": leave the icon slot empty
+    for a 3D token drawn over it."""
     title, desc, color, texture = content
     if with_description is None:
         with_description = show_description()
@@ -252,7 +258,9 @@ def draw_card(anchor, viewer, scale, content, with_description=None):
 
     ix0, iy0 = x0 + _PAD, y0 + _PAD
     icon = [(ix0, iy0, 0.0002), (ix0 + _ICON, iy0, 0.0002), (ix0 + _ICON, iy0 + _ICON, 0.0002), (ix0, iy0 + _ICON, 0.0002)]
-    if texture is not None:
+    if texture == "token":
+        pass
+    elif texture is not None:
         image = gpu.shader.from_builtin('IMAGE')
         batch = batch_for_shader(image, 'TRI_FAN', {"pos": icon, "texCoord": ((0, 0), (1, 0), (1, 1), (0, 1))})
         image.uniform_sampler("image", texture)
@@ -276,6 +284,7 @@ def draw_card(anchor, viewer, scale, content, with_description=None):
     else:
         draw_text(m, tx, y0 + _PAD + (_ICON - _TITLE_H) / 2.0, title, _TITLE_H, (1.0, 1.0, 1.0, 1.0))
     gpu.state.blend_set('NONE')
+    return m @ Vector((ix0 + _ICON / 2.0, iy0 + _ICON / 2.0, 0.004))
 
 
 def clear():

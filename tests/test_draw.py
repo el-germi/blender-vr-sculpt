@@ -426,7 +426,7 @@ def test_taper():
 
 
 def test_sculpt_forgets_and_panel():
-    print("== sculpting a stroke, panel rows")
+    print("== sculpting a stroke, Draw chips")
     clear()
     ss, ctx, s = setup_trigger()
     hold(ctx, ss, 1, path((0, 0, 1), (0.3, 0, 1)))
@@ -438,20 +438,31 @@ def test_sculpt_forgets_and_panel():
     check(not strokes.is_stroke(obj), "sculpting a stroke turns it into a plain mesh")
 
     s.mode = 'DRAW'
-    widgets, _ = vr_ui.layout(menus.rows(bpy.context))
-    ids = {w.id for w in widgets}
-    check({"mode_draw", "tool_EDIT", "style_RIBBON", "color_GREEN", "draw_width", "mirror_x", "undo_stroke",
-           "draw_thickness"} <= ids, "Draw panel has tools, styles, colors, width, mirror, thickness and undo")
-    vr_ui.find(widgets, "draw_thickness").on_press()
-    widgets, _ = vr_ui.layout(menus.rows(bpy.context))
+    ctx = bpy.context
+    tray = {w.id for w in vr_ui.layout(menus.tray_rows(ctx, "draw"))[0]}
+    check({"style_TUBE", "style_RIBBON", "style_NOTE", "tool_EDIT", "tool_ERASE"} <= tray,
+          "the Draw token's tray: stroke styles, Edit and Erase")
+    tag, _ = vr_ui.layout(menus.tag_rows(ctx))
+    ids = {w.id for w in tag}
+    check({"draw_smoothing", "mirror_x", "undo_stroke", "draw_thickness"} <= ids,
+          "the pen's tag: smoothing, thickness, mirror and undo (width is its ring)")
+    palette = {w.id for w in vr_ui.layout(menus.palette_rows(ctx))[0]}
+    check({"color_GREEN", "color_WHITE"} <= palette, "the palette in the left hand has the colors")
+    vr_ui.find(vr_ui.layout(menus.tray_rows(ctx, "draw"))[0], "style_RIBBON").on_press()
+    check(s.draw_style == 'RIBBON' and s.draw_tool == 'DRAW', "taking Ribbon from the tray")
+    vr_ui.find(vr_ui.layout(menus.tray_rows(ctx, "draw"))[0], "tool_EDIT").on_press()
+    check(s.draw_tool == 'EDIT', "taking Edit from the tray")
+    vr_ui.find(tag, "draw_thickness").on_press()
+    widgets, _ = vr_ui.layout(menus.picker_rows())
     vr_ui.find(widgets, "opt_SPEED_THIN").on_press()
     check(s.draw_thickness == 'SPEED_THIN' and not menus.picker_open(), "Thickness picker sets the mode")
-    widgets, _ = vr_ui.layout(menus.rows(bpy.context))
-    vr_ui.find(widgets, "color_GREEN").on_press()
-    vr_ui.find(widgets, "mirror_z").on_press()
+    vr_ui.find(vr_ui.layout(menus.palette_rows(ctx))[0], "color_GREEN").on_press()
+    vr_ui.find(vr_ui.layout(menus.tag_rows(ctx))[0], "mirror_z").on_press()
     check(s.draw_color == 'GREEN' and s.mirror_z, "swatches and mirror toggles work")
-    sw = vr_ui.find(vr_ui.layout(menus.rows(bpy.context))[0], "color_GREEN")
+    sw = vr_ui.find(vr_ui.layout(menus.palette_rows(ctx))[0], "color_GREEN")
     check(sw.swatch is not None and sw.active, "the chosen swatch is marked")
+    s.mirror_z = False
+    s.draw_tool, s.draw_style = 'DRAW', 'TUBE'
 
 
 def main():

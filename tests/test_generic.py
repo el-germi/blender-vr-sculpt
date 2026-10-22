@@ -114,57 +114,66 @@ def test_picker():
     s.mode = 'MODEL'
     s.primitive = primitives.DEFAULT_ADD
     clear()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets, _ = vr_ui.layout(menus.tray_rows(ctx, "model"))
     add = vr_ui.find(widgets, "add")
-    check(add is not None and add.kind == 'select' and add.value_text == "Cube", "Add is a select showing Cube")
+    check(add is not None and add.kind == 'select' and vr_ui.find(widgets, "shape_cube").active,
+          "the Model token's tray: Cube is taken, All shapes is a select")
     add.on_press()
     check(menus.picker_open(), "pressing it opens the picker")
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets, _ = vr_ui.layout(menus.picker_rows())
     ids = [w.id for w in widgets]
     check("cat_Mesh" in ids and "cat_Gears" in ids, "picker starts on categories (Mesh, Gears, ...)")
     check(vr_ui.find(widgets, "cat_Mesh").active, "the current value's category is highlighted")
     vr_ui.find(widgets, "cat_Gears").on_press()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets, _ = vr_ui.layout(menus.picker_rows())
     gear_key = next(e.key for e in catalog.entries() if e.idname == "mesh.primitive_gear")
     check(vr_ui.find(widgets, "opt_" + gear_key) is not None, "Gears category lists Gear")
     vr_ui.find(widgets, "picker_back").on_press()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets, _ = vr_ui.layout(menus.picker_rows())
     check(vr_ui.find(widgets, "cat_Gears") is not None and menus.picker_open(), "Back returns to categories")
     vr_ui.find(widgets, "cat_Mesh").on_press()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets, _ = vr_ui.layout(menus.picker_rows())
     mesh_items = [w for w in widgets if w.id.startswith("opt_")]
     check(len(mesh_items) == len([e for e in catalog.entries() if not e.category]), "Mesh shows all built-ins")
     vr_ui.find(widgets, "cat_Mesh") is None
     vr_ui.find(widgets, "picker_back").on_press()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets, _ = vr_ui.layout(menus.picker_rows())
     vr_ui.find(widgets, "cat_Gears").on_press()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets, _ = vr_ui.layout(menus.picker_rows())
     vr_ui.find(widgets, "opt_" + gear_key).on_press()
     check(s.primitive == gear_key and not menus.picker_open(), "choosing Gear sets it and closes the picker")
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    check(vr_ui.find(widgets, "add").value_text == "Gear", "Add now shows Gear")
+    widgets, _ = vr_ui.layout(menus.tray_rows(ctx, "model"))
+    check(vr_ui.find(widgets, "add").value_text == "Gear", "All shapes now shows Gear")
 
     # Paging: a picker with many options.
     menus.open_picker("Many", [menus.Option(i, f"Item {i}") for i in range(40)], 0, lambda v: None)
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets, _ = vr_ui.layout(menus.picker_rows())
     shown = [w for w in widgets if w.id.startswith("opt_")]
     check(len(shown) == menus.PICKER_COLS * menus.PICKER_ROWS and vr_ui.find(widgets, "picker_next"),
           "long lists are paged")
     vr_ui.find(widgets, "picker_next").on_press()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets, _ = vr_ui.layout(menus.picker_rows())
     check(vr_ui.find(widgets, "opt_18") is not None and vr_ui.find(widgets, "picker_prev"), "Next shows page 2")
     menus.close_picker()
 
 
+def chips_of(ctx, obj):
+    """The selected object's chips, expanded (More): an operator primitive's settings are there."""
+    menus._set_expanded(obj, True)
+    return vr_ui.layout(menus.object_rows(ctx, obj))[0]
+
+
 def test_settings_panel():
-    print("== settings rows for operator primitives")
+    print("== settings chips for operator primitives")
     ctx = bpy.context
     s = ctx.scene.vr_sculpt
     s.mode = 'MODEL'
     clear()
     gear_key = next(e.key for e in catalog.entries() if e.idname == "mesh.primitive_gear")
     gear = primitives.create_from_entry(ctx, gear_key, (0, 0, 0))
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    collapsed = {w.id for w in vr_ui.layout(menus.object_rows(ctx, gear))[0]}
+    check("param_number_of_teeth" not in collapsed and "more" in collapsed, "settings wait under More")
+    widgets = chips_of(ctx, gear)
     ids = {w.id for w in widgets}
     check("param_number_of_teeth" in ids and "param_radius" in ids, "gear shows Teeth and Radius")
     check(not ({"param_change", "param_Gear", "param_name", "param_align"} & ids), "internal/placement settings hidden")
@@ -175,24 +184,24 @@ def test_settings_panel():
     check(len(gear.data.vertices) > verts and generic.stored(gear)["number_of_teeth"] == 20,
           "Teeth slider regenerates a gear with more teeth")
     vr_ui.find(widgets, "params_next").on_press()
-    widgets2, _ = vr_ui.layout(menus.rows(ctx))
+    widgets2 = chips_of(ctx, gear)
     check(vr_ui.find(widgets2, "param_number_of_teeth") is None and "params_prev" in {w.id for w in widgets2},
           "Next shows the second settings page")
 
     clear()
     torus_key = next(e.key for e in catalog.entries() if e.idname == "mesh.primitive_torus_add")
     torus = primitives.create_from_entry(ctx, torus_key, (0, 0, 0))
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets = chips_of(ctx, torus)
     mode = vr_ui.find(widgets, "param_mode")
     check(mode is not None and mode.kind == 'select', "enum settings (torus Dimensions Mode) are selects")
     mode.on_press()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets, _ = vr_ui.layout(menus.picker_rows())
     check(vr_ui.find(widgets, "opt_EXT_INT") is not None, "the enum picker lists its items directly")
     vr_ui.find(widgets, "opt_EXT_INT").on_press()
     check(generic.stored(torus)["mode"] == 'EXT_INT' and not menus.picker_open(), "picking an item sets the setting")
     # The torus has 8 settings: Generate UVs is on page 2.
-    vr_ui.find(vr_ui.layout(menus.rows(ctx))[0], "params_next").on_press()
-    uvs = vr_ui.find(vr_ui.layout(menus.rows(ctx))[0], "param_generate_uvs")
+    vr_ui.find(chips_of(ctx, torus), "params_next").on_press()
+    uvs = vr_ui.find(chips_of(ctx, torus), "param_generate_uvs")
     check(uvs is not None and uvs.kind == 'button' and uvs.active, "bool settings are toggle buttons")
     uvs.on_press()
     check(generic.stored(torus)["generate_uvs"] is False, "toggling flips the bool")
@@ -206,7 +215,7 @@ def test_slow_generator():
     wall = primitives.create_from_entry(ctx, wall_key, (0, 0, 0))
     generic.fit(ctx, wall, (0, 0, 0), (0.1, 0.1, 0.1), 0.005)
     check(wall.get("vrs_slow", False), "Wall Factory is detected as slow")
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets = chips_of(ctx, wall)
     slider = next(w for w in widgets if w.kind == 'slider' and w.id.startswith("param_"))
     mesh_before = wall.data
     t0 = time.perf_counter()

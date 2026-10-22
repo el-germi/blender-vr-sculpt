@@ -19,7 +19,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 import vr_sculpt  # noqa: E402
-from vr_sculpt import hardsurface, menus, operators, primitives, shading, snapping, symmetry, vr_ui  # noqa: E402
+from vr_sculpt import hardsurface, menus, operators, primitives, shading, snapping, spatial, symmetry  # noqa: E402
 import test_model as tm  # noqa: E402  (fakes and the press() helper)
 
 failures = []
@@ -385,21 +385,22 @@ def test_shading():
     primitives.make_active(bpy.context, plate)
     check(set(shading.mark_targets(bpy.context)) == {plate, hole}, "the Mark tool works on the object and its cutters")
 
-    # Panel: the Finish page's shading and mark buttons; leaving the page turns the tool off.
-    settings.model_page = 'FINISH'
-    ids = panel_ids(ctx)
-    check(all(k in ids for k in ("shade_flat", "shade_smooth", "shade_auto", "shade_angle", "mark_hard", "bevel")),
-          "Finish page: shading modes, Angle, Mark and Bevel")
+    # Chips: shading next to the object; the edge markers are tools on the Model token's tray.
+    ids = object_ids(ctx, plate)
+    check(all(k in ids for k in ("shade_flat", "shade_smooth", "shade_auto", "shade_angle")),
+          "the object's chips: shading modes and Angle")
     ids["shade_auto"].on_press()
     check(shading.mode(plate) is None, "pressing the active mode takes the VR shading off")
-    ids["mark_soft"].on_press()
-    check(settings.model_mark == 'SOFT', "Mark Soft turns the tool on")
-    panel_ids(ctx)["page_shape"].on_press()
-    check(settings.model_mark == 'NONE', "leaving the Finish page turns it off")
-    panel_ids(ctx)["page_finish"].on_press()
-    panel_ids(ctx)["bevel"].on_press()
-    check(hardsurface.has_bevel(plate) and shading.mode(plate) == 'AUTO', "Bevel brings Auto shading with it")
-    settings.model_page = 'SHAPE'
+    tray = spatial.ids(ctx, menus.tray_rows(ctx, "model"))
+    check(all(k in tray for k in ("mark_hard", "mark_soft", "mark_clear")), "the tray has the three edge markers")
+    tray["mark_soft"].on_press()
+    check(settings.model_mark == 'SOFT', "taking the Soft marker turns the tool on")
+    spatial.ids(ctx, menus.tray_rows(ctx, "model"))["shape_cube"].on_press()
+    check(settings.model_mark == 'NONE', "taking a shape puts the marker down")
+    menus._set_expanded(plate, True)
+    object_ids(ctx, plate)["bevel"].on_press()
+    check(hardsurface.has_bevel(plate) and shading.mode(plate) == 'AUTO', "Bevel (under More) brings Auto shading")
+    menus._set_expanded(plate, False)
 
 
 def test_arrays():
@@ -511,49 +512,55 @@ def test_snapping():
     settings.snap_surface = False
 
 
-def panel_ids(ctx):
-    widgets, _height = vr_ui.layout(menus.rows(ctx))
-    return {w.id: w for w in widgets if w.id}
+def object_ids(ctx, obj):
+    return spatial.ids(ctx, menus.object_rows(ctx, obj))
 
 
 def test_panel():
-    print("== Model panel pages")
+    print("== Model chips: the tool's tag and the selection's chips")
     clear()
     ss, ctx, settings = setup()
-    ids = panel_ids(ctx)
-    check(all(i in ids for i in ("add_as_object", "add_as_difference", "snap_surface", "snap_angle")),
-          "New as and snap buttons are on the panel")
-    ids["add_as_difference"].on_press()
-    check(settings.model_add_as == 'DIFFERENCE', "Cut button sets New as")
+    tag = spatial.ids(ctx, menus.tag_rows(ctx))
+    check(all(i in tag for i in ("add_as_object", "add_as_difference", "snap_surface", "snap_angle")),
+          "New as and snap chips are on the Model tool's tag")
+    tag["add_as_difference"].on_press()
+    check(settings.model_add_as == 'DIFFERENCE', "Cut sets New as")
     obj = cube(0.1, (0, 0, 0), "Panel")
-    for page in ('SHAPE', 'BOOLEAN', 'FINISH', 'ARRAY'):
-        settings.model_page = page
-        ids = panel_ids(ctx)
-        check("page_" + page.lower() in ids, f"page {page} draws")
-    settings.model_page = 'FINISH'
-    panel_ids(ctx)["bevel"].on_press()
-    check(hardsurface.has_bevel(obj) and "bevel_width" in panel_ids(ctx), "Bevel button adds the bevel and its sliders")
-    settings.model_page = 'ARRAY'
-    panel_ids(ctx)["array_count"].on_change(4)
-    ids = panel_ids(ctx)
-    check(hardsurface.array_count(obj) == 4 and "array_gap" in ids, "Count slider makes an array; Gap shows")
+    ids = object_ids(ctx, obj)
+    check({"shade_auto", "duplicate", "delete", "more"} <= set(ids) and "bevel_segments" not in ids,
+          "a plain object shows only shading and its actions")
+    hardsurface.set_bevel(obj, True)
+    check("bevel_segments" in object_ids(ctx, obj), "with a bevel, its Segments chip shows (the width is a handle)")
+    hardsurface.set_array_count(ctx, obj, 4)
+    ids = object_ids(ctx, obj)
+    check({"array_linear", "array_radial", "array_axis_X"} <= set(ids), "with an array, Linear / Radial and the axis")
     ids["array_radial"].on_press()
-    check("array_center" in panel_ids(ctx), "Radial shows the center button")
-    settings.model_page = 'SHAPE'
-    panel_ids(ctx)["solidify"].on_press()
-    check("solidify_thickness" in panel_ids(ctx), "Solidify button shows Thickness")
+    check(hardsurface.array_mode(obj) == 'RADIAL', "Radial makes it a ring")
+    ids["array_axis_Z"].on_press()
+    check(hardsurface.array_axis(obj) == 2, "the axis chips turn it")
+    ids["more"].on_press()
+    ids = object_ids(ctx, obj)
+    check({"mirror_X", "solidify", "bevel"} <= set(ids) and ids["more"].active, "More shows mirror, solidify, bevel")
+    ids["solidify"].on_press()
+    check("solidify_thickness" in object_ids(ctx, obj), "Solidify shows Thickness")
+    ids["more"].on_press()
+    check("mirror_X" not in object_ids(ctx, obj), "Less folds it away")
+    hardsurface.set_array_count(ctx, obj, 1)
     cutter = cube(0.05, (0.05, 0.05, 0.05), "PanelCutter")
     hardsurface.make_cutter(bpy.context, cutter, obj)
-    settings.model_page = 'BOOLEAN'
-    ids = panel_ids(ctx)
-    check("bool_union" in ids and "bool_apply" in ids, "a cutter's page has its operation and Apply")
+    ids = object_ids(ctx, cutter)
+    check("bool_union" in ids and "bool_apply" in ids and "bool_remove" in ids,
+          "a cutter's chips: its operation, Apply and Remove")
     ids["bool_union"].on_press()
-    check(hardsurface.modifier_of(cutter).operation == 'UNION', "Union button changes the cutter's operation")
+    check(hardsurface.modifier_of(cutter).operation == 'UNION', "Union changes the cutter's operation")
     ids["bool_target"].on_press()
-    ids = panel_ids(ctx)
-    check("bool_apply_all" in ids and "solver_exact" in ids, "the target's page has Apply all and the solver")
+    check(ctx.view_layer.objects.active == obj, "Select object selects what it cuts")
+    menus._set_expanded(obj, True)
+    ids = object_ids(ctx, obj)
+    check("bool_apply_all" in ids and "solver_exact" in ids, "the target's More: Apply all and the solver")
     ids["solver_exact"].on_press()
     check(all(m.solver == 'EXACT' for m in hardsurface.booleans(obj)), "Exact switches every cut's solver")
+    menus._set_expanded(obj, False)
     settings.model_add_as = 'OBJECT'
 
 

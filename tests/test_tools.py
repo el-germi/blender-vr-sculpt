@@ -527,27 +527,30 @@ def test_desktop_input():
 
 
 def test_tools_page():
-    print("== Tools page and buttons")
+    print("== Tools: the tags and the drawer")
     ctx = bpy.context
     settings = ctx.scene.vr_sculpt
     menus.set_mode(ctx, 'TOOLS')
-    for tool in ('MEASURE', 'CAMERA'):
-        settings.tool = tool
-        widgets, height = vr_ui.layout(menus.rows(ctx))
-        ids = {w.id for w in widgets}
-        need = {"mode_tools", "tool_measure", "tool_camera", "grid_show", "grid_snap", "show_desktop", "passthrough",
-                "tracking", "nav_walk", "nav_fly", "nav_speed"}
-        check(need <= ids, f"{tool}: page has its buttons (missing {sorted(need - ids)})")
-        check(height < 0.4, f"{tool}: panel height {height:.3f} m")
+    settings.tool = 'MEASURE'
+    ids = {w.id for w in vr_ui.layout(menus.tag_rows(ctx))[0]}
+    check({"measures_show", "measure_undo", "measure_clear"} <= ids, "the tape measure's tag: Show, Undo, Clear")
     settings.tool = 'CAMERA'
-    check(vr_ui.find(vr_ui.layout(menus.rows(ctx))[0], "camera_new") is not None, "New here shows by default")
+    ids = {w.id for w in vr_ui.layout(menus.tag_rows(ctx))[0]}
+    check({"camera", "camera_new", "camera_preview", "camera_lens"} <= ids, "the camera's tag: camera, New here, "
+          "Pin preview, Lens")
+    widgets, height = vr_ui.layout(menus.drawer_rows(ctx))
+    ids = {w.id for w in widgets}
+    need = {"grid_show", "grid_snap", "show_desktop", "passthrough", "show_timeline", "tracking", "tracking_record",
+            "nav_walk", "nav_fly", "nav_speed"}
+    check(need <= ids, f"the drawer has the rest (missing {sorted(need - ids)})")
+    check(height < 0.25, f"the drawer is compact ({height:.3f} m)")
     settings.show_new_camera = False
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets, _ = vr_ui.layout(menus.tag_rows(ctx))
     check(vr_ui.find(widgets, "camera_new") is None and vr_ui.find(widgets, "camera_preview") is not None,
           "VR Extras can hide New here (Pin preview stays)")
     settings.show_new_camera = True
     settings.tool = 'MEASURE'
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets, _ = vr_ui.layout(menus.drawer_rows(ctx))
     vr_ui.find(widgets, "nav_fly").on_press()
     check(settings.nav_mode == 'FLY', "Fly button")
     vr_ui.find(widgets, "grid_show").on_press()

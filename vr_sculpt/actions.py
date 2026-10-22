@@ -83,7 +83,7 @@ def _patch(session_state):
         ami.op_mode = 'MODAL'
     if missing:
         return "Patched, but stock actions missing: " + ", ".join(missing)
-    return "Trigger = sculpt/model/draw/tools, Y = mode, B = next brush / undo, stick clicks: L = panel, R = radius"
+    return "Trigger = use what the tip is in, Y = next tool, B = next brush / undo, stick clicks: L = UI, R = radius"
 
 
 @persistent
@@ -100,6 +100,9 @@ def on_xr_session_start_pre(_context):
     context.window_manager.xr_session_settings.show_custom_overlays = True
     # Draw mode's Note strokes are annotations.
     context.window_manager.xr_session_settings.show_annotation = True
+    # The tool dock settles around wherever you start.
+    from . import spatial
+    spatial.reset()
     # Pick up primitives from extensions enabled since the last session.
     from . import catalog
     try:

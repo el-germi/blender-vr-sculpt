@@ -625,10 +625,9 @@ def draw(context, ss, right_pose=None):
         hud.draw_text(matrix, -w / 2 + 0.01, h / 2, "Waiting for the desktop window...", 0.012,
                       (0.85, 0.85, 0.88, 1.0))
 
-    from . import interactions
     for name, pm, widgets, height, width in panels(context, ss):
         hover_id = pointed[1].id if pointed is not None and pointed[0] == name and pointed[1] else None
-        vr_ui.draw_panel(pm, widgets, height, hover_id, interactions.pressed_id, width=width)
+        vr_ui.draw_panel(pm, widgets, height, hover_id, width=width)
     if pointed is not None and right_pose is not None:
         vr_ui.draw_ray(right_pose.translation, pointed[2], True)
     gpu.state.blend_set('NONE')

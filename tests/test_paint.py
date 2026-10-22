@@ -187,34 +187,38 @@ def test_undo(obj, img):
 
 
 def test_panel(obj):
-    print("== panel and buttons")
+    print("== Paint chips: the tray, the brush's tag and the palette")
     ctx = bpy.context
     settings = ctx.scene.vr_sculpt
     for o in ctx.view_layer.objects:
         o.select_set(False)
     ctx.view_layer.objects.active = obj
     settings.mode = 'PAINT'
-    widgets, height = vr_ui.layout(menus.rows(ctx))
-    ids = {w.id for w in widgets}
-    need = {"mode_paint", "reach_contact", "reach_spray", "paint_pick", "paint_hue", "paint_sat", "paint_val",
-            "paint_radius", "paint_undo", "paint_swap"}
-    check(need <= ids, f"ready mesh: paint page (missing {sorted(need - ids)})")
-    check(height < 0.42, f"panel height {height:.3f} m")
+    tray, _ = vr_ui.layout(menus.tray_rows(ctx, "paint"))
+    tag, _ = vr_ui.layout(menus.tag_rows(ctx))
+    widgets, height = vr_ui.layout(menus.palette_rows(ctx))
+    ids = {w.id for w in tray + tag + widgets}
+    need = {"pbrush_Paint Hard", "pbrush_Smear", "paint_pick", "reach_contact", "reach_spray",
+            "paint_undo", "paint_hue", "paint_sat", "paint_val", "paint_swap"}
+    check(need <= ids, f"ready mesh: brushes on the tray, reach on the tag, colors on the palette "
+          f"(missing {sorted(need - ids)})")
+    check(height < 0.2, f"the palette is small ({height:.3f} m)")
     check(sum(1 for w in widgets if w.id.startswith("pcolor_")) == 8, "8 color swatches")
+    check(vr_ui.find(widgets, "paint_hue").gradient, "the hue slider shows the hues")
     vr_ui.find(widgets, "pcolor_YELLOW").on_press()
     check(close(paint.get_color(ctx), next(rgb for i, _n, rgb in vr_sculpt.strokes.PALETTE if i == 'YELLOW')),
           "a swatch sets the color")
-    vr_ui.find(widgets, "reach_spray").on_press()
+    vr_ui.find(tag, "reach_spray").on_press()
     check(settings.paint_reach == 'SPRAY', "Spray button")
     settings.paint_reach = 'CONTACT'
-    vr_ui.find(widgets, "paint_pick").on_press()
+    vr_ui.find(tray, "paint_pick").on_press()
     check(settings.paint_tool == 'PICK', "Pick color arms the eyedropper")
     settings.paint_tool = 'PAINT'
 
     bare = bpy.data.objects.new("Bare", bpy.data.meshes.new("Bare"))
     ctx.scene.collection.objects.link(bare)
     ctx.view_layer.objects.active = bare
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets, _ = vr_ui.layout(menus.palette_rows(ctx))
     check(vr_ui.find(widgets, "paint_setup") is not None and vr_ui.find(widgets, "paint_size_2048") is not None,
           "a mesh without UVs/image offers Set up for painting")
     check(paint.pick(ctx, settings, False, Matrix(), Matrix(), 1.0) is None, "and the trigger does nothing on it")

@@ -1,9 +1,9 @@
-"""A small in-VR panel toolkit: rows of buttons, sliders and labels on a floating card.
+"""A small in-VR widget toolkit: rows of buttons, sliders and labels laid out on a card.
 
-The panel floats above the left controller, facing the headset. The right
-controller points at it (its aim ray) and the trigger presses buttons or drags
-sliders. Layout and hit testing are plain math so they can be tested without a
-headset; drawing is in draw_panel().
+The spatial UI's chip cards (chips.py) are laid out here and pressed by touch. The desktop screen's
+title bar and keyboard (desktop.py) are drawn with draw_panel() and pointed at with the right
+controller's aim ray (ray_hit). Layout and hit testing are plain math so they can be tested without
+a headset.
 """
 
 import gpu
@@ -39,8 +39,9 @@ class Widget:
 
     def __init__(self, kind, id="", text="", *, active=False, danger=False, on_press=None,
                  value=0.0, min=0.0, max=1.0, integer=False, fmt=None, on_change=None, value_text="",
-                 swatch=None, ticks=None):
+                 swatch=None, ticks=None, gradient=None):
         self.kind, self.id, self.text = kind, id, text
+        self.gradient = gradient  # slider: track colors from min to max (hue, saturation, value)
         self.ticks = ticks or ()  # slider: marks at these fractions of the track (keyframes)
         self.value_text = value_text
         self.swatch = swatch  # (r, g, b): a color button
@@ -79,9 +80,9 @@ def select(id, text, value_text, on_press):
     return Widget('select', id, text, on_press=on_press, value_text=value_text)
 
 
-def slider(id, text, value, lo, hi, on_change, integer=False, fmt=None, ticks=None):
+def slider(id, text, value, lo, hi, on_change, integer=False, fmt=None, ticks=None, gradient=None):
     return Widget('slider', id, text, value=value, min=lo, max=hi, integer=integer, fmt=fmt,
-                  on_change=on_change, ticks=ticks)
+                  on_change=on_change, ticks=ticks, gradient=gradient)
 
 
 def layout(rows, width=WIDTH):

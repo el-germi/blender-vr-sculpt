@@ -31,7 +31,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('PAINT', "Paint", "Trigger paints the active mesh's texture with Blender's texture paint brushes"),
             ('POSE', "Pose", "Trigger poses the bones of the active armature (FK or IK); puppeteer bones with "
                              "your hands and record takes"),
-            ('TOOLS', "Tools", "Tape measure and scene camera, plus grid, desktop window and navigation options"),
+            ('TOOLS', "Tools", "Tape measure and scene camera"),
+            ('HAND', "Hand", "Empty hand (a tool put back on the dock): the trigger grabs and moves objects"),
         ),
         default='SCULPT',
     )
@@ -92,17 +93,18 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     show_measures: BoolProperty(name="Show Measurements", description="Show tape measurements in VR", default=True)
     show_new_camera: BoolProperty(
         name="New Camera Button",
-        description="Show the \"New here\" button on the hand panel's Camera tool, which adds a camera at your right hand",
+        description="Show the \"New here\" chip on the Camera tool's tag, which adds a camera at your right hand",
         default=True,
     )
     camera_preview: BoolProperty(
         name="Camera Preview",
-        description="Show what the scene camera sees next to the hand panel, in every mode",
+        description="Show what the scene camera sees beside the timeline strip (or above the left hand), "
+                    "in every mode",
         default=False,
     )
     # Animation.
     show_timeline: BoolProperty(
-        name="Timeline", description="Timeline, keying and playback controls at the bottom of the hand panel",
+        name="Timeline", description="Timeline, keying and playback controls on a strip above the tool dock",
         default=True,
     )
     show_paths: BoolProperty(
@@ -235,17 +237,6 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         ),
         default='OBJECT',
     )
-    model_page: EnumProperty(
-        name="Page",
-        description="Which settings of the selected object the hand panel shows",
-        items=(
-            ('SHAPE', "Shape", "Primitive settings, mirror and solidify"),
-            ('BOOLEAN', "Cuts", "Cutters and booleans"),
-            ('FINISH', "Finish", "Bevel and smooth shading"),
-            ('ARRAY', "Array", "Linear and radial arrays"),
-        ),
-        default='SHAPE',
-    )
     model_mark: EnumProperty(
         name="Mark Edges",
         description="While on, the trigger marks the edges it touches on the selected object instead of grabbing "
@@ -270,7 +261,11 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         default="mesh.primitive_cube_add",
         description="Add > Mesh entry the trigger creates in Model mode (see catalog.py)",
     )
-    show_panel: BoolProperty(name="Show Hand Panel", description="Menu panel above the left controller", default=True)
+    show_panel: BoolProperty(
+        name="Show VR UI",
+        description="The tool dock around you, the tool tag and palette on your hands, chips and gizmos on the "
+                    "selection (left stick click shows or hides them)",
+        default=True)
     engine: EnumProperty(
         name="Engine",
         items=(
