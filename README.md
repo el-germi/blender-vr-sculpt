@@ -149,8 +149,16 @@ Meta Quest over OpenXR.
     with your hand instead.
   - **IK**: grab a bone (a hand, a foot) and it follows your hand, position
     and rotation, while 1-6 parent bones bend to reach.
-  - **Mirror X** poses the .L/.R counterpart the same way. Bone rotation
-    modes and rotation/location locks are respected. Reset bone / Reset pose.
+  - **Mirror X** poses the .L/.R counterpart the same way. Reset bone /
+    Reset pose.
+  - **Limits**: bone rotation modes, rotation and location locks, and Limit
+    Rotation / Limit Location constraints (Local Space) hold in FK, IK and
+    moves. IK also holds the bones' IK limits and IK locks (Bone > Inverse
+    Kinematics), the way Blender's IK does. Each limit is applied at every
+    step of the solve, so when a joint can't bend further, the rest of the
+    chain makes up for it. Try it on `tests/add_ik_limits_rig.py`, which
+    adds an arm with a one-way elbow hinge, a no-twist upper arm, a limited
+    wrist and a slider bone.
   - With Auto on, letting go keys the bones you moved. Key / Delete key, the
     timeline's key ticks, key jumps and interpolation work on the selected
     bones, and the selected keyed bones get motion paths.
@@ -470,6 +478,10 @@ blender --background --factory-startup --python tests/test_pose.py
 ```
 
 ```bash
+blender --background --factory-startup --python tests/test_ik_limits.py
+```
+
+```bash
 blender --background --factory-startup --python tests/test_hard_surface.py
 ```
 
@@ -532,7 +544,10 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
 - Posing writes the bones' own transforms: constraints on the rig (its own
   IK, Copy Rotation, ...) still apply on top, so posing a constrained bone
   can look like it fights back. Pick the controls a rig is meant to be
-  animated with. The VR IK ignores the bones' IK limits and stretch, and
+  animated with. Only Limit constraints in Local Space at full influence
+  are kept while solving (other spaces and other constraints still act
+  afterwards). IK limits are measured as Blender's IK does it (twist about
+  the bone, swing as X / Z), and IK stretch and stiffness are ignored.
   Mirror X needs .L/.R names with mirrored rest poses (as Symmetrize makes).
   Bindings last until Unbind or the end of the VR session. Takes key every
   frame (dense keys), with no smoothing yet.
