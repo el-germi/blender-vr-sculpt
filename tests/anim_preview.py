@@ -188,6 +188,7 @@ def after_play(win, area, region, state):
         rv3d.view_rotation = Quaternion((1, 0, 0), 1.35)
         rv3d.view_distance = 1.9
         ctx.scene.vr_sculpt.show_panel = True
+        ctx.scene.vr_sculpt.panel_pin = True  # The reveal needs a real wrist: keep it shown.
     except Exception:
         log(traceback.format_exc())
         failures.append("raised")

@@ -271,6 +271,22 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         description="Add > Mesh entry the trigger creates in Model mode (see catalog.py)",
     )
     show_panel: BoolProperty(name="Show Hand Panel", description="Menu panel above the left controller", default=True)
+    panel_pin: BoolProperty(
+        name="Pin Hand Panel",
+        description="Keep the hand panel shown, whatever the left wrist does (left stick click)",
+        default=False,
+    )
+    panel_reveal: EnumProperty(
+        name="Reveal",
+        description="When the hand panel shows, unless it's pinned",
+        items=(
+            ('WRIST', "Wrist", "Turn the back of your left hand toward your face, like checking a watch, "
+                               "and look at it"),
+            ('LOOK', "Look", "Look at your left hand"),
+            ('ALWAYS', "Always", "Always shown"),
+        ),
+        default='WRIST',
+    )
     engine: EnumProperty(
         name="Engine",
         items=(
@@ -315,8 +331,9 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     )
     show_cursor: BoolProperty(name="Show Brush Cursor", default=True)
     show_brush_card: BoolProperty(
-        name="Show Brush Card",
-        description="Show the brush icon and name above the right controller, plus a short description after switching",
+        name="Show Tip Status",
+        description="Show the mode, tool and size in a slim line above the right controller, plus a short "
+                    "description after switching",
         default=True,
     )
 

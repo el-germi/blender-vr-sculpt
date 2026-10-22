@@ -280,13 +280,19 @@ def test_rows(rig):
     ctx = bpy.context
     settings = ctx.scene.vr_sculpt
     settings.pose_tool = 'IK'
-    widgets, _h = vr_ui.layout(menus.rows(ctx))
+    widgets, _h = menus.layout(ctx)
     ids = {w.id for w in widgets}
-    need = {"mode_sculpt", "mode_pose", "mode_tools", "pose_rig", "pose_fk", "pose_ik", "pose_mirror", "pose_bones",
-            "pose_chain", "pose_reset", "pose_reset_all", "bind_left", "bind_right", "bind_head", "puppet_rec"}
-    check(need <= ids, f"Pose rows (missing {sorted(need - ids)})")
+    first = {"mode_sculpt", "mode_pose", "mode_tools", "pose_rig", "pose_fk", "pose_ik", "pose_mirror", "pose_bones",
+             "pose_chain"}
+    later = {"pose_reset", "pose_reset_all", "bind_left", "bind_right", "bind_head", "puppet_rec"}
+    check(first <= ids and not (later & ids), f"Pose: the first level (missing {sorted(first - ids)})")
+    vr_ui.find(widgets, "more").on_press()
+    widgets, _h = menus.layout(ctx)
+    ids = {w.id for w in widgets}
+    check(first | later <= ids, f"Pose with More (missing {sorted((first | later) - ids)})")
     tabs = [w for w in widgets if w.id.startswith("mode_")]
-    check(len(tabs) == 6 and len({round(w.rect[1], 5) for w in tabs}) == 2, "six mode tabs on two rows")
+    check(len(tabs) == 6 and len({round(w.rect[0], 5) for w in tabs}) == 1 and
+          len({round(w.rect[1], 5) for w in tabs}) == 6, "six mode icons in one column (the rail)")
     vr_ui.find(widgets, "pose_fk").on_press()
     check(settings.pose_tool == 'FK', "FK button")
     pb = rig.pose.bones["Spine"]
@@ -295,9 +301,10 @@ def test_rows(rig):
     vr_ui.find(widgets, "pose_reset").on_press()
     check(pb.rotation_quaternion.angle < 1e-6, "Reset bone")
     pose.choose_rig(ctx, "")
-    widgets, _h = vr_ui.layout(menus.rows(ctx))
+    widgets, _h = menus.layout(ctx)
     check(rig.mode == 'OBJECT' and vr_ui.find(widgets, "pose_fk") is None and vr_ui.find(widgets, "bind_left"),
           "rig picker: Objects (no rig) leaves Pose Mode, Bind stays")
+    menus.reset()
 
 
 def test_objects(rig, body):

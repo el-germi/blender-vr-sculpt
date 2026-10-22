@@ -4,7 +4,7 @@ Sculpt, model, draw, paint, pose, puppeteer and measure with VR controllers insi
 extension, no Blender fork. Built and tested on **Blender 5.4.0 Alpha** with a
 Meta Quest over OpenXR.
 
-![Brush rings and the brush card, native engine](docs/overlay_native.png)
+![Brush rings at the controller tips, native engine](docs/overlay_native.png)
 
 ## Features
 
@@ -19,8 +19,9 @@ Meta Quest over OpenXR.
     Inflate/Deflate, Crease Sharp, Flatten/Contrast.
 - **Brush cursor in the headset**: rings at each controller tip, colored per
   brush (blue when that hand inverts).
-- **Brush card** above the right controller: brush icon and name, plus a
-  one-line description for a few seconds after switching.
+- **Tip status** above the right controller: a slim line with the mode icon
+  in the tool's color, the tool's name and its size (radius, stroke width, IK
+  chain, lens), plus a one-line description for a few seconds after switching.
 - **Haptics** on contact with the surface.
 - One undo step per stroke (Python engine).
 - **Model mode**: drag out any Add > Mesh primitive in empty space, grab
@@ -130,7 +131,8 @@ Meta Quest over OpenXR.
   and key stepping, Key / Delete key, **Auto** (Blender's Auto Keying, which
   also keys objects and the camera when you let go of a VR grab), the
   interpolation of the keys on this frame, and Start / End to set the range
-  here. Tools > Hand panel: **Timeline** shows or hides the strip from VR.
+  here. Settings (the gear on the hand panel): **Timeline** shows or hides
+  the strip from VR.
   - **Motion paths in 3D**: the selection's paths with a tick per frame
     (so spacing shows) and a marker on every location key. Grab a marker
     and drag to move that key; the path follows.
@@ -173,12 +175,16 @@ Meta Quest over OpenXR.
   the range. A take only replaces what it records, so takes layer: the head
   first, then each hand.
 - **Passthrough** toggle (Blender's own; needs a runtime that supports it).
-- **Hand panel** above the left controller: Sculpt / Model / Draw / Paint /
-  Pose / Tools tabs, engine and brush buttons, radius and strength sliders, primitive
-  settings, Duplicate and Delete. Point at it with the right controller and
-  pull the trigger.
+- **Hand panel** above the left controller: an icon rail for the six modes,
+  each mode's 3-5 most used controls up front and a **More** row for the rest;
+  the selected object's settings, Settings (grid, navigation, view, reveal,
+  tracking) and pickers open as a second level with a Back button. It shows
+  when you turn your left wrist toward your face, like checking a watch, and
+  fades when you turn it back; **Pin** (the pin icon, or a left stick click)
+  keeps it shown. Point at it with the right controller and pull the trigger.
+  The full map of where everything is: [docs/ui_panel.md](docs/ui_panel.md).
 
-![Brush cards](docs/brush_cards.png)
+![The hand panel in every mode, with More closed and open](docs/ui_panel_modes.png)
 
 ## Controls
 
@@ -186,12 +192,12 @@ Meta Quest over OpenXR.
 |---|---|---|---|---|---|---|
 | Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Grab a bone (FK / IK), or an object without a rig | Measure / aim the camera |
 | Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Same as right | Same as right |
-| Right trigger, pointing at the hand panel | Press buttons, drag sliders | Same | Same | Same | Same | Same |
+| Right trigger, pointing at the hand panel | Press buttons, drag sliders, step steppers (hold to repeat) | Same | Same | Same | Same | Same |
 | Y (left) | Next mode (Sculpt, Model, Draw, Paint, Pose, Tools) | Same | Same | Same | Same | Same |
 | B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Switch FK / IK | Remove the last measurement / next camera |
 | Left stick | Walk / fly (move) | Same | Same | Same | Same | Same |
 | Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same | Same |
-| Left stick click | Show / hide the hand panel | Same | Same | Same | Same | Same |
+| Left stick click | Pin / unpin the hand panel | Same | Same | Same | Same | Same |
 | Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Next IK chain length (1-4) | Same |
 | Right trigger on a motion path key | Drag the key | Same | Same | Same | Same | Same |
 | Grip, A / X | Blender's stock VR navigation (unchanged) | Same | Same | Same | Same | Same |
@@ -278,10 +284,19 @@ window, passthrough and tracking settings (including hiding the hand panel's
   turn toward the controller only when its side axis clearly stands across
   the stroke (judged over the last 2 cm, so jitter doesn't count), at most
   half a turn per 10 cm, and never flip.
-- **Hand panel** ([vr_ui.py](vr_sculpt/vr_ui.py), [menus.py](vr_sculpt/menus.py)):
-  rows of buttons, sliders and selects on a card that faces the headset; the
-  right controller's aim ray is intersected with the card's plane. A select
-  opens a picker page (categories first, then a paged grid).
+- **Hand panel** ([vr_ui.py](vr_sculpt/vr_ui.py), [menus.py](vr_sculpt/menus.py),
+  [presence.py](vr_sculpt/presence.py), [gfx.py](vr_sculpt/gfx.py)): rows of
+  widgets on a card that faces the headset; the right controller's aim ray is
+  intersected with the card's plane. Everything is drawn from triangles in one
+  batch per panel (rounded rects, vector icons) plus `blf` text; the batch and
+  the fitted text are kept in panel space and reused until a widget looks
+  different or an animation runs, so a steady panel costs about 0.2 ms per eye.
+  Hover, presses, the segmented controls' sliding pill and the panel's fade are
+  time-based (they don't speed up with the extra draws per frame). The reveal
+  rule compares the left controller's -X axis (the back of a left hand) with
+  the direction to the head, and the head's view direction with the hand, with
+  hysteresis. A select opens a picker page (categories first, then a paged
+  grid).
 - **Primitive catalog** ([catalog.py](vr_sculpt/catalog.py)): runs the Add >
   Mesh menu's draw functions (including ones extensions appended) against a
   recording layout, collecting each `layout.operator(...)` with its preset

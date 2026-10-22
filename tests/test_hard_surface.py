@@ -400,6 +400,7 @@ def test_shading():
     panel_ids(ctx)["bevel"].on_press()
     check(hardsurface.has_bevel(plate) and shading.mode(plate) == 'AUTO', "Bevel brings Auto shading with it")
     settings.model_page = 'SHAPE'
+    menus.reset()
 
 
 def test_arrays():
@@ -512,7 +513,11 @@ def test_snapping():
 
 
 def panel_ids(ctx):
-    widgets, _height = vr_ui.layout(menus.rows(ctx))
+    """The Model panel's widgets with every More open and, with a selection, the object's sheet open."""
+    menus.open_sheet('OBJECT')
+    for key in ('MODEL', 'OBJECT_SHAPE', 'OBJECT_BOOLEAN', 'OBJECT_FINISH', 'OBJECT_ARRAY'):
+        menus.set_more(key, True)
+    widgets, _height = menus.layout(ctx)
     return {w.id: w for w in widgets if w.id}
 
 
@@ -555,6 +560,7 @@ def test_panel():
     ids["solver_exact"].on_press()
     check(all(m.solver == 'EXACT' for m in hardsurface.booleans(obj)), "Exact switches every cut's solver")
     settings.model_add_as = 'OBJECT'
+    menus.reset()
 
 
 def main():

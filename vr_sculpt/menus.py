@@ -1,17 +1,31 @@
-"""What the hand panel shows in each mode, and the mode/engine switches behind it."""
+"""What the hand panel shows, and the mode/engine switches behind it.
+
+The panel is an icon rail (the six modes) beside the content. The content is:
+  - a header: the mode's name, its context, and icon actions (undo where there is one, Settings, Pin);
+  - the mode's 3-5 most used controls;
+  - a More row that opens the rest (it opens upward, so the row stays under the pointer).
+Second levels replace the content, with a Back button in the header: the selected object's
+settings (Model), Settings (from the gear, in every mode) and pickers (from any select).
+"""
 
 import math
 
 import bpy
 
-from . import (anim, camera, catalog, desktop, generic, hardsurface, measure, native, paint, pose, primitives, puppet,
-               shading, strokes, symmetry, vr_ui)
+from . import (anim, camera, catalog, desktop, generic, hardsurface, hud, measure, native, paint, pose, presence,
+               primitives, puppet, shading, strokes, symmetry, vr_ui)
 from .props import BRUSH_ITEMS
 
 NATIVE_SHORT = {
     "Draw": "Draw", "Clay Strips": "Clay", "Smooth": "Smooth",
     "Inflate/Deflate": "Inflate", "Crease Sharp": "Crease", "Flatten/Contrast": "Flatten",
 }
+
+MODES = (('SCULPT', "Sculpt", "sculpt"), ('MODEL', "Model", "model"), ('DRAW', "Draw", "draw"),
+         ('PAINT', "Paint", "paint"), ('POSE', "Pose", "pose"), ('TOOLS', "Tools", "tools"))
+MODE_ICONS = {ident: icon for ident, _name, icon in MODES}
+
+LABEL_W = 0.034  # row-leading labels ("Symmetry", "Mirror"): one column, so the controls line up
 
 
 def _desktop_view(context):
@@ -43,6 +57,8 @@ def set_mode(context, mode):
     settings = context.scene.vr_sculpt
     if settings.mode == 'POSE' and mode != 'POSE':
         pose.leave(context)
+    close_picker()
+    close_sheet(context)
     settings.mode = mode
     settings.model_mark = 'NONE'
     obj = context.view_layer.objects.active
@@ -90,6 +106,66 @@ def _number(v):
     return f"{v:.3g}"
 
 
+def _percent(v):
+    return f"{v * 100:.0f}%"
+
+
+def _toggle(settings, prop):
+    return lambda: setattr(settings, prop, not getattr(settings, prop))
+
+
+# --- panel state: sheets, disclosure, picker ------------------------------------
+
+_sheet = None  # None, 'OBJECT' (the selected object's settings) or 'SETTINGS'
+_open = set()  # disclosure keys whose More is open
+
+
+def open_sheet(name):
+    global _sheet
+    close_picker()
+    _sheet = name
+
+
+def close_sheet(context=None):
+    global _sheet
+    if _sheet == 'OBJECT' and context is not None:
+        context.scene.vr_sculpt.model_mark = 'NONE'  # Its buttons are in the sheet; don't leave it on unseen.
+    _sheet = None
+
+
+def sheet():
+    return _sheet
+
+
+def more_open(key):
+    return key in _open
+
+
+def set_more(key, is_open):
+    if is_open:
+        _open.add(key)
+    else:
+        _open.discard(key)
+
+
+def _disclose(key, rows, more, hint=""):
+    """rows plus, when there's more, the More row; open, the extra rows go between the two."""
+    if not more:
+        return rows
+    is_open = key in _open
+    toggle = [vr_ui.more("more" if key != 'TIMELINE' else "timeline_more", is_open,
+                         lambda: set_more(key, key not in _open), hint)]
+    return rows + (more if is_open else []) + [toggle]
+
+
+def reset():
+    """Forget the panel's navigation state (sheets, open More rows, picker)."""
+    global _sheet
+    _sheet = None
+    _open.clear()
+    close_picker()
+
+
 # --- picker (the open state of a select widget) -----------------------------
 
 PICKER_COLS = 3
@@ -104,7 +180,7 @@ class Option:
 
 
 def open_picker(title, options, current, on_select):
-    """Replace the panel with a list to choose from. options: list of Option."""
+    """Replace the panel's content with a list to choose from. options: list of Option."""
     global _picker
     categories = list(dict.fromkeys(o.category for o in options))
     _picker = {
@@ -158,10 +234,21 @@ def _paged(cells, page, per_page):
     return cells[page * per_page:(page + 1) * per_page], page, pages
 
 
+def _pager(prefix, page, pages, set_page):
+    return [
+        vr_ui.icon_button(prefix + "_prev", "back", lambda: set_page(page - 1), "Previous page")
+        if page > 0 else vr_ui.label("", fixed=vr_ui.ROW_H),
+        vr_ui.label(f"{page + 1} / {pages}", align='CENTER'),
+        vr_ui.icon_button(prefix + "_next", "chevron_right", lambda: set_page(page + 1), "Next page")
+        if page < pages - 1 else vr_ui.label("", fixed=vr_ui.ROW_H),
+    ]
+
+
 def _picker_rows():
     p = _picker
-    out = [[vr_ui.label(p["title"])]]
-    per_page = PICKER_COLS * PICKER_ROWS
+    in_category = p["category"] is not None and len(p["categories"]) > 1
+    out = [[vr_ui.icon_button("picker_back", "back", _back, "Back"),
+            vr_ui.title(p["category"] if in_category else p["title"], p["title"] if in_category else "")]]
     if p["category"] is None:
         current_cat = next((o.category for o in p["options"] if o.value == p["current"]), None)
         cells = []
@@ -174,47 +261,380 @@ def _picker_rows():
         options = [o for o in p["options"] if o.category == p["category"]]
         cells = [vr_ui.button("opt_" + str(o.value), o.label, (lambda v=o.value: _pick(v)),
                               active=o.value == p["current"]) for o in options]
-        shown, page, pages = _paged(cells, p["page"], per_page)
+        shown, page, pages = _paged(cells, p["page"], PICKER_COLS * PICKER_ROWS)
         out += _grid(shown, PICKER_COLS)
-    nav = [vr_ui.button("picker_back", "Back", _back)]
     if pages > 1:
-        nav.append(vr_ui.button("picker_prev", "\u2039 Prev", lambda: _set_page(page - 1)) if page > 0
-                   else vr_ui.label(""))
-        nav.append(vr_ui.label(f"  {page + 1} / {pages}"))
-        nav.append(vr_ui.button("picker_next", "Next \u203a", lambda: _set_page(page + 1)) if page < pages - 1
-                   else vr_ui.label(""))
-    out.append(nav)
+        out.append(_pager("picker", page, pages, _set_page))
     return out
 
 
-# --- rows ------------------------------------------------------------------
+# --- the panel ------------------------------------------------------------------
 
-MODE_TABS = (('SCULPT', "Sculpt"), ('MODEL', "Model"), ('DRAW', "Draw"), ('PAINT', "Paint"), ('POSE', "Pose"),
-             ('TOOLS', "Tools"))
+def panel(context):
+    """The hand panel: the mode rail and the content for the current mode, sheet or picker."""
+    settings = context.scene.vr_sculpt
+    if _sheet == 'OBJECT' and (settings.mode != 'MODEL' or _selected(context) is None):
+        close_sheet(context)  # The object went away (deleted, deselected) or the mode changed.
+    if _picker is not None:
+        content = _picker_rows()
+    elif _sheet == 'SETTINGS':
+        content = _settings_rows(context, settings)
+    elif _sheet == 'OBJECT':
+        content = _object_rows(context, settings, _selected(context))
+    else:
+        content = _MODE_ROWS.get(settings.mode, _model_rows)(context, settings)
+    return vr_ui.Panel(_rail(context, settings), content)
+
+
+def layout(context):
+    """(widgets, height) of the hand panel, laid out."""
+    return vr_ui.layout_panel(panel(context))
 
 
 def rows(context):
-    """Rows of widgets for the current mode (or the open picker)."""
-    if _picker is not None:
-        return _picker_rows()
-    settings = context.scene.vr_sculpt
-    mode = settings.mode
-    tabs = [vr_ui.button("mode_" + ident.lower(), name, (lambda i=ident: set_mode(context, i)), active=mode == ident)
-            for ident, name in MODE_TABS]
-    out = [tabs[:3], tabs[3:]]
-    if mode == 'SCULPT':
-        out += _sculpt_rows(context, settings)
-    elif mode == 'DRAW':
-        out += _draw_rows(context, settings)
-    elif mode == 'TOOLS':
-        out += _tools_rows(context, settings)
-    elif mode == 'PAINT':
-        out += _paint_rows(context, settings)
-    elif mode == 'POSE':
-        out += _pose_rows(context, settings)
+    """The content rows (no rail)."""
+    return panel(context).rows
+
+
+def _rail(context, settings):
+    return [vr_ui.rail("mode_" + ident.lower(), icon, (lambda i=ident: _choose_mode(context, i)),
+                       settings.mode == ident, name) for ident, name, icon in MODES]
+
+
+def _choose_mode(context, mode):
+    if mode == context.scene.vr_sculpt.mode:
+        close_picker()
+        close_sheet(context)  # The current mode's icon: back to its first level.
     else:
-        out += _model_rows(context, settings)
+        set_mode(context, mode)
+
+
+def _header(context, settings, text, subtitle="", actions=()):
+    return [vr_ui.title(text, subtitle)] + list(actions) + [
+        vr_ui.icon_button("settings", "gear", lambda: open_sheet('SETTINGS'), "Settings"),
+        _pin(context, settings)]
+
+
+def _pin(context, settings):
+    return vr_ui.icon_button("pin", "pinned" if settings.panel_pin else "pin", lambda: presence.toggle_pin(context),
+                             "Unpin" if settings.panel_pin else "Keep open", active=settings.panel_pin)
+
+
+def _segments(prefix, group, items, current, choose, icons=None, dots=None):
+    """A segmented control: items (value, label); ids prefix + value."""
+    return [vr_ui.segment(prefix + str(value), text, (lambda v=value: choose(v)), current == value, group,
+                          icon=(icons or {}).get(value), dot=(dots or {}).get(value))
+            for value, text in items]
+
+
+def _axes_row(text, prefix, states, toggle, here=None):
+    """'Mirror  X Y Z (here)': axis toggles after a leading label."""
+    row = [vr_ui.label(text, fixed=LABEL_W)] + [
+        vr_ui.toggle(prefix + a, a, states[i], (lambda i=i: toggle(i))) for i, a in enumerate(symmetry.AXES)]
+    if here is not None:
+        row.append(vr_ui.icon_button("mirror_here", "here", here, "Center at left hand"))
+    return row
+
+
+# --- Sculpt ---------------------------------------------------------------------
+
+def _sculpt_rows(context, settings):
+    is_native = settings.engine == 'NATIVE'
+    out = [_header(context, settings, "Sculpt", "Native brushes" if is_native else "")]
+    if is_native:
+        brush = native.sculpt_brush(context)
+        current = brush.name if brush else ""
+        cells = [vr_ui.segment("brush_" + n, NATIVE_SHORT[n], (lambda n=n: native.activate_brush(context, n)),
+                               n == current, "brushes_a" if i < 3 else "brushes_b", dot=hud.NATIVE_COLORS.get(n))
+                 for i, n in enumerate(native.NATIVE_BRUSHES)]
+        out += [cells[:3], cells[3:]]
+    else:
+        out.append(_segments("brush_", "brushes", [(i, n) for i, n, _d in BRUSH_ITEMS], settings.brush,
+                             lambda v: setattr(settings, "brush", v), dots=hud.PYTHON_COLORS))
+    out.append([vr_ui.slider("radius", "Radius", settings.radius, 0.005, 0.2,
+                             lambda v: setattr(settings, "radius", v), fmt=_meters)])
+    if not is_native:
+        out.append([vr_ui.slider("strength", "Strength", settings.strength, 0.0, 1.0,
+                                 lambda v: setattr(settings, "strength", v), fmt=_percent)])
+    else:
+        strength = native.get_strength(context)
+        if strength is not None:
+            out.append([vr_ui.slider("strength", "Strength", strength, 0.0, 1.0,
+                                     lambda v: native.set_strength(context, v), fmt=_percent)])
+    out.append(_axes_row("Symmetry", "sym_", symmetry.sculpt_axes(context),
+                         lambda i: symmetry.sculpt_toggle(context, i)))
+    more = [
+        [vr_ui.label("Engine", fixed=LABEL_W)] + _segments(
+            "engine_", "engine", (('python', "Python"), ('native', "Native")), settings.engine.lower(),
+            lambda v: set_engine(context, v.upper())),
+        [vr_ui.toggle("left_inverts", "Left hand inverts", settings.left_inverts, _toggle(settings, "left_inverts"),
+                      icon="swap")],
+    ]
+    return _disclose('SCULPT', out, more, "Engine, left hand")
+
+
+# --- Model ----------------------------------------------------------------------
+
+ADD_AS = (('OBJECT', "Object"), ('DIFFERENCE', "Cut"), ('UNION', "Union"), ('INTERSECT', "Intersect"))
+MODEL_PAGES = (('SHAPE', "Shape"), ('BOOLEAN', "Cuts"), ('FINISH', "Finish"), ('ARRAY', "Array"))
+
+
+def _selected(context):
+    obj = context.view_layer.objects.active
+    return obj if obj is not None and obj.select_get() else None
+
+
+def open_add_picker(context):
+    settings = context.scene.vr_sculpt
+    options = [Option(e.key, e.label, e.category or "Mesh") for e in catalog.entries(refresh=True)]
+    open_picker("Add primitive", options, settings.primitive, lambda key: setattr(settings, "primitive", key))
+
+
+def _model_rows(context, settings):
+    out = [
+        _header(context, settings, "Model"),
+        [vr_ui.select("add", "Add", primitives.label(settings.primitive), lambda: open_add_picker(context),
+                      icon="model")],
+        _segments("add_as_", "add_as", [(i.lower(), n) for i, n in ADD_AS], settings.model_add_as.lower(),
+                  lambda v: setattr(settings, "model_add_as", v.upper())),
+    ]
+    obj = _selected(context)
+    if obj is None:
+        out.append([vr_ui.label("Drag in empty space to add", align='CENTER')])
+    else:
+        cutter = hardsurface.is_cutter(obj)
+        out.append([
+            vr_ui.select("edit_object", obj.name, "", lambda: open_sheet('OBJECT'),
+                         icon="cut" if cutter else "object", weight=3.0),
+            vr_ui.icon_button("duplicate", "duplicate", lambda: hardsurface.duplicate(context, obj), "Duplicate"),
+            vr_ui.icon_button("delete", "trash", lambda: hardsurface.delete(context, obj), "Delete", danger=True),
+        ])
+    return _disclose('MODEL', out, _snap_rows(settings), "Snapping")
+
+
+def _snap_rows(settings):
+    out = [[
+        vr_ui.label("Grid", fixed=LABEL_W),
+        vr_ui.toggle("grid_show", "Show", settings.grid_show, _toggle(settings, "grid_show"), icon="grid"),
+        vr_ui.toggle("grid_snap", "Snap", settings.grid_snap, _toggle(settings, "grid_snap"), icon="magnet"),
+    ], [
+        vr_ui.label("Grab", fixed=LABEL_W),
+        vr_ui.toggle("snap_surface", "Surface", settings.snap_surface, _toggle(settings, "snap_surface"),
+                     icon="surface", tip="Snap to surface"),
+        vr_ui.toggle("snap_angle", "15\u00b0 steps", settings.snap_angle, _toggle(settings, "snap_angle"),
+                     icon="angle"),
+    ]]
+    if settings.grid_show or settings.grid_snap:
+        out.append([vr_ui.slider("grid_size", "Grid size", settings.grid_size, 0.005, 0.5,
+                                 lambda v: setattr(settings, "grid_size", v), fmt=_meters)])
     return out
+
+
+def _object_rows(context, settings, obj):
+    """Second level: the selected object's settings, in four pages."""
+    cutter = hardsurface.is_cutter(obj)
+    out = [[
+        vr_ui.icon_button("back", "back", lambda: close_sheet(context), "Back"),
+        vr_ui.title(obj.name, "cutter" if cutter else ""),
+        vr_ui.icon_button("duplicate", "duplicate", lambda: hardsurface.duplicate(context, obj), "Duplicate"),
+        vr_ui.icon_button("delete", "trash", lambda: hardsurface.delete(context, obj), "Delete", danger=True),
+    ]]
+    if obj.type != 'MESH':
+        out.append([vr_ui.label("No settings for this object")])
+        return out
+    page = settings.model_page
+    out.append(_segments("page_", "pages", [(i.lower(), n) for i, n in MODEL_PAGES], page.lower(),
+                         lambda v: _set_model_page(settings, v.upper())))
+    if page == 'BOOLEAN':
+        rows, more, hint = _boolean_rows(context, obj)
+    elif page == 'FINISH':
+        rows, more, hint = _finish_rows(context, settings, obj)
+    elif page == 'ARRAY':
+        rows, more, hint = _array_rows(context, obj)
+    else:
+        rows, more, hint = _shape_rows(context, obj)
+    return _disclose('OBJECT_' + page, out + rows, more, hint)
+
+
+def _set_model_page(settings, page):
+    settings.model_page = page
+    if page != 'FINISH':
+        settings.model_mark = 'NONE'  # Its buttons are on the Finish page; don't leave it on unseen.
+
+
+# Settings page per object, for operators with many settings.
+PARAMS_PER_PAGE = 5
+_param_pages = {}
+
+
+def _param_widget(context, obj, spec):
+    wid = "param_" + spec.id
+
+    def set_value(v, ident=spec.id):
+        # Slow generators (e.g. Wall Factory) regenerate when the slider is released.
+        live = not (spec.type in {'INT', 'FLOAT'} and obj.get("vrs_slow", False))
+        generic.set_param(context, obj, ident, v, live=live)
+
+    if spec.type == 'ENUM':
+        names = dict(spec.items)
+        return vr_ui.select(wid, spec.label, names.get(spec.value, str(spec.value)),
+                            lambda: open_picker(spec.label, [Option(i, n) for i, n in spec.items],
+                                                spec.value, set_value))
+    if spec.type == 'BOOLEAN':
+        return vr_ui.toggle(wid, spec.label, spec.value, lambda: set_value(not spec.value))
+    if spec.type == 'INT':
+        if spec.hi - spec.lo <= 32:
+            return vr_ui.stepper(wid, spec.label, spec.value, spec.lo, spec.hi, set_value)
+        return vr_ui.slider(wid, spec.label, spec.value, spec.lo, spec.hi, set_value, integer=True)
+    fmt = _meters if spec.length else _degrees if spec.angle else _number
+    return vr_ui.slider(wid, spec.label, spec.value, spec.lo, spec.hi, set_value, fmt=fmt)
+
+
+def _operator_rows(context, obj):
+    entry = catalog.find(obj.vr_prim.op_key)
+    if entry is None:
+        return [[vr_ui.label("Its Add > Mesh entry is gone (extension off?)")]]
+    specs = generic.params(entry, obj)
+    if not specs:
+        return [[vr_ui.label("No settings")]]
+    key = obj.name
+    shown, page, pages = _paged(specs, _param_pages.get(key, 0), PARAMS_PER_PAGE)
+    _param_pages[key] = page
+    out = [[_param_widget(context, obj, s)] for s in shown]
+    if pages > 1:
+        out.append(_pager("params", page, pages, lambda p: _param_pages.__setitem__(key, p)))
+    return out
+
+
+def _shape_rows(context, obj):
+    prim = obj.vr_prim
+    out = []
+    if prim.kind == 'CUBE':
+        for i, axis in enumerate("XYZ"):
+            out.append([vr_ui.slider(f"size_{axis}", f"Size {axis}", prim.size[i], 0.01, 1.0,
+                                     _setter(obj, "size", i), fmt=_meters)])
+        out.append([vr_ui.stepper("subdivisions", "Subdivisions", prim.subdivisions, 0, 16,
+                                  _setter(obj, "subdivisions"))])
+    elif prim.kind == 'CYLINDER':
+        out.append([vr_ui.slider("radius_prim", "Radius", prim.radius, 0.005, 0.5,
+                                 _setter(obj, "radius"), fmt=_meters)])
+        out.append([vr_ui.slider("height", "Height", prim.height, 0.01, 1.0,
+                                 _setter(obj, "height"), fmt=_meters)])
+        out.append([vr_ui.stepper("segments", "Segments", prim.segments, 3, 64, _setter(obj, "segments"))])
+    elif prim.kind == 'OPERATOR':
+        out += _operator_rows(context, obj)
+    extra = [_axes_row("Mirror", "mirror_", symmetry.model_axes(obj), lambda i: symmetry.model_toggle(context, obj, i),
+                       here=lambda: _cursor_to_left_hand(context))]
+    solid = hardsurface.solidify(obj) is not None
+    row = [vr_ui.toggle("solidify", "Solidify", solid, lambda: hardsurface.set_solidify(obj, not solid), icon="shell")]
+    if solid:
+        row.append(vr_ui.slider("solidify_thickness", "Thickness", hardsurface.solidify_thickness(obj), 0.0005,
+                                max(0.05, 0.5 * max(obj.dimensions)),
+                                lambda v: hardsurface.set_solidify_thickness(obj, v), fmt=_meters, weight=1.8))
+    extra.append(row)
+    if not out:
+        # A plain mesh (sculpted, or not a VR primitive): mirror and solidify are all there is.
+        return [[vr_ui.label("Plain mesh (sculpted or not a VR primitive)")]] + extra, [], ""
+    return out, extra, "Mirror, solidify"
+
+
+def _boolean_rows(context, obj):
+    if hardsurface.is_cutter(obj):
+        target = hardsurface.target_of(obj)
+        mod = hardsurface.modifier_of(obj)
+        if target is None or mod is None:
+            return [[vr_ui.label("Cuts nothing (its object is gone)")]], [], ""
+        return [
+            [vr_ui.label(f"Cuts {target.name}")],
+            _segments("bool_", "bool_op", [(i.lower(), n) for i, n in hardsurface.OPERATIONS], mod.operation.lower(),
+                      lambda v: hardsurface.set_operation(obj, v.upper())),
+            [
+                vr_ui.button("bool_target", "Select object", lambda: primitives.make_active(context, target),
+                             icon="cursor", weight=1.6),
+                vr_ui.button("bool_apply", "Apply", lambda: hardsurface.apply_cutter(context, obj), icon="check"),
+                vr_ui.icon_button("bool_remove", "trash", lambda: hardsurface.delete(context, obj), "Remove the cut",
+                                  danger=True),
+            ],
+        ], [], ""
+    mods = hardsurface.booleans(obj)
+    if not mods:
+        return [[vr_ui.label("No cuts yet: set New to Cut,")], [vr_ui.label("then drag on or near this object")]], [], ""
+    visible = hardsurface.cutters_visible(context)
+    exact = all(m.solver == 'EXACT' for m in mods)
+
+    def set_solver(solver):
+        for m in hardsurface.booleans(obj):
+            m.solver = solver
+
+    rows = [
+        [vr_ui.label(f"{len(mods)} cutter{'s' if len(mods) != 1 else ''}")],
+        [
+            vr_ui.toggle("cutters_show", "Show cutters", visible,
+                         lambda: hardsurface.set_cutters_visible(context, not visible), icon="eye"),
+            vr_ui.button("bool_apply_all", "Apply all", lambda: hardsurface.apply_all(context, obj), danger=True,
+                         icon="check"),
+        ],
+    ]
+    more = [[vr_ui.label("Solver", fixed=LABEL_W)] + _segments(
+        "solver_", "solver", (('fast', "Fast"), ('exact', "Exact")), 'exact' if exact else 'fast',
+        lambda v: set_solver('EXACT' if v == 'exact' else 'MANIFOLD'))]
+    return rows, more, "Solver"
+
+
+MARKS = (('HARD', "Hard"), ('SOFT', "Soft"), ('CLEAR', "Clear"))
+
+
+def _finish_rows(context, settings, obj):
+    current = shading.mode(obj)
+    rows = [[vr_ui.label("Shading", fixed=LABEL_W)] + [
+        vr_ui.segment("shade_" + ident.lower(), name,
+                      (lambda i=ident: shading.set_mode(obj, None if current == i else i)), current == ident, "shade")
+        for ident, name in shading.MODES]]
+    if current == 'AUTO':
+        rows.append([vr_ui.slider("shade_angle", "Angle", shading.angle(obj), math.radians(1.0), math.radians(180.0),
+                                  lambda v: shading.set_angle(obj, v), fmt=_degrees)])
+    on = hardsurface.has_bevel(obj)
+    row = [vr_ui.toggle("bevel", "Bevel", on, lambda: hardsurface.set_bevel(obj, not on), icon="bevel")]
+    more = [[vr_ui.label("Mark", fixed=LABEL_W)] + [
+        vr_ui.segment("mark_" + ident.lower(), name,
+                      (lambda i=ident: setattr(settings, "model_mark", 'NONE' if settings.model_mark == i else i)),
+                      settings.model_mark == ident, "mark")
+        for ident, name in MARKS]]
+    if on:
+        mod = hardsurface.bevel(obj)
+        dims = [d for d in obj.dimensions if d > 1e-6]
+        hi = max(0.25 * min(dims), 0.002) if dims else 0.02
+        row.append(vr_ui.slider("bevel_width", "Width", hardsurface.bevel_width(obj), 0.0002, hi,
+                                lambda v: hardsurface.set_bevel_width(obj, v), fmt=_meters, weight=1.8))
+        more.append([vr_ui.stepper("bevel_segments", "Segments", mod.segments, 1, 8,
+                                   lambda v: setattr(mod, "segments", int(v)))])
+    rows.append(row)
+    return rows, more, "Edge marks" + (", segments" if on else "")
+
+
+def _array_rows(context, obj):
+    count = hardsurface.array_count(obj)
+    out = [[vr_ui.stepper("array_count", "Count", count, 1, 24,
+                          lambda v: hardsurface.set_array_count(context, obj, v),
+                          fmt=lambda v: "Off" if int(v) <= 1 else str(int(v)))]]
+    if count <= 1:
+        return out, [], ""
+    mode = hardsurface.array_mode(obj)
+    axis = hardsurface.array_axis(obj)
+    out.append(_segments("array_", "array_mode", (('linear', "Linear"), ('radial', "Radial")), mode.lower(),
+                         lambda v: hardsurface.set_array_mode(context, obj, v.upper()),
+                         icons={'linear': "linear", 'radial': "radial"}))
+    out.append([vr_ui.label("Around" if mode == 'RADIAL' else "Along", fixed=LABEL_W)] + [
+        vr_ui.segment("array_axis_" + a, a, (lambda i=i: hardsurface.set_array_axis(context, obj, i)), axis == i,
+                      "array_axis")
+        for i, a in enumerate(symmetry.AXES)])
+    if mode == 'RADIAL':
+        out.append([vr_ui.button("array_center", "Center at left hand", lambda: _array_center_here(context, obj),
+                                 icon="here")])
+    else:
+        out.append([vr_ui.slider("array_gap", "Gap", hardsurface.array_gap(obj), -0.5, 2.0,
+                                 lambda v: hardsurface.set_array_gap(context, obj, v), fmt=_percent)])
+    return out, [], ""
 
 
 def _left_tip(context):
@@ -235,66 +655,49 @@ def _cursor_to_left_hand(context):
         symmetry.move_center(context, tip)
 
 
-def _toggle(settings, prop):
-    return lambda: setattr(settings, prop, not getattr(settings, prop))
+def _array_center_here(context, obj):
+    tip = _left_tip(context)
+    if tip is not None:
+        hardsurface.set_array_center(context, obj, tip)
 
 
-def _grid_rows(settings, model=False):
-    row = [
-        vr_ui.button("grid_show", "Grid", _toggle(settings, "grid_show"), active=settings.grid_show),
-        vr_ui.button("grid_snap", "Snap" if model else "Snap to grid", _toggle(settings, "grid_snap"),
-                     active=settings.grid_snap),
-    ]
-    if model:  # Plus the grab snaps, in the same row.
-        row += [
-            vr_ui.button("snap_surface", "Surface", _toggle(settings, "snap_surface"), active=settings.snap_surface),
-            vr_ui.button("snap_angle", "15\u00b0", _toggle(settings, "snap_angle"), active=settings.snap_angle),
-        ]
-    out = [row]
-    if settings.grid_show or settings.grid_snap:
-        out.append([vr_ui.slider("grid_size", "Grid size", settings.grid_size, 0.005, 0.5,
-                                 lambda v: setattr(settings, "grid_size", v), fmt=_meters)])
-    return out
+# --- Draw -----------------------------------------------------------------------
+
+DRAW_TOOLS = (('DRAW', "Draw"), ('EDIT', "Edit"), ('ERASE', "Erase"))
+DRAW_STYLES = (('TUBE', "Tube"), ('RIBBON', "Ribbon"), ('NOTE', "Note"))
 
 
 def _draw_rows(context, settings):
-    def choice(prefix, prop, items):
-        return [vr_ui.button(f"{prefix}_{ident}", name, (lambda i=ident: setattr(settings, prop, i)),
-                             active=getattr(settings, prop) == ident) for ident, name in items]
-
     out = [
-        choice("tool", "draw_tool", (('DRAW', "Draw"), ('EDIT', "Edit"), ('ERASE', "Erase"))),
-        choice("style", "draw_style", (('TUBE', "Tube"), ('RIBBON', "Ribbon"), ('NOTE', "Note"))),
+        _header(context, settings, "Draw", actions=[
+            vr_ui.icon_button("undo_stroke", "undo", lambda: _undo_stroke(context), "Undo stroke")]),
+        _segments("tool_", "draw_tool", DRAW_TOOLS, settings.draw_tool, lambda v: setattr(settings, "draw_tool", v),
+                  icons={'DRAW': "pen", 'EDIT': "edit", 'ERASE': "eraser"}),
     ]
-    swatches = [vr_ui.button("color_" + ident, "", (lambda i=ident: setattr(settings, "draw_color", i)),
-                             active=settings.draw_color == ident, swatch=rgb)
-                for ident, _name, rgb in strokes.PALETTE]
-    out += [swatches[:4], swatches[4:]]
+    if settings.draw_tool == 'DRAW':
+        out.append(_segments("style_", "draw_style", DRAW_STYLES, settings.draw_style,
+                             lambda v: setattr(settings, "draw_style", v),
+                             icons={'TUBE': "tube", 'RIBBON': "ribbon", 'NOTE': "note"}))
+        out.append([vr_ui.swatch_button("color_" + ident, rgb, (lambda i=ident: setattr(settings, "draw_color", i)),
+                                        settings.draw_color == ident) for ident, _name, rgb in strokes.PALETTE])
     out.append([vr_ui.slider("draw_width", "Width", settings.draw_width, 0.001, 0.05,
                              lambda v: setattr(settings, "draw_width", v), fmt=_meters)])
-    out.append([vr_ui.slider("draw_smoothing", "Smoothing", settings.draw_smoothing, 0.0, 0.95,
-                             lambda v: setattr(settings, "draw_smoothing", v), fmt=lambda v: f"{v:.2f}")])
-    out.append([
-        vr_ui.label("Mirror:"),
-        vr_ui.button("mirror_x", "X", lambda: setattr(settings, "mirror_x", not settings.mirror_x),
-                     active=settings.mirror_x),
-        vr_ui.button("mirror_y", "Y", lambda: setattr(settings, "mirror_y", not settings.mirror_y),
-                     active=settings.mirror_y),
-        vr_ui.button("mirror_z", "Z", lambda: setattr(settings, "mirror_z", not settings.mirror_z),
-                     active=settings.mirror_z),
-        vr_ui.button("mirror_here", "Here", lambda: _cursor_to_left_hand(context)),
-    ])
     items = [(i.identifier, i.name) for i in settings.bl_rna.properties["draw_thickness"].enum_items]
     names = dict(items)
-    out.append([vr_ui.select(
+    more = [[vr_ui.select(
         "draw_thickness", "Thickness", names[settings.draw_thickness],
         lambda: open_picker("Thickness", [Option(i, n) for i, n in items], settings.draw_thickness,
-                            lambda v: setattr(settings, "draw_thickness", v)))])
+                            lambda v: setattr(settings, "draw_thickness", v)))]]
     if settings.draw_thickness == 'TAPER':
-        out.append([vr_ui.slider("draw_taper", "Taper length", settings.draw_taper, 0.05, 0.5,
-                                 lambda v: setattr(settings, "draw_taper", v), fmt=lambda v: f"{v * 100:.0f}%")])
-    out.append([vr_ui.button("undo_stroke", "Undo stroke", lambda: _undo_stroke(context), danger=True)])
-    return out
+        more.append([vr_ui.slider("draw_taper", "Taper length", settings.draw_taper, 0.05, 0.5,
+                                  lambda v: setattr(settings, "draw_taper", v), fmt=_percent)])
+    more.append([vr_ui.slider("draw_smoothing", "Smoothing", settings.draw_smoothing, 0.0, 0.95,
+                              lambda v: setattr(settings, "draw_smoothing", v), fmt=_percent)])
+    more.append([vr_ui.label("Mirror", fixed=LABEL_W)] + [
+        vr_ui.toggle("mirror_" + a, a.upper(), getattr(settings, "mirror_" + a), _toggle(settings, "mirror_" + a))
+        for a in "xyz"] + [vr_ui.icon_button("mirror_here", "here", lambda: _cursor_to_left_hand(context),
+                                            "Center at left hand")])
+    return _disclose('DRAW', out, more, "Thickness, smoothing, mirror")
 
 
 def _undo_stroke(context):
@@ -302,275 +705,191 @@ def _undo_stroke(context):
     operators.undo_last_stroke(context)
 
 
-def _sculpt_rows(context, settings):
-    out = [[
-        vr_ui.button("engine_python", "Python", lambda: set_engine(context, 'PYTHON'),
-                     active=settings.engine == 'PYTHON'),
-        vr_ui.button("engine_native", "Native", lambda: set_engine(context, 'NATIVE'),
-                     active=settings.engine == 'NATIVE'),
-    ]]
-    if settings.engine == 'NATIVE':
-        brush = native.sculpt_brush(context)
-        current = brush.name if brush else ""
-        cells = [vr_ui.button("brush_" + n, NATIVE_SHORT[n], (lambda n=n: native.activate_brush(context, n)),
-                              active=n == current) for n in native.NATIVE_BRUSHES]
-        out += [cells[:3], cells[3:]]
-    else:
-        cells = []
-        for ident, name, _desc in BRUSH_ITEMS:
-            cells.append(vr_ui.button("brush_" + ident, name,
-                                      (lambda ident=ident: setattr(settings, "brush", ident)),
-                                      active=settings.brush == ident))
-        out.append(cells)
-    out.append([vr_ui.slider("radius", "Radius", settings.radius, 0.005, 0.2,
-                             lambda v: setattr(settings, "radius", v), fmt=_meters)])
-    if settings.engine == 'PYTHON':
-        out.append([vr_ui.slider("strength", "Strength", settings.strength, 0.0, 1.0,
-                                 lambda v: setattr(settings, "strength", v), fmt=lambda v: f"{v:.2f}")])
-    else:
-        strength = native.get_strength(context)
-        if strength is not None:
-            out.append([vr_ui.slider("strength", "Strength", strength, 0.0, 1.0,
-                                     lambda v: native.set_strength(context, v), fmt=lambda v: f"{v:.2f}")])
-    axes = symmetry.sculpt_axes(context)
-    out.append([vr_ui.label("Symmetry:")] + [
-        vr_ui.button("sym_" + a, a, (lambda i=i: symmetry.sculpt_toggle(context, i)), active=axes[i])
-        for i, a in enumerate(symmetry.AXES)])
-    return out
+# --- Paint ----------------------------------------------------------------------
+
+PAINT_SHORT = {"Airbrush": "Air"}  # Six brushes share a row.
 
 
-def open_add_picker(context):
-    settings = context.scene.vr_sculpt
-    options = [Option(e.key, e.label, e.category or "Mesh") for e in catalog.entries(refresh=True)]
-    open_picker("Add primitive", options, settings.primitive, lambda key: setattr(settings, "primitive", key))
+def _paint_setup(context):
+    obj = paint.target(context)
+    if obj is not None:
+        paint.setup(context, obj, int(context.scene.vr_sculpt.paint_texture_size))
 
 
-# Settings page per object, for operators with many settings.
-PARAMS_PER_PAGE = 6
-_param_pages = {}
-
-
-def _param_widget(context, obj, spec):
-    wid = "param_" + spec.id
-
-    def set_value(v, ident=spec.id):
-        # Slow generators (e.g. Wall Factory) regenerate when the slider is released.
-        live = not (spec.type in {'INT', 'FLOAT'} and obj.get("vrs_slow", False))
-        generic.set_param(context, obj, ident, v, live=live)
-
-    if spec.type == 'ENUM':
-        names = dict(spec.items)
-        return vr_ui.select(wid, spec.label, names.get(spec.value, str(spec.value)),
-                            lambda: open_picker(spec.label, [Option(i, n) for i, n in spec.items],
-                                                spec.value, set_value))
-    if spec.type == 'BOOLEAN':
-        return vr_ui.button(wid, f"{spec.label}: {'On' if spec.value else 'Off'}",
-                            lambda: set_value(not spec.value), active=spec.value)
-    if spec.type == 'INT':
-        return vr_ui.slider(wid, spec.label, spec.value, spec.lo, spec.hi, set_value, integer=True)
-    fmt = _meters if spec.length else _degrees if spec.angle else _number
-    return vr_ui.slider(wid, spec.label, spec.value, spec.lo, spec.hi, set_value, fmt=fmt)
-
-
-def _operator_rows(context, obj):
-    entry = catalog.find(obj.vr_prim.op_key)
-    if entry is None:
-        return [[vr_ui.label("Its Add > Mesh entry is gone (extension off?)")]]
-    specs = generic.params(entry, obj)
-    if not specs:
-        return [[vr_ui.label("No settings")]]
-    key = obj.name
-    shown, page, pages = _paged(specs, _param_pages.get(key, 0), PARAMS_PER_PAGE)
-    _param_pages[key] = page
-    out = [[_param_widget(context, obj, s)] for s in shown]
-    if pages > 1:
-        out.append([
-            vr_ui.button("params_prev", "\u2039 Prev", lambda: _param_pages.__setitem__(key, page - 1))
-            if page > 0 else vr_ui.label(""),
-            vr_ui.label(f"     {page + 1} / {pages}"),
-            vr_ui.button("params_next", "Next \u203a", lambda: _param_pages.__setitem__(key, page + 1))
-            if page < pages - 1 else vr_ui.label(""),
-        ])
-    return out
-
-
-ADD_AS = (('OBJECT', "Object"), ('DIFFERENCE', "Cut"), ('UNION', "Union"), ('INTERSECT', "Intersect"))
-MODEL_PAGES = (('SHAPE', "Shape"), ('BOOLEAN', "Cuts"), ('FINISH', "Finish"), ('ARRAY', "Array"))
-
-
-def _model_rows(context, settings):
-    out = [
-        [vr_ui.select("add", "Add", primitives.label(settings.primitive), lambda: open_add_picker(context))],
-        [vr_ui.button("add_as_" + ident.lower(), name, (lambda i=ident: setattr(settings, "model_add_as", i)),
-                      active=settings.model_add_as == ident) for ident, name in ADD_AS],
-    ] + _grid_rows(settings, model=True)
-    obj = context.view_layer.objects.active
-    if obj is None or not obj.select_get():
-        out.append([vr_ui.label("Drag in empty space to add")])
-        return out
-    out.append([vr_ui.label(f"{obj.name} (cutter)" if hardsurface.is_cutter(obj) else obj.name)])
-    if obj.type == 'MESH':
-        out.append([vr_ui.button("page_" + ident.lower(), name, (lambda i=ident: _set_model_page(settings, i)),
-                                 active=settings.model_page == ident) for ident, name in MODEL_PAGES])
-        page = settings.model_page
-        if page == 'BOOLEAN':
-            out += _boolean_rows(context, obj)
-        elif page == 'FINISH':
-            out += _finish_rows(context, settings, obj)
-        elif page == 'ARRAY':
-            out += _array_rows(context, obj)
-        else:
-            out += _shape_rows(context, obj)
-    out.append([
-        vr_ui.button("duplicate", "Duplicate", lambda: hardsurface.duplicate(context, obj)),
-        vr_ui.button("delete", "Delete", lambda: hardsurface.delete(context, obj), danger=True),
-    ])
-    return out
-
-
-def _set_model_page(settings, page):
-    settings.model_page = page
-    if page != 'FINISH':
-        settings.model_mark = 'NONE'  # Its buttons are on the Finish page; don't leave it on unseen.
-
-
-def _shape_rows(context, obj):
-    prim = obj.vr_prim
-    out = []
-    if prim.kind == 'CUBE':
-        for i, axis in enumerate("XYZ"):
-            out.append([vr_ui.slider(f"size_{axis}", f"Size {axis}", prim.size[i], 0.01, 1.0,
-                                     _setter(obj, "size", i), fmt=_meters)])
-        out.append([vr_ui.slider("subdivisions", "Subdivisions", prim.subdivisions, 0, 16,
-                                 _setter(obj, "subdivisions"), integer=True)])
-    elif prim.kind == 'CYLINDER':
-        out.append([vr_ui.slider("radius_prim", "Radius", prim.radius, 0.005, 0.5,
-                                 _setter(obj, "radius"), fmt=_meters)])
-        out.append([vr_ui.slider("height", "Height", prim.height, 0.01, 1.0,
-                                 _setter(obj, "height"), fmt=_meters)])
-        out.append([vr_ui.slider("segments", "Segments", prim.segments, 3, 64,
-                                 _setter(obj, "segments"), integer=True)])
-    elif prim.kind == 'OPERATOR':
-        out += _operator_rows(context, obj)
-    else:
-        out.append([vr_ui.label("Plain mesh (sculpted or not a VR primitive)")])
-    axes = symmetry.model_axes(obj)
-    out.append([vr_ui.label("Mirror:")] + [
-        vr_ui.button("mirror_" + a, a, (lambda i=i: symmetry.model_toggle(context, obj, i)), active=axes[i])
-        for i, a in enumerate(symmetry.AXES)] + [
-        vr_ui.button("mirror_here", "Here", lambda: _cursor_to_left_hand(context))])
-    solid = hardsurface.solidify(obj) is not None
-    out.append([vr_ui.button("solidify", "Solidify", lambda: hardsurface.set_solidify(obj, not solid), active=solid)])
-    if solid:
-        out.append([vr_ui.slider("solidify_thickness", "Thickness", hardsurface.solidify_thickness(obj), 0.0005,
-                                 max(0.05, 0.5 * max(obj.dimensions)),
-                                 lambda v: hardsurface.set_solidify_thickness(obj, v), fmt=_meters)])
-    return out
-
-
-def _boolean_rows(context, obj):
-    if hardsurface.is_cutter(obj):
-        target = hardsurface.target_of(obj)
-        mod = hardsurface.modifier_of(obj)
-        if target is None or mod is None:
-            return [[vr_ui.label("Cuts nothing (its object is gone)")]]
+def _paint_rows(context, settings):
+    obj = paint.target(context)
+    if obj is None:
+        return [_header(context, settings, "Paint"), [vr_ui.label("Select a mesh to paint", align='CENTER')]]
+    if not paint.ready(obj):
+        items = [(i.identifier, i.name) for i in settings.bl_rna.properties["paint_texture_size"].enum_items]
         return [
-            [vr_ui.label(f"Cuts {target.name}")],
-            [vr_ui.button("bool_" + ident.lower(), name, (lambda i=ident: hardsurface.set_operation(obj, i)),
-                          active=mod.operation == ident) for ident, name in hardsurface.OPERATIONS],
-            [
-                vr_ui.button("bool_target", "Select object", lambda: primitives.make_active(context, target)),
-                vr_ui.button("bool_apply", "Apply", lambda: hardsurface.apply_cutter(context, obj)),
-                vr_ui.button("bool_remove", "Remove", lambda: hardsurface.delete(context, obj), danger=True),
-            ],
+            _header(context, settings, "Paint", obj.name),
+            [vr_ui.label("It needs UVs and an image to paint on")],
+            [vr_ui.label("Texture", fixed=LABEL_W)] + _segments(
+                "paint_size_", "paint_size", items, settings.paint_texture_size,
+                lambda v: setattr(settings, "paint_texture_size", v)),
+            [vr_ui.button("paint_setup", "Set up for painting", lambda: _paint_setup(context), active=True,
+                          icon="check")],
         ]
-    mods = hardsurface.booleans(obj)
-    if not mods:
-        return [[vr_ui.label("No cuts yet: pick Cut above,")], [vr_ui.label("then drag on or near this object")]]
-    visible = hardsurface.cutters_visible(context)
-    exact = all(m.solver == 'EXACT' for m in mods)
+    b = paint.brush(context)
+    current = b.name if b else ""
+    out = [
+        _header(context, settings, "Paint", obj.name, actions=[
+            vr_ui.icon_button("paint_undo", "undo", lambda: paint.undo_last(context), "Undo stroke")]),
+        _segments("pbrush_", "pbrush", [(n, PAINT_SHORT.get(n, paint.SHORT[n])) for n in paint.BRUSHES], current,
+                  lambda n: paint.activate_brush(context, n)),
+    ]
+    color = paint.get_color(context)
+    out.append([
+        vr_ui.swatch_button("paint_color1", color, lambda: None, active=True),
+        vr_ui.swatch_button("paint_color2", paint.get_color(context, True), lambda: paint.swap_colors(context)),
+        vr_ui.icon_button("paint_swap", "swap", lambda: paint.swap_colors(context), "Swap colors"),
+        vr_ui.toggle("paint_pick", "Pick", settings.paint_tool == 'PICK',
+                     lambda: setattr(settings, "paint_tool", 'PAINT' if settings.paint_tool == 'PICK' else 'PICK'),
+                     icon="eyedropper", weight=2.2, tip="Pick a color from the surface"),
+    ])
+    out.append([vr_ui.swatch_button("pcolor_" + ident, rgb, (lambda rgb=rgb: paint.set_color(context, rgb)),
+                                    all(abs(a - b) < 1e-3 for a, b in zip(color, rgb)))
+                for ident, _name, rgb in strokes.PALETTE])
+    out.append([vr_ui.slider("paint_radius", "Radius", settings.paint_radius, 0.002, 0.15,
+                             lambda x: setattr(settings, "paint_radius", x), fmt=_meters)])
+    if b is not None:
+        out.append([vr_ui.slider("paint_strength", "Strength", b.strength, 0.0, 1.0,
+                                 lambda x: setattr(b, "strength", x), fmt=_percent)])
+    h, s, v = paint.get_hsv(context)
+    more = [
+        [vr_ui.label("Reach", fixed=LABEL_W)] + _segments(
+            "reach_", "reach", (('contact', "Contact"), ('spray', "Spray")), settings.paint_reach.lower(),
+            lambda r: setattr(settings, "paint_reach", r.upper()), icons={'contact': "contact", 'spray': "spray"}),
+        [vr_ui.slider("paint_hue", "Hue", h, 0.0, 1.0, lambda x: paint.set_hsv(context, h=x),
+                      fmt=lambda x: f"{x * 360:.0f}\u00b0")],
+        [vr_ui.slider("paint_sat", "Saturation", s, 0.0, 1.0, lambda x: paint.set_hsv(context, s=x), fmt=_percent)],
+        [vr_ui.slider("paint_val", "Value", v, 0.0, 1.0, lambda x: paint.set_hsv(context, v=x), fmt=_percent)],
+    ]
+    return _disclose('PAINT', out, more, "Spray, hue / sat / value")
 
-    def set_solver(solver):
-        for m in hardsurface.booleans(obj):
-            m.solver = solver
 
+# --- Pose -----------------------------------------------------------------------
+
+def open_rig_picker(context):
+    current = pose.rig(context)
+    options = [Option(o.name, o.name) for o in pose.rigs(context)] + [Option("", "Objects (no rig)")]
+    open_picker("Pose", options, current.name if current else "", lambda name: pose.choose_rig(context, name))
+
+
+def _bind(context, source):
+    puppet.bind(context, context.window_manager.xr_session_state, source)
+
+
+def _puppet_rows(context):
+    n = puppet.binding_count()
+    take = puppet.state()
+    recording = take in {'RECORDING', 'ENDING'}
     return [
-        [vr_ui.label(f"{len(mods)} cutter{'s' if len(mods) != 1 else ''}")],
+        [vr_ui.label("Bind", fixed=LABEL_W)] + [
+            vr_ui.button("bind_" + ident.lower(), short, (lambda i=ident: _bind(context, i)))
+            for ident, short in (('LEFT', "L hand"), ('RIGHT', "R hand"), ('HEAD', "Head"))],
         [
-            vr_ui.button("cutters_show", "Show cutters", lambda: hardsurface.set_cutters_visible(context, not visible),
-                         active=visible),
-            vr_ui.button("bool_apply_all", "Apply all", lambda: hardsurface.apply_all(context, obj), danger=True),
-        ],
-        [
-            vr_ui.label("Solver:"),
-            vr_ui.button("solver_fast", "Fast", lambda: set_solver('MANIFOLD'), active=not exact),
-            vr_ui.button("solver_exact", "Exact", lambda: set_solver('EXACT'), active=exact),
+            vr_ui.button("unbind", f"Unbind {n}", puppet.unbind_all, danger=True, icon="close") if n else
+            vr_ui.label("Puppet", fixed=LABEL_W),
+            vr_ui.button("puppet_rec", puppet.status(), lambda: puppet.toggle_record(context),
+                         active=take is not None, danger=recording, icon="stop" if take else "record"),
         ],
     ]
 
 
-MARKS = (('HARD', "Hard"), ('SOFT', "Soft"), ('CLEAR', "Clear"))
-
-
-def _finish_rows(context, settings, obj):
-    current = shading.mode(obj)
-    out = [[vr_ui.label("Shading:")] + [
-        vr_ui.button("shade_" + ident.lower(), name,
-                     (lambda i=ident: shading.set_mode(obj, None if current == i else i)), active=current == ident)
-        for ident, name in shading.MODES]]
-    if current == 'AUTO':
-        out.append([vr_ui.slider("shade_angle", "Angle", shading.angle(obj), math.radians(1.0), math.radians(180.0),
-                                 lambda v: shading.set_angle(obj, v), fmt=_degrees)])
-    out.append([vr_ui.label("Mark:")] + [
-        vr_ui.button("mark_" + ident.lower(), name,
-                     (lambda i=ident: setattr(settings, "model_mark", 'NONE' if settings.model_mark == i else i)),
-                     active=settings.model_mark == ident)
-        for ident, name in MARKS])
-    on = hardsurface.has_bevel(obj)
-    out.append([vr_ui.button("bevel", "Bevel", lambda: hardsurface.set_bevel(obj, not on), active=on)])
-    if on:
-        mod = hardsurface.bevel(obj)
-        dims = [d for d in obj.dimensions if d > 1e-6]
-        hi = max(0.25 * min(dims), 0.002) if dims else 0.02
-        out.append([vr_ui.slider("bevel_width", "Width", hardsurface.bevel_width(obj), 0.0002, hi,
-                                 lambda v: hardsurface.set_bevel_width(obj, v), fmt=_meters)])
-        out.append([vr_ui.slider("bevel_segments", "Segments", mod.segments, 1, 8,
-                                 lambda v: setattr(mod, "segments", int(v)), integer=True)])
-    return out
-
-
-def _array_rows(context, obj):
-    count = hardsurface.array_count(obj)
-    out = [[vr_ui.slider("array_count", "Count", count, 1, 24,
-                         lambda v: hardsurface.set_array_count(context, obj, v), integer=True,
-                         fmt=lambda v: "Off" if int(v) <= 1 else str(int(v)))]]
-    if count <= 1:
-        return out
-    mode = hardsurface.array_mode(obj)
-    axis = hardsurface.array_axis(obj)
-    out.append([
-        vr_ui.button("array_linear", "Linear", lambda: hardsurface.set_array_mode(context, obj, 'LINEAR'),
-                     active=mode == 'LINEAR'),
-        vr_ui.button("array_radial", "Radial", lambda: hardsurface.set_array_mode(context, obj, 'RADIAL'),
-                     active=mode == 'RADIAL'),
-    ])
-    out.append([vr_ui.label("Around:" if mode == 'RADIAL' else "Along:")] + [
-        vr_ui.button("array_axis_" + a, a, (lambda i=i: hardsurface.set_array_axis(context, obj, i)), active=axis == i)
-        for i, a in enumerate(symmetry.AXES)])
-    if mode == 'RADIAL':
-        out.append([vr_ui.button("array_center", "Center at left hand", lambda: _array_center_here(context, obj))])
+def _pose_rows(context, settings):
+    obj = pose.rig(context)
+    pb = pose.active_bone(obj) if obj is not None else None
+    subtitle = pb.name if pb is not None else ("touch a bone" if obj is not None else "")
+    out = [
+        _header(context, settings, "Pose", subtitle),
+        [vr_ui.select("pose_rig", "Rig", obj.name if obj else "Objects", lambda: open_rig_picker(context),
+                      icon="bones")],
+    ]
+    more = []
+    if obj is not None:
+        out.append(_segments("pose_", "pose_tool", (('fk', "FK"), ('ik', "IK")), settings.pose_tool.lower(),
+                             lambda v: setattr(settings, "pose_tool", v.upper())))
+        if settings.pose_tool == 'IK':
+            out.append([vr_ui.stepper("pose_chain", "IK chain", settings.pose_chain, 1, 6,
+                                      lambda v: setattr(settings, "pose_chain", int(v)))])
+        out.append([
+            vr_ui.toggle("pose_mirror", "Mirror X", settings.pose_mirror, _toggle(settings, "pose_mirror"),
+                         icon="mirror"),
+            vr_ui.toggle("pose_bones", "Bones", settings.pose_show_bones, _toggle(settings, "pose_show_bones"),
+                         icon="eye"),
+        ])
+        more.append([
+            vr_ui.button("pose_reset", "Reset bone", lambda: pose.reset_selected(context), icon="reset"),
+            vr_ui.button("pose_reset_all", "Reset pose", lambda: pose.reset_selected(context, True), danger=True,
+                         icon="reset"),
+        ])
     else:
-        out.append([vr_ui.slider("array_gap", "Gap", hardsurface.array_gap(obj), -0.5, 2.0,
-                                 lambda v: hardsurface.set_array_gap(context, obj, v),
-                                 fmt=lambda v: f"{v * 100:.0f}%")])
+        out.append([vr_ui.label("Touch an object to move it", align='CENTER')])
+    if puppet.binding_count() or puppet.state() is not None:
+        out += _puppet_rows(context)  # A puppet in use: its controls come up front.
+    else:
+        more += _puppet_rows(context)
+    return _disclose('POSE', out, more, "Reset, puppeteering")
+
+
+# --- Tools ----------------------------------------------------------------------
+
+def open_camera_picker(context):
+    scene = context.scene
+    options = [Option(o.name, o.name) for o in camera.cameras(scene)]
+    current = scene.camera.name if scene.camera else ""
+
+    def choose(name):
+        obj = scene.objects.get(name)
+        if obj is not None:
+            scene.camera = obj
+
+    open_picker("Scene camera", options, current, choose)
+
+
+def _new_camera_here(context):
+    ss = context.window_manager.xr_session_state
+    pose_ = None
+    if ss is not None:
+        from . import operators
+        pose_ = operators.controller_pose(ss.controller_aim_location_get(context, 1),
+                                          ss.controller_aim_rotation_get(context, 1))
+    camera.new_camera(context, pose_)
+
+
+def _tools_rows(context, settings):
+    scene = context.scene
+    out = [
+        _header(context, settings, "Tools"),
+        _segments("tool_", "tool", (('measure', "Measure"), ('camera', "Camera")), settings.tool.lower(),
+                  lambda v: setattr(settings, "tool", v.upper()), icons={'measure': "ruler", 'camera': "camera"}),
+    ]
+    if settings.tool == 'MEASURE':
+        n = len(measure.stored(scene))
+        out.append([
+            vr_ui.toggle("measures_show", "Show", settings.show_measures, _toggle(settings, "show_measures"),
+                         icon="eye"),
+            vr_ui.button("measure_undo", "Undo", lambda: measure.undo_last(scene), icon="undo"),
+            vr_ui.button("measure_clear", f"Clear {n}", lambda: measure.clear(scene), danger=True, icon="trash"),
+        ])
+    else:
+        cam = scene.camera
+        out.append([vr_ui.select("camera", "Camera", cam.name if cam else "none", lambda: open_camera_picker(context),
+                                 icon="camera")])
+        row = [vr_ui.toggle("camera_preview", "Pin preview", settings.camera_preview,
+                            _toggle(settings, "camera_preview"), icon="pin")]
+        if settings.show_new_camera:
+            row.insert(0, vr_ui.button("camera_new", "New here", lambda: _new_camera_here(context), icon="plus"))
+        out.append(row)
+        if cam is not None and cam.data.type == 'PERSP':
+            out.append([vr_ui.slider("camera_lens", "Lens", cam.data.lens, 10.0, 200.0,
+                                     lambda v: setattr(cam.data, "lens", v), fmt=lambda v: f"{v:.0f} mm")])
     return out
 
 
-def _array_center_here(context, obj):
-    tip = _left_tip(context)
-    if tip is not None:
-        hardsurface.set_array_center(context, obj, tip)
-
+# --- Settings (the gear, in every mode) --------------------------------------------
 
 def _passthrough(context):
     xs = context.window_manager.xr_session_settings
@@ -592,193 +911,57 @@ def _bring_desktop(context):
         desktop.place_in_front(context, ss)
 
 
-def open_camera_picker(context):
-    scene = context.scene
-    options = [Option(o.name, o.name) for o in camera.cameras(scene)]
-    current = scene.camera.name if scene.camera else ""
-
-    def choose(name):
-        obj = scene.objects.get(name)
-        if obj is not None:
-            scene.camera = obj
-
-    open_picker("Scene camera", options, current, choose)
+REVEALS = (('wrist', "Wrist"), ('look', "Look"), ('always', "Always"))
 
 
-def _new_camera_here(context):
-    ss = context.window_manager.xr_session_state
-    pose = None
-    if ss is not None:
-        from . import operators
-        pose = operators.controller_pose(ss.controller_aim_location_get(context, 1),
-                                         ss.controller_aim_rotation_get(context, 1))
-    camera.new_camera(context, pose)
-
-
-def _tools_rows(context, settings):
-    scene = context.scene
-    out = [[
-        vr_ui.button("tool_measure", "Measure", lambda: setattr(settings, "tool", 'MEASURE'),
-                     active=settings.tool == 'MEASURE'),
-        vr_ui.button("tool_camera", "Camera", lambda: setattr(settings, "tool", 'CAMERA'),
-                     active=settings.tool == 'CAMERA'),
-    ]]
-    if settings.tool == 'MEASURE':
-        n = len(measure.stored(scene))
-        out.append([
-            vr_ui.button("measures_show", "Show", _toggle(settings, "show_measures"), active=settings.show_measures),
-            vr_ui.button("measure_undo", "Undo", lambda: measure.undo_last(scene)),
-            vr_ui.button("measure_clear", f"Clear ({n})", lambda: measure.clear(scene), danger=True),
-        ])
-    else:
-        cam = scene.camera
-        out.append([vr_ui.select("camera", "Camera", cam.name if cam else "none",
-                                 lambda: open_camera_picker(context))])
-        row = [vr_ui.button("camera_preview", "Pin preview", _toggle(settings, "camera_preview"),
-                            active=settings.camera_preview)]
-        if settings.show_new_camera:
-            row.insert(0, vr_ui.button("camera_new", "New here", lambda: _new_camera_here(context)))
-        out.append(row)
-        if cam is not None and cam.data.type == 'PERSP':
-            out.append([vr_ui.slider("camera_lens", "Lens", cam.data.lens, 10.0, 200.0,
-                                     lambda v: setattr(cam.data, "lens", v), fmt=lambda v: f"{v:.0f} mm")])
-    out += _grid_rows(settings)
+def _settings_rows(context, settings):
     xs = context.window_manager.xr_session_settings
-    out.append([
-        vr_ui.label("Hand panel:"),
-        vr_ui.button("show_timeline", "Timeline", _toggle(settings, "show_timeline"), active=settings.show_timeline),
-    ])
-    out.append([
-        vr_ui.button("show_desktop", "Desktop", lambda: _show_desktop(context, settings),
-                     active=settings.show_desktop),
-        vr_ui.button("bring_desktop", "Bring here", lambda: _bring_desktop(context))
-        if settings.show_desktop else vr_ui.label(""),
-        vr_ui.button("passthrough", "Passthrough", lambda: _passthrough(context),
-                     active=bool(xs and xs.show_passthrough)),
-    ])
-    out.append([
-        vr_ui.button("tracking", "Tracking", _toggle(settings, "tracking"), active=settings.tracking),
-        vr_ui.button("tracking_record", "Record", _toggle(settings, "tracking_record"),
-                     active=settings.tracking_record),
-    ])
-    out.append([
-        vr_ui.label("Move:"),
-        vr_ui.button("nav_walk", "Walk", lambda: setattr(settings, "nav_mode", 'WALK'),
-                     active=settings.nav_mode == 'WALK'),
-        vr_ui.button("nav_fly", "Fly", lambda: setattr(settings, "nav_mode", 'FLY'),
-                     active=settings.nav_mode == 'FLY'),
-    ])
-    out.append([vr_ui.slider("nav_speed", "Speed", settings.nav_speed, 0.2, 6.0,
-                             lambda v: setattr(settings, "nav_speed", v), fmt=lambda v: f"{v:.1f} m/s")])
+    out = [
+        [vr_ui.icon_button("back", "back", lambda: close_sheet(context), "Back"), vr_ui.title("Settings"),
+         _pin(context, settings)],
+        [vr_ui.label("Move", fixed=LABEL_W)] + _segments(
+            "nav_", "nav", (('walk', "Walk"), ('fly', "Fly")), settings.nav_mode.lower(),
+            lambda v: setattr(settings, "nav_mode", v.upper()), icons={'walk': "walk", 'fly': "fly"}),
+        [vr_ui.slider("nav_speed", "Speed", settings.nav_speed, 0.2, 6.0,
+                      lambda v: setattr(settings, "nav_speed", v), fmt=lambda v: f"{v:.1f} m/s")],
+        [vr_ui.label("Grid", fixed=LABEL_W),
+         vr_ui.toggle("grid_show", "Show", settings.grid_show, _toggle(settings, "grid_show"), icon="grid"),
+         vr_ui.toggle("grid_snap", "Snap", settings.grid_snap, _toggle(settings, "grid_snap"), icon="magnet")],
+    ]
+    if settings.grid_show or settings.grid_snap:
+        out.append([vr_ui.slider("grid_size", "Grid size", settings.grid_size, 0.005, 0.5,
+                                 lambda v: setattr(settings, "grid_size", v), fmt=_meters)])
+    out += [
+        [vr_ui.toggle("show_timeline", "Timeline", settings.show_timeline, _toggle(settings, "show_timeline"),
+                      icon="timeline"),
+         vr_ui.toggle("passthrough", "Passthrough", bool(xs and xs.show_passthrough), lambda: _passthrough(context),
+                      icon="passthrough")],
+        [vr_ui.label("Desktop", fixed=LABEL_W),
+         vr_ui.toggle("show_desktop", "Show", settings.show_desktop, lambda: _show_desktop(context, settings),
+                      icon="desktop", tip="Desktop window"),
+         vr_ui.button("bring_desktop", "Bring here", lambda: _bring_desktop(context), icon="here")
+         if settings.show_desktop else vr_ui.label("")],
+        [vr_ui.label("Panel", fixed=LABEL_W)] + _segments(
+            "reveal_", "reveal", REVEALS, settings.panel_reveal.lower(),
+            lambda v: setattr(settings, "panel_reveal", v.upper())),
+        [vr_ui.label("Track", fixed=LABEL_W),
+         vr_ui.toggle("tracking", "Objects", settings.tracking, _toggle(settings, "tracking"), icon="tracking",
+                      tip="Tracking objects"),
+         vr_ui.toggle("tracking_record", "Record", settings.tracking_record, _toggle(settings, "tracking_record"),
+                      icon="record", tip="Record tracking")],
+    ]
     return out
 
 
-def _paint_setup(context):
-    obj = paint.target(context)
-    if obj is not None:
-        paint.setup(context, obj, int(context.scene.vr_sculpt.paint_texture_size))
+_MODE_ROWS = {'SCULPT': _sculpt_rows, 'MODEL': _model_rows, 'DRAW': _draw_rows, 'PAINT': _paint_rows,
+              'POSE': _pose_rows, 'TOOLS': _tools_rows}
 
 
-def _paint_rows(context, settings):
-    obj = paint.target(context)
-    if obj is None:
-        return [[vr_ui.label("Select a mesh to paint")]]
-    if not paint.ready(obj):
-        items = [(i.identifier, i.name) for i in settings.bl_rna.properties["paint_texture_size"].enum_items]
-        return [
-            [vr_ui.label(f"{obj.name} needs UVs and an image")],
-            [vr_ui.button("paint_size_" + ident, name, (lambda i=ident: setattr(settings, "paint_texture_size", i)),
-                          active=settings.paint_texture_size == ident) for ident, name in items],
-            [vr_ui.button("paint_setup", "Set up for painting", lambda: _paint_setup(context))],
-        ]
-    b = paint.brush(context)
-    current = b.name if b else ""
-    cells = [vr_ui.button("pbrush_" + n, paint.SHORT[n], (lambda n=n: paint.activate_brush(context, n)),
-                          active=n == current) for n in paint.BRUSHES]
-    out = [cells[:3], cells[3:]]
-    out.append([
-        vr_ui.button("reach_contact", "Contact", lambda: setattr(settings, "paint_reach", 'CONTACT'),
-                     active=settings.paint_reach == 'CONTACT'),
-        vr_ui.button("reach_spray", "Spray", lambda: setattr(settings, "paint_reach", 'SPRAY'),
-                     active=settings.paint_reach == 'SPRAY'),
-        vr_ui.button("paint_pick", "Pick color",
-                     lambda: setattr(settings, "paint_tool", 'PAINT' if settings.paint_tool == 'PICK' else 'PICK'),
-                     active=settings.paint_tool == 'PICK'),
-    ])
-    color = paint.get_color(context)
-    swatches = [vr_ui.button("pcolor_" + ident, "", (lambda rgb=rgb: paint.set_color(context, rgb)),
-                             active=all(abs(a - b) < 1e-3 for a, b in zip(color, rgb)), swatch=rgb)
-                for ident, _name, rgb in strokes.PALETTE]
-    out += [swatches[:4], swatches[4:]]
-    h, s, v = paint.get_hsv(context)
-    out.append([vr_ui.slider("paint_hue", "Hue", h, 0.0, 1.0, lambda x: paint.set_hsv(context, h=x),
-                             fmt=lambda x: f"{x * 360:.0f}" + chr(0xB0))])  # degrees
-    out.append([vr_ui.slider("paint_sat", "Saturation", s, 0.0, 1.0, lambda x: paint.set_hsv(context, s=x),
-                             fmt=lambda x: f"{x * 100:.0f}%")])
-    out.append([vr_ui.slider("paint_val", "Value", v, 0.0, 1.0, lambda x: paint.set_hsv(context, v=x),
-                             fmt=lambda x: f"{x * 100:.0f}%")])
-    out.append([
-        vr_ui.button("paint_color1", "Color", lambda: None, swatch=color, active=True),
-        vr_ui.button("paint_color2", "2nd", lambda: None, swatch=paint.get_color(context, True)),
-        vr_ui.button("paint_swap", "Swap", lambda: paint.swap_colors(context)),
-    ])
-    out.append([vr_ui.slider("paint_radius", "Radius", settings.paint_radius, 0.002, 0.15,
-                             lambda x: setattr(settings, "paint_radius", x), fmt=_meters)])
-    if b is not None:
-        out.append([vr_ui.slider("paint_strength", "Strength", b.strength, 0.0, 1.0,
-                                 lambda x: setattr(b, "strength", x), fmt=lambda x: f"{x:.2f}")])
-    out.append([vr_ui.button("paint_undo", "Undo stroke", lambda: paint.undo_last(context), danger=True)])
-    return out
-
-
-def open_rig_picker(context):
-    current = pose.rig(context)
-    options = [Option(o.name, o.name) for o in pose.rigs(context)] + [Option("", "Objects (no rig)")]
-    open_picker("Pose", options, current.name if current else "", lambda name: pose.choose_rig(context, name))
-
-
-def _bind(context, source):
-    puppet.bind(context, context.window_manager.xr_session_state, source)
-
-
-def _pose_rows(context, settings):
-    obj = pose.rig(context)
-    out = [[vr_ui.select("pose_rig", "Rig", obj.name if obj else "Objects", lambda: open_rig_picker(context))]]
-    if obj is not None:
-        pb = pose.active_bone(obj)
-        out.append([vr_ui.label(f"Bone: {pb.name}" if pb is not None else "Touch a bone to pose it")])
-        out.append([
-            vr_ui.button("pose_fk", "FK", lambda: setattr(settings, "pose_tool", 'FK'),
-                         active=settings.pose_tool == 'FK'),
-            vr_ui.button("pose_ik", "IK", lambda: setattr(settings, "pose_tool", 'IK'),
-                         active=settings.pose_tool == 'IK'),
-            vr_ui.button("pose_mirror", "Mirror X", _toggle(settings, "pose_mirror"), active=settings.pose_mirror),
-            vr_ui.button("pose_bones", "Bones", _toggle(settings, "pose_show_bones"),
-                         active=settings.pose_show_bones),
-        ])
-        if settings.pose_tool == 'IK':
-            out.append([vr_ui.slider("pose_chain", "IK chain", settings.pose_chain, 1, 6,
-                                     lambda v: setattr(settings, "pose_chain", int(v)), integer=True)])
-        out.append([
-            vr_ui.button("pose_reset", "Reset bone", lambda: pose.reset_selected(context)),
-            vr_ui.button("pose_reset_all", "Reset pose", lambda: pose.reset_selected(context, True), danger=True),
-        ])
-    else:
-        out.append([vr_ui.label("Touch an object to move it")])
-    out.append([vr_ui.button("bind_" + ident.lower(), "Bind " + short, (lambda i=ident: _bind(context, i)))
-                for ident, short in (('LEFT', "L"), ('RIGHT', "R"), ('HEAD', "head"))])
-    n = puppet.binding_count()
-    recording = puppet.state() in {'RECORDING', 'ENDING'}
-    out.append([
-        vr_ui.button("unbind", f"Unbind ({n})", puppet.unbind_all, danger=True) if n else vr_ui.label("Puppet:"),
-        vr_ui.button("puppet_rec", puppet.status(), lambda: puppet.toggle_record(context),
-                     active=puppet.state() is not None, danger=recording),
-    ])
-    return out
-
+# --- timeline strip --------------------------------------------------------------
 
 def timeline_rows(context, settings):
-    """Frame scrubber with key ticks, transport, keying and range buttons (at the panel's bottom)."""
+    """Frame scrubber with key ticks, transport and keying; More has the interpolation, range, paths and
+    onion skin."""
     scene = context.scene
     start, end = scene.frame_start, scene.frame_end
     span = max(end - start, 1)
@@ -788,31 +971,41 @@ def timeline_rows(context, settings):
     interp = anim.interpolation_at(context)
     names = dict(anim.INTERPOLATIONS)
     tool = scene.tool_settings
-    return [
+    out = [
         [vr_ui.slider("frame", "Frame", scene.frame_current, start, end,
                       lambda v: anim.set_frame(context, v), integer=True,
                       fmt=lambda v: f"{int(v)} / {end}", ticks=ticks)],
         [
-            vr_ui.button("key_prev", "|<", lambda: anim.jump_key(context, -1)),
-            vr_ui.button("frame_prev", "<", lambda: anim.step(context, -1)),
-            vr_ui.button("play", "Stop" if playing else "Play", lambda: anim.toggle_play(context), active=playing),
-            vr_ui.button("frame_next", ">", lambda: anim.step(context, 1)),
-            vr_ui.button("key_next", ">|", lambda: anim.jump_key(context, 1)),
+            vr_ui.icon_button("key_prev", "key_prev", lambda: anim.jump_key(context, -1), "Previous key"),
+            vr_ui.icon_button("frame_prev", "frame_prev", lambda: anim.step(context, -1), "Previous frame"),
+            vr_ui.button("play", "Stop" if playing else "Play", lambda: anim.toggle_play(context), active=playing,
+                         icon="stop" if playing else "play"),
+            vr_ui.icon_button("frame_next", "frame_next", lambda: anim.step(context, 1), "Next frame"),
+            vr_ui.icon_button("key_next", "key_next", lambda: anim.jump_key(context, 1), "Next key"),
         ],
         [
-            vr_ui.button("key_insert", "Key", lambda: anim.key_selection(context)),
-            vr_ui.button("key_delete", "Del key", lambda: anim.delete_selection_keys(context), danger=True),
-            vr_ui.button("autokey", "Auto", lambda: setattr(tool, "use_keyframe_insert_auto",
-                                                              not tool.use_keyframe_insert_auto),
-                         active=tool.use_keyframe_insert_auto),
-            vr_ui.select("interp", "Ease", names.get(interp, "-") if interp != 'MIXED' else "Mixed",
-                         lambda: open_picker("Key interpolation", [Option(i, n) for i, n in anim.INTERPOLATIONS],
-                                             interp, lambda v: anim.set_interpolation(context, v))),
-        ],
-        [
-            vr_ui.button("range_start", "Start", lambda: anim.set_start(context)),
-            vr_ui.button("range_end", "End", lambda: anim.set_end(context)),
-            vr_ui.button("show_paths", "Paths", _toggle(settings, "show_paths"), active=settings.show_paths),
-            vr_ui.button("onion", "Onion", _toggle(settings, "onion"), active=settings.onion),
+            vr_ui.button("key_insert", "Key", lambda: anim.key_selection(context), icon="key"),
+            vr_ui.button("key_delete", "Delete", lambda: anim.delete_selection_keys(context), danger=True,
+                         icon="key_delete", tip="Delete key"),
+            vr_ui.toggle("autokey", "Auto", tool.use_keyframe_insert_auto,
+                         lambda: setattr(tool, "use_keyframe_insert_auto", not tool.use_keyframe_insert_auto),
+                         icon="record", tip="Auto keying"),
         ],
     ]
+    more = [
+        [vr_ui.select("interp", "Ease", names.get(interp, "-") if interp != 'MIXED' else "Mixed",
+                      lambda: open_picker("Key interpolation", [Option(i, n) for i, n in anim.INTERPOLATIONS],
+                                          interp, lambda v: anim.set_interpolation(context, v)))],
+        [
+            vr_ui.button("range_start", "Start", lambda: anim.set_start(context), icon="range_start",
+                         tip="Start the range here"),
+            vr_ui.button("range_end", "End", lambda: anim.set_end(context), icon="range_end",
+                         tip="End the range here"),
+        ],
+        [
+            vr_ui.toggle("show_paths", "Paths", settings.show_paths, _toggle(settings, "show_paths"), icon="paths",
+                         tip="Motion paths"),
+            vr_ui.toggle("onion", "Onion skin", settings.onion, _toggle(settings, "onion"), icon="onion"),
+        ],
+    ]
+    return _disclose('TIMELINE', out, more, "Ease, range, paths, onion")

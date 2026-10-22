@@ -101,6 +101,7 @@ def scenario_model(ctx):
     cube = primitives.create(ctx, 'CUBE', (-0.05, -0.1, 1.3))
     cube.vr_prim.size = (0.12, 0.08, 0.1)
     ctx.view_layer.update()
+    menus.open_sheet('OBJECT')
     # Left tip inside the cube (bounds highlight), right ray on the "Size Y" slider.
     fake.aim_loc[0] = Vector((-0.05, -0.1, 1.3)) - fake.aim_rot[0] @ Vector((0, 0, -ctx.scene.vr_sculpt.tip_offset))
     matrix, widgets, height = interactions.panel_frame(ctx, fake)
@@ -166,6 +167,7 @@ def setup():
     from vr_sculpt import native
     try:
         vr_sculpt.register()
+        bpy.context.scene.vr_sculpt.panel_pin = True  # The reveal needs a real wrist: keep the panel shown.
         win = bpy.context.window_manager.windows[0]
         area, region = native.largest_view3d(win)
         rv3d = area.spaces.active.region_3d

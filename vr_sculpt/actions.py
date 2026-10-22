@@ -83,7 +83,7 @@ def _patch(session_state):
         ami.op_mode = 'MODAL'
     if missing:
         return "Patched, but stock actions missing: " + ", ".join(missing)
-    return "Trigger = sculpt/model/draw/tools, Y = mode, B = next brush / undo, stick clicks: L = panel, R = radius"
+    return "Trigger = sculpt/model/draw/tools, Y = mode, B = next brush / undo, stick clicks: L = pin panel, R = radius"
 
 
 @persistent

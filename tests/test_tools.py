@@ -531,23 +531,32 @@ def test_tools_page():
     ctx = bpy.context
     settings = ctx.scene.vr_sculpt
     menus.set_mode(ctx, 'TOOLS')
+    tool_ids = {'MEASURE': {"measures_show", "measure_undo", "measure_clear"},
+                'CAMERA': {"camera", "camera_preview", "camera_lens"}}
     for tool in ('MEASURE', 'CAMERA'):
         settings.tool = tool
-        widgets, height = vr_ui.layout(menus.rows(ctx))
+        widgets, height = menus.layout(ctx)
         ids = {w.id for w in widgets}
-        need = {"mode_tools", "tool_measure", "tool_camera", "grid_show", "grid_snap", "show_desktop", "passthrough",
-                "tracking", "nav_walk", "nav_fly", "nav_speed"}
+        need = {"mode_tools", "tool_measure", "tool_camera", "settings", "pin"} | tool_ids[tool]
         check(need <= ids, f"{tool}: page has its buttons (missing {sorted(need - ids)})")
-        check(height < 0.4, f"{tool}: panel height {height:.3f} m")
+        check(height < 0.2, f"{tool}: panel height {height:.3f} m")
     settings.tool = 'CAMERA'
-    check(vr_ui.find(vr_ui.layout(menus.rows(ctx))[0], "camera_new") is not None, "New here shows by default")
+    check(vr_ui.find(menus.layout(ctx)[0], "camera_new") is not None, "New here shows by default")
     settings.show_new_camera = False
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets, _ = menus.layout(ctx)
     check(vr_ui.find(widgets, "camera_new") is None and vr_ui.find(widgets, "camera_preview") is not None,
           "VR Extras can hide New here (Pin preview stays)")
     settings.show_new_camera = True
     settings.tool = 'MEASURE'
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+
+    # Grid, navigation, view and tracking live in Settings (the gear, in every mode).
+    vr_ui.find(menus.layout(ctx)[0], "settings").on_press()
+    widgets, height = menus.layout(ctx)
+    ids = {w.id for w in widgets}
+    need = {"back", "grid_show", "grid_snap", "show_desktop", "passthrough", "show_timeline", "tracking",
+            "tracking_record", "nav_walk", "nav_fly", "nav_speed", "reveal_wrist", "reveal_look", "reveal_always"}
+    check(need <= ids, f"Settings has the rest (missing {sorted(need - ids)})")
+    check(height < 0.3, f"Settings: panel height {height:.3f} m")
     vr_ui.find(widgets, "nav_fly").on_press()
     check(settings.nav_mode == 'FLY', "Fly button")
     vr_ui.find(widgets, "grid_show").on_press()
@@ -561,6 +570,12 @@ def test_tools_page():
     vr_ui.find(widgets, "show_timeline").on_press()
     check(settings.show_timeline != shown, "Timeline button shows / hides the timeline strip")
     settings.show_timeline = shown
+    vr_ui.find(menus.layout(ctx)[0], "reveal_always").on_press()
+    check(settings.panel_reveal == 'ALWAYS', "Reveal: Always")
+    settings.panel_reveal = 'WRIST'
+    vr_ui.find(menus.layout(ctx)[0], "back").on_press()
+    check(menus.sheet() is None and vr_ui.find(menus.layout(ctx)[0], "tool_measure") is not None,
+          "Back returns to the Tools page")
     settings.grid_show = False
     settings.nav_mode = 'WALK'
 
