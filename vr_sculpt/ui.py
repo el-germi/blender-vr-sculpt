@@ -24,7 +24,6 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
         for mode, text in (('SCULPT', "Sculpt"), ('MODEL', "Model"), ('DRAW', "Draw"), ('PAINT', "Paint"),
                            ('POSE', "Pose"), ('TOOLS', "Tools")):
             row.operator("vrsculpt.set_mode", text=text, depress=settings.mode == mode).mode = mode
-        layout.prop(settings, "show_panel")
         col = layout.column()
         col.active = settings.enabled
         if settings.mode == 'DRAW':
@@ -85,7 +84,7 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
                 col.prop(settings, "pose_mirror")
                 col.prop(settings, "pose_show_bones")
             n = puppet.binding_count()
-            col.label(text=f"Puppet bindings: {n}" if n else "Puppet: bind bones on the hand panel")
+            col.label(text=f"Puppet bindings: {n}" if n else "Puppet: bind bones from the object pie (A)")
             col.prop(settings, "tip_offset")
             box = layout.box()
             box.scale_y = 0.8
@@ -142,7 +141,7 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
         col.prop(settings, "show_cursor")
         sub = col.column()
         sub.active = settings.show_cursor
-        sub.prop(settings, "show_brush_card")
+        sub.prop(settings, "show_status")
 
         box = layout.box()
         box.scale_y = 0.8
@@ -172,7 +171,6 @@ class VIEW3D_PT_vr_extras(bpy.types.Panel):
         settings = context.scene.vr_sculpt
 
         col = layout.column(heading="Animation")
-        col.prop(settings, "show_timeline")
         col.prop(settings, "show_paths")
         col.prop(settings, "onion")
         sub = col.column()
@@ -235,7 +233,7 @@ class VIEW3D_PT_vr_primitive(bpy.types.Panel):
         prim = context.active_object.vr_prim
         if prim.kind == 'OPERATOR':
             layout.label(text=primitives.label(prim.op_key))
-            layout.label(text="Edit its settings from the VR hand panel", icon='INFO')
+            layout.label(text="Edit its settings in VR: A > Shape", icon='INFO')
             return
         layout.label(text=prim.bl_rna.properties["kind"].enum_items[prim.kind].name)
         if prim.kind == 'CUBE':

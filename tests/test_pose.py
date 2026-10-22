@@ -19,7 +19,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import vr_sculpt  # noqa: E402
-from vr_sculpt import anim, menus, onion, paths, pose, puppet, vr_ui  # noqa: E402
+from vr_sculpt import anim, menus, onion, paths, pose, puppet, radial  # noqa: E402
 
 failures = []
 
@@ -276,28 +276,30 @@ def test_keys(rig):
 
 
 def test_rows(rig):
-    print("== hand panel")
+    print("== pies")
     ctx = bpy.context
     settings = ctx.scene.vr_sculpt
     settings.pose_tool = 'IK'
-    widgets, _h = vr_ui.layout(menus.rows(ctx))
-    ids = {w.id for w in widgets}
+    modes = menus.mode_level(ctx)
+    tool, other = menus.tool_level(ctx), menus.object_level(ctx)
+    ids = {i.id for level in (modes, tool, other) for i in radial.walk(level, depth=1)}
     need = {"mode_sculpt", "mode_pose", "mode_tools", "pose_rig", "pose_fk", "pose_ik", "pose_mirror", "pose_bones",
             "pose_chain", "pose_reset", "pose_reset_all", "bind_left", "bind_right", "bind_head", "puppet_rec"}
-    check(need <= ids, f"Pose rows (missing {sorted(need - ids)})")
-    tabs = [w for w in widgets if w.id.startswith("mode_")]
-    check(len(tabs) == 6 and len({round(w.rect[1], 5) for w in tabs}) == 2, "six mode tabs on two rows")
-    vr_ui.find(widgets, "pose_fk").on_press()
-    check(settings.pose_tool == 'FK', "FK button")
+    check(need <= ids, f"Pose pies (missing {sorted(need - ids)})")
+    check([i.id for i in modes.items][:6] == ["mode_" + m.lower() for m, _n in menus.MODES] and len(modes.items) == 8,
+          "the mode pie: six modes, View and Help, 8 slices")
+    radial.find(tool, "pose_fk").action()
+    check(settings.pose_tool == 'FK', "FK")
     pb = rig.pose.bones["Spine"]
     pb.rotation_quaternion = Quaternion((1, 0, 0), 0.3)
     pose.select_bone(rig, pb)
-    vr_ui.find(widgets, "pose_reset").on_press()
+    other = menus.object_level(ctx)
+    check(other.title == "Spine", "the object pie (A) is titled with the active bone")
+    radial.find(other, "pose_reset").action()
     check(pb.rotation_quaternion.angle < 1e-6, "Reset bone")
-    pose.choose_rig(ctx, "")
-    widgets, _h = vr_ui.layout(menus.rows(ctx))
-    check(rig.mode == 'OBJECT' and vr_ui.find(widgets, "pose_fk") is None and vr_ui.find(widgets, "bind_left"),
-          "rig picker: Objects (no rig) leaves Pose Mode, Bind stays")
+    radial.find(menus.tool_level(ctx), "rig_none").action()
+    check(rig.mode == 'OBJECT' and menus.find(ctx, "pose_fk") is None and menus.find(ctx, "bind_left"),
+          "Rig > Objects (no rig) leaves Pose Mode; FK / IK go, Bind stays")
 
 
 def test_objects(rig, body):

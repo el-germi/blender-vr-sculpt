@@ -1,8 +1,9 @@
-"""Background tests for Model mode: primitives, the hand panel, and trigger interactions.
+"""Background tests for Model mode: primitives, the pies, and trigger interactions.
 
 blender --background --factory-startup --python tests/test_model.py
 """
 
+import math
 import os
 import sys
 import time
@@ -15,7 +16,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import vr_sculpt  # noqa: E402
-from vr_sculpt import actions, interactions, menus, operators, primitives, vr_ui  # noqa: E402
+from vr_sculpt import actions, interactions, menus, operators, primitives, radial, vr_ui  # noqa: E402
 
 failures = []
 
@@ -191,7 +192,7 @@ def test_primitives():
 
 
 def test_layout():
-    print("== panel layout and hit testing")
+    print("== card layout and hit testing (the desktop screen's title bar and keyboard)")
     clicked = []
     rows = [[vr_ui.button("a", "A", lambda: clicked.append("a")), vr_ui.button("b", "B", lambda: None)],
             [vr_ui.label("hello")],
@@ -222,22 +223,25 @@ def test_layout():
 
 
 def test_menus():
-    print("== menus")
+    print("== pies")
     ctx = bpy.context
     settings = ctx.scene.vr_sculpt
     for mode in ('SCULPT', 'MODEL'):
         for engine in ('PYTHON', 'NATIVE'):
             settings.mode, settings.engine = mode, engine
-            widgets, _ = vr_ui.layout(menus.rows(ctx))
-            ids = {w.id for w in widgets}
-            check({"mode_sculpt", "mode_model"} <= ids, f"{mode}/{engine}: mode tabs present")
+            ids = {i.id for i in menus.mode_level(ctx).items}
+            check({"mode_sculpt", "mode_model"} <= ids, f"{mode}/{engine}: the mode pie has the modes")
+            check(menus.tool_level(ctx).items and menus.tool_level(ctx).center is not None,
+                  f"{mode}/{engine}: the tool pie has slices and a center dial")
     settings.mode = 'MODEL'
     cyl = primitives.create(ctx, 'CYLINDER', (0, 0, 0))
-    ids = {w.id for w in vr_ui.layout(menus.rows(ctx))[0]}
-    check({"radius_prim", "height", "segments", "duplicate", "delete"} <= ids, "cylinder settings shown when selected")
-    seg = vr_ui.find(vr_ui.layout(menus.rows(ctx))[0], "segments")
-    seg.on_change(8)
-    check(cyl.vr_prim.segments == 8 and len(cyl.data.vertices) == 16, "panel slider edits the primitive")
+    ids = {i.id for i in radial.walk(menus.object_level(ctx))}
+    check({"radius_prim", "height", "segments", "duplicate", "delete"} <= ids,
+          "the object pie has the cylinder's settings when it's selected")
+    seg = menus.find(ctx, "segments").dial
+    seg.begin()
+    seg.turn(-(seg.start - 8) * seg.step_angle)
+    check(cyl.vr_prim.segments == 8 and len(cyl.data.vertices) == 16, "twisting the Segments dial edits the primitive")
     primitives.delete(ctx, cyl)
     settings.mode = 'SCULPT'
     settings.engine = 'PYTHON'
@@ -252,7 +256,6 @@ def test_trigger():
     settings = bpy.context.scene.vr_sculpt
     settings.mode = 'MODEL'
     settings.tip_offset = 0.0
-    settings.show_panel = True
 
     settings.primitive = 'mesh.primitive_cube_add'
     n = len(bpy.data.objects)
@@ -292,38 +295,31 @@ def test_trigger():
     ss.aim_rot[1] = Quaternion()
     check(abs(obj.matrix_world.to_euler().z - 1.5708) < 1e-3, "grab follows controller rotation")
 
-    # Pointing at the panel and pressing "Sculpt" switches mode instead of creating.
-    matrix, widgets, height = interactions.panel_frame(ctx, ss)
-    tab = vr_ui.find(widgets, "mode_sculpt")
-    target = matrix @ Vector(((tab.rect[0] + tab.rect[2]) / 2, (tab.rect[1] + tab.rect[3]) / 2, 0.0))
-    normal = (matrix.to_3x3() @ Vector((0, 0, 1))).normalized()
-    origin, rot = aim_at(target, normal)
+    # A pie left open on Sculpt (Y, let go on a branch): the trigger chooses in it instead of creating.
+    hand = Vector((-0.3, -0.5, 1.0))
+    level = menus.mode_level(bpy.context)
+    pie = radial.Pie('MODE', 0, level, Matrix.Translation(hand), Quaternion())
+    pie.update(hand + Vector((0.0, 0.03, 0.0)), Quaternion())  # Sculpt is the top slice.
+    pie.sticky = True
+    radial.pie = pie
+    check(pie.hovered().id == "mode_sculpt", "pointing at Sculpt in the mode pie")
     n = len(bpy.data.objects)
-    op, r = press(ctx, ss, 1, [origin], rot)
-    check(type(op.handler).__name__ == "UIPress", "trigger aimed at the panel goes to the panel")
-    check(settings.mode == 'SCULPT' and len(bpy.data.objects) == n, "pressing 'Sculpt' switched mode, nothing created")
+    op, r = press(ctx, ss, 1, [(1.0, 0.0, 1.0), (1.2, 0.1, 1.1)])
+    check(type(op.handler).__name__ == "PieConfirm", "the trigger goes to the open pie")
+    check(settings.mode == 'SCULPT' and len(bpy.data.objects) == n, "it switched mode, nothing created")
+    check(radial.pie is None and r == {'FINISHED'}, "the pie closed; the choice is an undo step")
 
-    # Drag the radius slider from its left end to its right end.
-    matrix, widgets, height = interactions.panel_frame(ctx, ss)
-    s = vr_ui.find(widgets, "radius")
-    y = (s.rect[1] + s.rect[3]) / 2
-    left = matrix @ Vector((s.rect[0] + vr_ui.PAD, y, 0.0))
-    right = matrix @ Vector((s.rect[2] - vr_ui.PAD, y, 0.0))
-    o1, r1 = aim_at(left, normal)
-    ss.trigger = 1.0
-    ss.aim_loc[1], ss.aim_rot[1] = o1, r1
-    op = harness()
-    op.invoke(ctx, FakeEvent('XR_ACTION', 'PRESS', FakeXR(o1, r1)))
-    check(abs(settings.radius - 0.005) < 1e-3, f"pressing the slider's left end sets the minimum ({settings.radius:.4f})")
-    # Keep the controller in place but turn it to point at the right end.
-    ss.aim_rot[1] = (right - o1).to_track_quat('-Z', 'Y')
-    time.sleep(0.01)
-    op.modal(ctx, FakeEvent('TIMER'))
-    check(abs(settings.radius - 0.2) < 1e-3, f"dragging to the right end sets the maximum ({settings.radius:.4f})")
-    ss.trigger = 0.0
-    time.sleep(0.01)
-    r = op.modal(ctx, FakeEvent('TIMER'))
-    check(r == {'FINISHED'} and interactions.pressed_id is None, "slider release finishes and clears the press")
+    # The right knob from one end to the other: radius at its minimum, then its maximum.
+    settings.radius = 0.04
+    knob = radial.Knob(1, menus.knob_dial(bpy.context, 'R'), Quaternion())
+    knob.update(Quaternion((0, 0, 1), math.radians(720)))  # Two turns counter-clockwise, in steps.
+    for a in range(0, 721, 30):
+        knob.update(Quaternion((0, 0, 1), math.radians(a)))
+    check(abs(settings.radius - 0.003) < 1e-4, f"twisting left takes the radius to its minimum ({settings.radius:.4f})")
+    for a in range(720, -1441, -30):
+        knob.update(Quaternion((0, 0, 1), math.radians(a)))
+    check(abs(settings.radius - 0.3) < 1e-4, f"twisting right takes it to the maximum ({settings.radius:.4f})")
+    check(knob.release() == 'done' and knob.changed, "letting go keeps it")
 
     # In Sculpt mode, sculpting a primitive turns it into a plain mesh.
     settings.engine = 'PYTHON'

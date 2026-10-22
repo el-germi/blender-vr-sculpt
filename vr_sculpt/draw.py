@@ -1,5 +1,5 @@
-"""VR overlay: brush rings at the controller tips, brush card, hand panel, grid, measurements,
-plus (headset only) the desktop window screen and camera previews."""
+"""VR overlay: brush rings at the controller tips, the tool status badge, pies and knob readouts, grid,
+measurements, plus (headset only) the desktop window screen and camera previews."""
 
 import math
 
@@ -8,8 +8,8 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-from . import (camera, desktop, drawing, grid, hardsurface, hud, interactions, measure, onion, operators, paint,
-               paths, primitives, puppet, shading, snapping, strokes, symmetry, vr_ui)
+from . import (camera, desktop, drawing, grid, hardsurface, hud, interactions, measure, menus, onion, operators,
+               paint, paths, primitives, puppet, radial, radial_draw, shading, snapping, strokes, symmetry)
 from . import pose as pose_mode  # "pose" is a controller pose below
 
 COLORS = {
@@ -83,6 +83,7 @@ def draw_overlay(context, ss, xr=True):
         desktop.draw(context, ss, poses[1])
     if settings.show_cursor:
         _draw_cursors(context, ss, settings, xr)
+    _draw_radial(context, ss, settings, Vector(ss.viewer_pose_location), scale)
 
 
 def _draw_cursors(context, ss, settings, xr):
@@ -171,7 +172,9 @@ def _draw_cursors(context, ss, settings, xr):
                     active.matrix_world.translation
                 _draw_mirror_planes(shader, bits, center, scale)
         snapping.draw(shader, scale)
-        if settings.model_page == 'FINISH' or settings.model_mark != 'NONE':
+        pie = radial.pie
+        finish_open = pie is not None and not pie.closed and pie.level.title == "Finish"
+        if finish_open or settings.model_mark != 'NONE':
             tips = [operators.brush_tip(operators.controller_pose(ss.controller_aim_location_get(context, i),
                                                                   ss.controller_aim_rotation_get(context, i)), offset)
                     for i in range(2)]
@@ -182,31 +185,37 @@ def _draw_cursors(context, ss, settings, xr):
 
     viewer = Vector(ss.viewer_pose_location)
     camera_tool = tools and settings.tool == 'CAMERA'
-    if settings.show_brush_card:
-        # Above the right hand, facing the headset.
-        anchor = Vector(ss.controller_grip_location_get(context, 1)) + Vector((0.0, 0.0, 0.06 * scale))
-        content = hud.card_content(settings, sculpt_brush, COLORS)
-        hud.draw_card(anchor, viewer, scale, content)
+    if settings.show_status:
+        # The tool status: a badge above the right hand, facing the headset.
+        anchor = Vector(ss.controller_grip_location_get(context, 1)) + Vector((0.0, 0.0, 0.05 * scale))
+        icon, color, ring, title, recording = hud.status(context, settings, sculpt_brush, COLORS)
+        radial_draw.draw_status(hud.billboard(anchor, viewer, scale), icon, color, ring, title, recording,
+                                hud.title_alpha(), radial.current_toast())
     if xr and camera_tool and context.scene.camera is not None:
-        # A viewfinder above the card: the controller is the camera.
-        anchor = Vector(ss.controller_grip_location_get(context, 1)) + Vector((0.0, 0.0, 0.11 * scale))
+        # A viewfinder above the badge: the controller is the camera.
+        anchor = Vector(ss.controller_grip_location_get(context, 1)) + Vector((0.0, 0.0, 0.08 * scale))
+        camera.draw_preview(hud.billboard(anchor, viewer, scale), context.scene)
+    if xr and settings.camera_preview and not camera_tool and context.scene.camera is not None:
+        # Pinned above the left hand.
+        anchor = Vector(ss.controller_grip_location_get(context, 0)) + Vector((0.0, 0.0, 0.07 * scale))
         camera.draw_preview(hud.billboard(anchor, viewer, scale), context.scene)
 
-    if settings.show_panel:
-        right = operators.controller_pose(ss.controller_aim_location_get(context, 1),
-                                          ss.controller_aim_rotation_get(context, 1))
-        widgets, hit, hit_matrix, _h = interactions.panel_pointer(context, ss, right)
-        hover = vr_ui.hit_test(widgets, *hit) if hit else None
-        for matrix, panel_widgets, height, width in interactions.panel_frames(context, ss):
-            vr_ui.draw_panel(matrix, panel_widgets, height, hover.id if hover else None, interactions.pressed_id,
-                             width=width)
-        if hit is not None:
-            vr_ui.draw_ray(right.translation, hit_matrix @ Vector((hit[0], hit[1], 0.0)), True)
-    if xr and settings.camera_preview and not camera_tool and context.scene.camera is not None:
-        # Pinned to the left of the hand panel.
-        matrix, _widgets, _height = interactions.panel_frame(context, ss)
-        width = camera.PREVIEW_WIDTH
-        camera.draw_preview(matrix, context.scene, width, x=-vr_ui.WIDTH / 2 - 0.006 - width)
+
+def _draw_radial(context, ss, settings, viewer, scale):
+    """The open pie, knob readouts by the hands, and the controls hints."""
+    radial_draw.draw_pie(radial.pie)
+    color = menus.MODE_COLORS.get(settings.mode, (1.0, 1.0, 1.0))
+    for idx, knob in list(radial.knobs.items()):
+        anchor = Vector(ss.controller_aim_location_get(context, idx)) + Vector((0.0, 0.0, 0.045 * scale))
+        radial_draw.draw_knob(knob, hud.billboard(anchor, viewer, scale), color)
+    alpha = radial.hints_alpha()
+    if alpha > 0.0:
+        for idx, rows in ((0, radial_draw.LEFT_HINTS), (1, radial_draw.RIGHT_HINTS)):
+            anchor = Vector(ss.controller_grip_location_get(context, idx))
+            m = hud.billboard(anchor, viewer, scale)
+            # Beside the hand, on the outside.
+            m = m @ Matrix.Translation(((-0.03 if idx == 0 else 0.03), 0.02, 0.0))
+            radial_draw.draw_hints(m, rows, alpha, right_aligned=idx == 0)
 
 
 def _draw_paint_cursors(context, ss, settings):

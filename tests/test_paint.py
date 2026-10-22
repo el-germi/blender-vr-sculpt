@@ -17,7 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import vr_sculpt  # noqa: E402
-from vr_sculpt import actions, menus, operators, paint, vr_ui  # noqa: E402
+from vr_sculpt import actions, menus, operators, paint, radial  # noqa: E402
 
 failures = []
 
@@ -187,53 +187,63 @@ def test_undo(obj, img):
 
 
 def test_panel(obj):
-    print("== panel and buttons")
+    print("== pies and taps")
     ctx = bpy.context
     settings = ctx.scene.vr_sculpt
     for o in ctx.view_layer.objects:
         o.select_set(False)
     ctx.view_layer.objects.active = obj
     settings.mode = 'PAINT'
-    widgets, height = vr_ui.layout(menus.rows(ctx))
-    ids = {w.id for w in widgets}
+    tool, other = menus.tool_level(ctx), menus.object_level(ctx)
+    ids = {i.id for level in (tool, other, menus.mode_level(ctx)) for i in radial.walk(level)}
     need = {"mode_paint", "reach_contact", "reach_spray", "paint_pick", "paint_hue", "paint_sat", "paint_val",
-            "paint_radius", "paint_undo", "paint_swap"}
-    check(need <= ids, f"ready mesh: paint page (missing {sorted(need - ids)})")
-    check(height < 0.42, f"panel height {height:.3f} m")
-    check(sum(1 for w in widgets if w.id.startswith("pcolor_")) == 8, "8 color swatches")
-    vr_ui.find(widgets, "pcolor_YELLOW").on_press()
+            "paint_radius", "paint_undo", "paint_swap", "pbrush_Paint Hard"}
+    if paint.brush(ctx) is not None:  # Strength is the active texture paint brush's.
+        need.add("paint_strength")
+    check(need <= ids, f"ready mesh: paint pies (missing {sorted(need - ids)})")
+    check(len(tool.items) <= radial.MAX_SLICES and len(other.items) <= radial.MAX_SLICES, "at most 8 slices each")
+    colors = radial.find(tool, "paint_color").children()
+    check(sum(1 for i in colors.items if i.id.startswith("pcolor_")) == 8, "8 color swatches in B > Color")
+    check(colors.center is not None and colors.center.id == "paint_hue", "its center dial is the hue")
+    radial.find(colors, "pcolor_YELLOW").action()
     check(close(paint.get_color(ctx), next(rgb for i, _n, rgb in vr_sculpt.strokes.PALETTE if i == 'YELLOW')),
           "a swatch sets the color")
-    vr_ui.find(widgets, "reach_spray").on_press()
-    check(settings.paint_reach == 'SPRAY', "Spray button")
+    hue = colors.center.dial
+    hue.begin()
+    hue.turn(math.radians(60))
+    check(abs(paint.get_hsv(ctx)[0] - (hue.start + 1.0 / 3.0)) < 1e-3, "twisting in the color pie turns the hue")
+    menus.find(ctx, "reach_spray").action()
+    check(settings.paint_reach == 'SPRAY', "Spray")
     settings.paint_reach = 'CONTACT'
-    vr_ui.find(widgets, "paint_pick").on_press()
+    menus.find(ctx, "paint_pick").action()
     check(settings.paint_tool == 'PICK', "Pick color arms the eyedropper")
     settings.paint_tool = 'PAINT'
 
     bare = bpy.data.objects.new("Bare", bpy.data.meshes.new("Bare"))
     ctx.scene.collection.objects.link(bare)
     ctx.view_layer.objects.active = bare
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    check(vr_ui.find(widgets, "paint_setup") is not None and vr_ui.find(widgets, "paint_size_2048") is not None,
-          "a mesh without UVs/image offers Set up for painting")
+    setup = menus.tool_level(ctx)
+    check(radial.find(setup, "paint_size_2048") is not None and "needs UVs" in setup.empty,
+          "a mesh without UVs/image offers Set up 1K / 2K / 4K")
     check(paint.pick(ctx, settings, False, Matrix(), Matrix(), 1.0) is None, "and the trigger does nothing on it")
     bpy.data.objects.remove(bare)
     ctx.view_layer.objects.active = obj
 
-    # Right stick click cycles the paint radius in Paint mode; Y goes on to Tools.
-    op = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_radius.execute, "left_hand": False})()
+    # A right stick click (tap) steps the paint radius in Paint mode; the knobs turn radius and strength.
     settings.paint_radius, settings.radius = 0.02, 0.04
-    op.execute(ctx)
+    menus.knob_tap(ctx, 'R')
     check(abs(settings.paint_radius - 0.04) < 1e-6 and abs(settings.radius - 0.04) < 1e-6,
           "stick click: next paint radius, sculpt radius untouched")
-    ob = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_brush.execute, "left_hand": True,
-                        "report": lambda *a: None})()
-    ob.execute(ctx)
-    check(settings.mode == 'POSE', "Y after Paint goes to Pose")
-    settings.mode = 'DRAW'
-    ob.execute(ctx)
-    check(settings.mode == 'PAINT', "and Paint comes after Draw")
+    amount = "Strength" if paint.brush(ctx) is not None else "Frame"
+    check(menus.knob_dial(ctx, 'R').label == "Radius" and menus.knob_dial(ctx, 'L').label == amount,
+          f"R knob: paint radius, L knob: {amount}")
+    # A Y tap goes back to the previous mode.
+    menus.set_mode(ctx, 'DRAW')
+    menus.set_mode(ctx, 'PAINT')
+    menus.tap(ctx, 'MODE')
+    check(settings.mode == 'DRAW', "a Y tap goes back to the previous mode")
+    menus.tap(ctx, 'MODE')
+    check(settings.mode == 'PAINT', "and again comes back")
 
     # The tip touching the mesh keeps the trigger from a desktop screen behind it.
     settings.paint_reach = 'CONTACT'

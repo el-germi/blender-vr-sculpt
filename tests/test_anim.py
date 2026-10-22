@@ -18,7 +18,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import vr_sculpt  # noqa: E402
-from vr_sculpt import anim, interactions, menus, onion, paths, primitives, vr_ui  # noqa: E402
+from vr_sculpt import anim, interactions, menus, onion, paths, primitives, radial  # noqa: E402
 
 failures = []
 
@@ -120,41 +120,30 @@ def test_keys():
     return cube
 
 
-def test_timeline_rows(cube):
-    print("== timeline rows")
+def test_timeline_pie(cube):
+    print("== time pie (X)")
     ctx = bpy.context
-    settings = ctx.scene.vr_sculpt
-    settings.show_timeline = True
     menus.set_mode(ctx, 'MODEL')
     select_only(ctx, cube)
-    class SS:
-        viewer_scale = 1.0
-        viewer_pose_location = Vector((0.0, -0.6, 1.5))
-
-        def controller_grip_location_get(self, context, i):
-            return Vector((-0.2, -0.3, 1.1))
-    frames = interactions.panel_frames(ctx, SS())
-    check(len(frames) == 2 and frames[1][3] > vr_ui.WIDTH, "the timeline is a wider strip beside the hand panel")
-    main_height = frames[0][2]
-    check((frames[1][0].translation - frames[0][0].translation).length > vr_ui.WIDTH / 2,
-          "next to it, not on top of it")
-    widgets, height = frames[1][1], frames[1][2]
-    ids = {w.id for w in widgets}
+    level = menus.time_level(ctx)
+    ids = {i.id for i in radial.walk(level)}
     need = {"frame", "key_prev", "frame_prev", "play", "frame_next", "key_next", "key_insert", "key_delete",
-            "autokey", "interp", "range_start", "range_end", "show_paths", "onion"}
-    check(need <= ids, f"timeline rows (missing {sorted(need - ids)})")
-    frame = vr_ui.find(widgets, "frame")
-    check(len(frame.ticks) == 2 and all(0 <= t <= 1 for t in frame.ticks), f"key ticks on the scrubber ({frame.ticks})")
-    frame.on_change(40)
-    check(ctx.scene.frame_current == 40, "scrubbing sets the frame")
-    settings.show_timeline = False
-    frames2 = interactions.panel_frames(ctx, SS())
-    check(len(frames2) == 1 and abs(frames2[0][2] - main_height) < 1e-9, "Timeline off hides it (panel unchanged)")
-    settings.show_timeline = True
+            "autokey", "interp", "range_start", "range_end", "show_paths", "onion", "undo", "redo"}
+    check(need <= ids, f"time pie (missing {sorted(need - ids)})")
+    check(len(level.items) <= radial.MAX_SLICES, "at most 8 slices")
+    frame = level.center.dial
+    ticks = frame.ticks()
+    check(len(ticks) == 2 and all(0 <= t <= 1 for t in ticks), f"key ticks on the frame dial ({ticks})")
+    frame.set(40)
+    check(ctx.scene.frame_current == 40, "the frame dial sets the frame")
+    frame.begin()
+    frame.turn(math.radians(25))
+    check(ctx.scene.frame_current == 45, f"twisting 25 degrees moves 5 frames ({ctx.scene.frame_current})")
     tool = ctx.scene.tool_settings
     tool.use_keyframe_insert_auto = False
-    vr_ui.find(widgets, "autokey").on_press()
-    check(tool.use_keyframe_insert_auto, "Auto turns on Blender's Auto Keying")
+    radial.find(level, "autokey").action()
+    check(tool.use_keyframe_insert_auto, "Auto key turns on Blender's Auto Keying")
+    check(menus.find(ctx, "autokey").active, "and the pie shows it on")
 
 
 def test_autokey(cube):
@@ -254,7 +243,7 @@ def main():
     vr_sculpt.register()
     try:
         cube = test_keys()
-        test_timeline_rows(cube)
+        test_timeline_pie(cube)
         test_autokey(cube)
         test_key_drag(cube)
         test_onion()

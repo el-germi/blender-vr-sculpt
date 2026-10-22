@@ -18,7 +18,7 @@ sys.path.insert(0, ROOT)
 
 import vr_sculpt  # noqa: E402
 from vr_sculpt import (actions, brushes, camera, desktop, grid, interactions, measure, menus,  # noqa: E402
-                       navigation, operators, primitives, symmetry, tracking, vr_ui)
+                       navigation, operators, primitives, radial, symmetry, tracking, vr_ui)
 
 failures = []
 
@@ -454,7 +454,6 @@ def test_desktop_input():
                 return getattr(bpy.context, name)
         c = Ctx()
         c.window_manager = type("WM", (), {"xr_session_state": ss, "windows": bpy.context.window_manager.windows})()
-        settings.show_panel = False
         pose = ss.nav() @ ss.hands[1]
         handler = operators._pick_handler(c, settings, actions.HANDS[1], pose, pose, 1.0, 1.0)
         check(isinstance(handler, desktop.MouseDrag) and ("button", "LEFT", True) in fake.log,
@@ -472,11 +471,13 @@ def test_desktop_input():
         handler.finish(ctx)
 
         fake.log.clear()
-        op = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_brush.execute, "left_hand": False,
-                            "report": lambda *a: None})()
-        op.execute(c)
-        check(("button", "RIGHT", True) in fake.log and ("button", "RIGHT", False) in fake.log,
-              "B while pointing: right click")
+        pie_op = type("H", (), {k: v for k, v in operators.VRSCULPT_OT_pie.__dict__.items()
+                                if callable(v) and not k.startswith("__")})()
+        xr = type("XR", (), {"user_path": actions.HANDS[1], "action": actions.ACTION_PIE, "float_threshold": 0.3,
+                             "controller_location": Vector(), "controller_rotation": Quaternion()})()
+        r = pie_op.invoke(c, type("Event", (), {"xr": xr})())
+        check(r == {'FINISHED'} and ("button", "RIGHT", True) in fake.log and ("button", "RIGHT", False) in fake.log
+              and radial.pie is None, "B while pointing: right click (no pie)")
         desktop.scroll(ctx, ss, -1)
         check(fake.log[-1] == ("wheel", -1), "the stick scrolls the wheel")
 
@@ -523,66 +524,58 @@ def test_desktop_input():
         desktop.state["pose"] = None
         desktop.state["notice"] = ("", 0.0)
         settings.show_desktop = False
-        settings.show_panel = True
 
 
-def test_tools_page():
-    print("== Tools page and buttons")
+def test_tools_pies():
+    print("== Tools pies and taps")
     ctx = bpy.context
     settings = ctx.scene.vr_sculpt
+    menus.set_mode(ctx, 'SCULPT')
     menus.set_mode(ctx, 'TOOLS')
     for tool in ('MEASURE', 'CAMERA'):
         settings.tool = tool
-        widgets, height = vr_ui.layout(menus.rows(ctx))
-        ids = {w.id for w in widgets}
+        levels = (menus.tool_level(ctx), menus.object_level(ctx), menus.mode_level(ctx))
+        ids = {i.id for level in levels for i in radial.walk(level)}
         need = {"mode_tools", "tool_measure", "tool_camera", "grid_show", "grid_snap", "show_desktop", "passthrough",
                 "tracking", "nav_walk", "nav_fly", "nav_speed"}
-        check(need <= ids, f"{tool}: page has its buttons (missing {sorted(need - ids)})")
-        check(height < 0.4, f"{tool}: panel height {height:.3f} m")
+        check(need <= ids, f"{tool}: the pies have its settings (missing {sorted(need - ids)})")
+        check(all(len(level.items) <= radial.MAX_SLICES for level in levels), f"{tool}: at most 8 slices per pie")
     settings.tool = 'CAMERA'
-    check(vr_ui.find(vr_ui.layout(menus.rows(ctx))[0], "camera_new") is not None, "New here shows by default")
+    check(menus.find(ctx, "camera_new") is not None, "New here shows by default")
     settings.show_new_camera = False
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    check(vr_ui.find(widgets, "camera_new") is None and vr_ui.find(widgets, "camera_preview") is not None,
+    check(menus.find(ctx, "camera_new") is None and menus.find(ctx, "camera_preview") is not None,
           "VR Extras can hide New here (Pin preview stays)")
     settings.show_new_camera = True
     settings.tool = 'MEASURE'
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    vr_ui.find(widgets, "nav_fly").on_press()
-    check(settings.nav_mode == 'FLY', "Fly button")
-    vr_ui.find(widgets, "grid_show").on_press()
-    check(settings.grid_show, "Grid button")
+    view = radial.find(menus.mode_level(ctx), "view").children()
+    radial.find(view, "nav_fly").action()
+    check(settings.nav_mode == 'FLY', "Y > View > Fly")
+    menus.find(ctx, "grid_show").action()
+    check(settings.grid_show, "Grid")
     xs = ctx.window_manager.xr_session_settings
     before = xs.show_passthrough
-    vr_ui.find(widgets, "passthrough").on_press()
-    check(xs.show_passthrough != before, "Passthrough button toggles the session setting")
+    radial.find(view, "passthrough").action()
+    check(xs.show_passthrough != before, "Passthrough toggles the session setting")
     xs.show_passthrough = before
-    shown = settings.show_timeline
-    vr_ui.find(widgets, "show_timeline").on_press()
-    check(settings.show_timeline != shown, "Timeline button shows / hides the timeline strip")
-    settings.show_timeline = shown
+    check(menus.time_level(ctx).center.id == "frame", "the timeline lives in the X pie (its center scrubs)")
     settings.grid_show = False
     settings.nav_mode = 'WALK'
 
-    # B in Tools mode: removes the last measurement / switches camera.
+    # A B tap in Tools mode: removes the last measurement / switches camera.
     measure.add(ctx.scene, (0, 0, 0), (1, 0, 0))
     measure.add(ctx.scene, (0, 0, 0), (2, 0, 0))
-    op = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_brush.execute, "left_hand": False,
-                        "report": lambda *a: None})()
-    op.execute(ctx)
-    check(len(measure.stored(ctx.scene)) == 1, "B removes the last measurement")
+    menus.tap(ctx, 'TOOL')
+    check(len(measure.stored(ctx.scene)) == 1, "a B tap removes the last measurement")
     settings.tool = 'CAMERA'
     cam = ctx.scene.camera
-    op.execute(ctx)
-    check(ctx.scene.camera != cam, "B switches to the next camera")
-    op.left_hand = True
-    op.execute(ctx)
-    check(settings.mode == 'SCULPT', "Y after Tools goes back to Sculpt")
+    menus.tap(ctx, 'TOOL')
+    check(ctx.scene.camera != cam, "a B tap switches to the next camera")
+    menus.tap(ctx, 'MODE')
+    check(settings.mode == 'SCULPT', "a Y tap goes back to the previous mode (Sculpt)")
     measure.clear(ctx.scene)
 
     # The trigger picks the tool's handler.
     menus.set_mode(ctx, 'TOOLS')
-    settings.show_panel = False
     pose = Matrix.Translation((0, 0, 1))
     settings.tool = 'MEASURE'
     hnd = operators._pick_handler(ctx, settings, actions.HANDS[1], pose, pose, 1.0, 1.0)
@@ -591,14 +584,13 @@ def test_tools_page():
     settings.tool = 'CAMERA'
     hnd = operators._pick_handler(ctx, settings, actions.HANDS[1], pose, pose, 1.0, 1.0)
     check(isinstance(hnd, camera.AimCamera), "Camera tool: trigger aims the camera")
-    settings.show_panel = True
 
 
 def main():
     vr_sculpt.register()
     try:
         for t in (test_grid, test_symmetry, test_measure, test_camera, test_navigation, test_tracking,
-                  test_desktop_screen, test_desktop_input, test_tools_page):
+                  test_desktop_screen, test_desktop_input, test_tools_pies):
             try:
                 t()
             except Exception:

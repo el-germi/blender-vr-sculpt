@@ -92,19 +92,15 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     show_measures: BoolProperty(name="Show Measurements", description="Show tape measurements in VR", default=True)
     show_new_camera: BoolProperty(
         name="New Camera Button",
-        description="Show the \"New here\" button on the hand panel's Camera tool, which adds a camera at your right hand",
+        description="Show \"New here\" in the Camera tool's object pie (A), which adds a camera at your right hand",
         default=True,
     )
     camera_preview: BoolProperty(
         name="Camera Preview",
-        description="Show what the scene camera sees next to the hand panel, in every mode",
+        description="Show what the scene camera sees above the left hand, in every mode",
         default=False,
     )
     # Animation.
-    show_timeline: BoolProperty(
-        name="Timeline", description="Timeline, keying and playback controls at the bottom of the hand panel",
-        default=True,
-    )
     show_paths: BoolProperty(
         name="Motion Paths",
         description="Show the selected objects' motion paths in VR; grab a key marker to move that key",
@@ -235,17 +231,6 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         ),
         default='OBJECT',
     )
-    model_page: EnumProperty(
-        name="Page",
-        description="Which settings of the selected object the hand panel shows",
-        items=(
-            ('SHAPE', "Shape", "Primitive settings, mirror and solidify"),
-            ('BOOLEAN', "Cuts", "Cutters and booleans"),
-            ('FINISH', "Finish", "Bevel and smooth shading"),
-            ('ARRAY', "Array", "Linear and radial arrays"),
-        ),
-        default='SHAPE',
-    )
     model_mark: EnumProperty(
         name="Mark Edges",
         description="While on, the trigger marks the edges it touches on the selected object instead of grabbing "
@@ -270,7 +255,6 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         default="mesh.primitive_cube_add",
         description="Add > Mesh entry the trigger creates in Model mode (see catalog.py)",
     )
-    show_panel: BoolProperty(name="Show Hand Panel", description="Menu panel above the left controller", default=True)
     engine: EnumProperty(
         name="Engine",
         items=(
@@ -314,9 +298,10 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         default=0.04, min=0.0, soft_max=0.5, subtype='DISTANCE', unit='LENGTH',
     )
     show_cursor: BoolProperty(name="Show Brush Cursor", default=True)
-    show_brush_card: BoolProperty(
-        name="Show Brush Card",
-        description="Show the brush icon and name above the right controller, plus a short description after switching",
+    show_status: BoolProperty(
+        name="Show Tool Status",
+        description="A small badge above the right controller with the tool's icon, in the tool's and the mode's "
+                    "colors; the tool's name shows beside it for a moment after it changes",
         default=True,
     )
 

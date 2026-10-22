@@ -1,13 +1,12 @@
 import time
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty
+from bpy.props import EnumProperty
 from mathutils import Matrix, Quaternion, Vector
 
-from . import (actions, brushes, camera, catalog, desktop, drawing, hardsurface, interactions, measure, menus,
-               native, paint, paths, primitives, shading, snapping, strokes, symmetry, vr_ui)
+from . import (actions, brushes, camera, desktop, drawing, generic, hardsurface, hud, interactions, measure, menus,
+               native, navigation, paint, paths, primitives, radial, shading, snapping, strokes, symmetry)
 from . import pose as pose_mode  # "pose" is the controller pose in the handlers below
-from .props import BRUSH_ITEMS, RADIUS_STEPS
 
 # Shared geometry cache, so both hands sculpt the same arrays.
 _state = None
@@ -106,13 +105,11 @@ def _tip_engaged(context, settings, tip, scale):
 
 
 def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
-    """Panel press, grab, create or draw for this trigger press; None means sculpt (or nothing)."""
+    """Pie choice, grab, create or draw for this trigger press; None means sculpt (or nothing)."""
     ss = context.window_manager.xr_session_state
-    if settings.show_panel and hand == actions.HANDS[1] and ss is not None:
-        widgets, hit, _m, _h = interactions.panel_pointer(context, ss, pose)
-        if hit is not None:
-            # A press anywhere on the panel belongs to the panel, even between widgets.
-            return interactions.UIPress(context, ss, vr_ui.hit_test(widgets, *hit), hit)
+    if radial.pie is not None and not radial.pie.closed:
+        # While a pie is open, the trigger chooses in it (a held pie, or one left open on a branch).
+        return interactions.PieConfirm(context, radial.pie)
     if settings.show_desktop and ss is not None and not _tip_engaged(context, settings, tip_pose.translation, scale):
         handler = desktop.pick(context, ss, hand, pose)
         if handler is not None:
@@ -146,7 +143,7 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
 
 
 class VRSCULPT_OT_stroke(bpy.types.Operator):
-    """Sculpt, model or use the hand panel with a VR controller while the trigger is held"""
+    """Sculpt, model, draw, paint, pose or measure with a VR controller while the trigger is held"""
     bl_idname = "vrsculpt.stroke"
     bl_label = "VR Trigger"
     bl_options = {'UNDO', 'INTERNAL'}
@@ -342,9 +339,6 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         return {'FINISHED'} if self.times else {'CANCELLED'}
 
 
-MODE_CYCLE = ('SCULPT', 'MODEL', 'DRAW', 'PAINT', 'POSE', 'TOOLS')
-
-
 def undo_last_stroke(context):
     """Quick undo for Draw mode: delete the latest stroke or note, as one regular undo step."""
     what = strokes.undo_last(context)
@@ -356,87 +350,242 @@ def undo_last_stroke(context):
     return what
 
 
-class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
-    """Right hand (B): next brush (Sculpt), next primitive (Model), undo last stroke (Draw),
-    FK / IK (Pose), remove the last measurement or switch camera (Tools). Left hand (Y): next mode"""
-    bl_idname = "vrsculpt.cycle_brush"
-    bl_label = "VR Next Brush / Switch Mode"
-    bl_options = {'INTERNAL'}
+PIE_KINDS = {(actions.ACTION_PIE, 0): 'MODE', (actions.ACTION_PIE, 1): 'TOOL',
+             (actions.ACTION_PIE_ALT, 0): 'TIME', (actions.ACTION_PIE_ALT, 1): 'OBJECT'}
 
-    left_hand: BoolProperty(name="Left Hand", options={'SKIP_SAVE'})
+# (amplitude, seconds) per pie / knob event.
+HAPTICS = {'hover': (0.22, 0.012), 'open': (0.45, 0.025), 'back': (0.3, 0.015), 'grab': (0.5, 0.02),
+           'tick': (0.12, 0.006), 'close': (0.2, 0.01), 'confirm': (0.65, 0.035), 'tap': (0.5, 0.03)}
 
-    def execute(self, context):
-        settings = context.scene.vr_sculpt
+
+def pulse(context, hand, events):
+    for e in events:
+        amplitude, duration = HAPTICS.get(e, (0.2, 0.01))
+        haptic(context, hand, amplitude, duration)
+
+
+def _button_value(context, ss, action, hand):
+    value = ss.action_state_get(context, actions.ACTIONMAP, action, hand)
+    return value if isinstance(value, float) else value[0]
+
+
+class VRSCULPT_OT_pie(bpy.types.Operator):
+    """Hold a face button for a pie menu at that hand: Y modes, B the mode's tools, A the selected object,
+    X time. Move the hand toward a slice (or flick the stick) and let go. A short tap does a quick action"""
+    bl_idname = "vrsculpt.pie"
+    bl_label = "VR Pie Menu"
+    bl_options = {'UNDO', 'INTERNAL'}
+
+    @classmethod
+    def poll(cls, context):
+        return session_running(context) and context.scene.vr_sculpt.enabled
+
+    def invoke(self, context, event):
+        xr = event.xr
+        if xr is None:
+            return {'CANCELLED'}
+        self.hand = xr.user_path
+        self.hand_idx = actions.hand_index(self.hand)
+        self.action = xr.action
+        self.threshold = xr.float_threshold
+        self.timer = None
+        kind = PIE_KINDS.get((xr.action, self.hand_idx), 'TOOL')
         ss = context.window_manager.xr_session_state
-        if not self.left_hand and ss is not None and desktop.pointing_at_content(context, ss):
+        current = radial.pie
+        if current is not None and not current.closed:
+            if not current.sticky:
+                return {'CANCELLED'}  # Another pie is being held.
+            if current.kind == kind and current.hand == self.hand_idx:
+                # The same button again: choose what it points at (or close it).
+                self.pie = current
+                return self._outcome(context, current, current.confirm(), second_press=True)
+            current.closed = True
+            radial.close()
+        if kind == 'TOOL' and ss is not None and desktop.pointing_at_content(context, ss):
             desktop.right_click(context, ss)
             return {'FINISHED'}
-        if self.left_hand:
-            i = MODE_CYCLE.index(settings.mode) if settings.mode in MODE_CYCLE else -1
-            menus.set_mode(context, MODE_CYCLE[(i + 1) % len(MODE_CYCLE)])
-        elif settings.mode == 'DRAW':
-            undo_last_stroke(context)
-        elif settings.mode == 'PAINT':
-            paint.undo_last(context)
-        elif settings.mode == 'POSE':
-            settings.pose_tool = 'IK' if settings.pose_tool == 'FK' else 'FK'
-        elif settings.mode == 'TOOLS':
-            if settings.tool == 'CAMERA':
-                camera.next_camera(context)
-            else:
-                measure.undo_last(context.scene)
-        elif settings.mode == 'MODEL':
-            keys = [e.key for e in catalog.entries()]
-            if keys:
-                i = keys.index(settings.primitive) if settings.primitive in keys else -1
-                settings.primitive = keys[(i + 1) % len(keys)]
-        elif settings.engine == 'NATIVE':
+        pose = controller_pose(xr.controller_location, xr.controller_rotation)
+        viewer = Vector(ss.viewer_pose_location) if ss is not None else pose.translation + Vector((0.0, -0.5, 0.0))
+        level = menus.root_level(context, kind)
+        self.pie = radial.Pie(kind, self.hand_idx, level, hud.billboard(pose.translation, viewer, viewer_scale(context)),
+                              pose.to_quaternion())
+        radial.pie = self.pie
+        self.generation = data_generation
+        self.last = time.perf_counter()
+        haptic(context, self.hand, 0.3, 0.015)
+        self.timer = context.window_manager.event_timer_add(1.0 / 90.0, window=context.window)
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def modal(self, context, event):
+        try:
+            return self._modal(context, event)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self._stop(context)
+            self.report({'ERROR'}, "VR Sculpt pie failed, see the system console")
+            return {'CANCELLED'}
+
+    def _modal(self, context, event):
+        pie = self.pie
+        if self.generation != data_generation:
+            pie.closed = True  # Undo or redo while it was open: its items point at freed data.
+        if pie.closed:
+            return self._stop(context)
+        if event.type == 'XR_ACTION':
+            xr = event.xr
+            if xr.action != self.action or xr.user_path != self.hand:
+                return {'PASS_THROUGH'}
+            if event.value == 'RELEASE':
+                return self._release(context)
+            self._update(context, xr.controller_location, xr.controller_rotation)
+            return {'RUNNING_MODAL'}
+        if event.type == 'TIMER':
+            ss = context.window_manager.xr_session_state
+            if ss is None or not session_running(context):
+                pie.closed = True
+                return self._stop(context)
+            if not pie.sticky and _button_value(context, ss, self.action, self.hand) <= self.threshold:
+                return self._release(context)
+            if time.perf_counter() - self.last > 1.0 / 120.0:
+                self._update(context, ss.controller_aim_location_get(context, self.hand_idx),
+                             ss.controller_aim_rotation_get(context, self.hand_idx))
+        return {'PASS_THROUGH'}
+
+    def _update(self, context, loc, rot):
+        now = time.perf_counter()
+        dt = min(now - self.last, 0.05)
+        self.last = now
+        ss = context.window_manager.xr_session_state
+        stick = navigation.stick(context, ss, self.hand_idx) if ss is not None else (0.0, 0.0)
+        pulse(context, self.hand, self.pie.update(Vector(loc), Quaternion(rot), stick, dt=dt))
+
+    def _release(self, context):
+        return self._outcome(context, self.pie, self.pie.release())
+
+    def _outcome(self, context, pie, outcome, second_press=False):
+        """After a release (or a second press of a pie left open): run the result. A pie left open on a
+        branch keeps running (in the operator that opened it)."""
+        if outcome == 'sticky':
+            haptic(context, self.hand, 0.45, 0.025)
+            return {'CANCELLED'} if second_press else {'RUNNING_MODAL'}
+        result = {'CANCELLED'}
+        if outcome == 'tap':
             try:
-                native.cycle_brush(context)
+                message = menus.tap(context, pie.kind)
             except (RuntimeError, TypeError) as ex:
-                self.report({'WARNING'}, f"Could not switch brush: {ex}")
+                message = str(ex)
+            if message:
+                radial.toast(message, menus.MODE_COLORS.get(context.scene.vr_sculpt.mode, (1.0, 1.0, 1.0)))
+            pulse(context, self.hand, ['tap'])
+            # Repeating an object action is an undo step; mode switches and play aren't (as before).
+            if pie.kind == 'OBJECT' and radial.last_action is not None:
+                result = {'FINISHED'}
+        elif outcome == 'done':
+            radial.remember(pie.ran)
+            generic.flush_pending(context)
+            pulse(context, self.hand, ['confirm'])
+            if pie.ran is not None:
+                radial.toast(pie.ran.label, pie.level.color or (1.0, 1.0, 1.0))
+            if pie.changed and (pie.ran is None or pie.ran.push):
+                context.view_layer.update()
+                result = {'FINISHED'}
+        if second_press:
+            radial.close()
         else:
-            ids = [b[0] for b in BRUSH_ITEMS]
-            settings.brush = ids[(ids.index(settings.brush) + 1) % len(ids)]
-        return {'FINISHED'}
+            self._stop(context)
+        return result
+
+    def _stop(self, context):
+        if self.timer is not None:
+            context.window_manager.event_timer_remove(self.timer)
+            self.timer = None
+        if radial.pie is self.pie:
+            radial.close()
+        for area in context.screen.areas if context.screen else ():
+            area.tag_redraw()
+        return {'CANCELLED'}
+
+
+class VRSCULPT_OT_knob(bpy.types.Operator):
+    """Hold a stick click and twist that hand like a knob: right = the mode's size (radius, width, ...),
+    left = its amount (strength, smoothing, ...). A click without a twist steps the radius (right) or
+    shows the controls (left)"""
+    bl_idname = "vrsculpt.knob"
+    bl_label = "VR Knob"
+    bl_options = {'UNDO', 'INTERNAL'}
+
+    @classmethod
+    def poll(cls, context):
+        return session_running(context) and context.scene.vr_sculpt.enabled
 
     def invoke(self, context, event):
-        if event.xr:
-            self.left_hand = event.xr.user_path == actions.HANDS[0]
-        self.execute(context)
-        if event.xr:
-            haptic(context, event.xr.user_path, 0.8 if self.left_hand else 0.6, 0.08 if self.left_hand else 0.05)
-        return {'FINISHED'}
+        xr = event.xr
+        if xr is None:
+            return {'CANCELLED'}
+        self.hand = xr.user_path
+        self.hand_idx = actions.hand_index(self.hand)
+        self.action = xr.action
+        self.threshold = xr.float_threshold
+        self.side = 'L' if self.hand_idx == 0 else 'R'
+        self.generation = data_generation
+        self.knob = radial.Knob(self.hand_idx, menus.knob_dial(context, self.side), Quaternion(xr.controller_rotation))
+        radial.knobs[self.hand_idx] = self.knob
+        self.timer = context.window_manager.event_timer_add(1.0 / 90.0, window=context.window)
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
 
+    def modal(self, context, event):
+        try:
+            return self._modal(context, event)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            return self._stop(context)
 
-class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
-    """Right stick click: next brush radius (Pose: IK chain length). Left stick click: show or hide the hand panel"""
-    bl_idname = "vrsculpt.cycle_radius"
-    bl_label = "VR Next Radius / Toggle Panel"
-    bl_options = {'INTERNAL'}
+    def _modal(self, context, event):
+        if self.generation != data_generation:
+            return self._stop(context)
+        if event.type == 'XR_ACTION':
+            xr = event.xr
+            if xr.action != self.action or xr.user_path != self.hand:
+                return {'PASS_THROUGH'}
+            if event.value == 'RELEASE':
+                return self._finish(context)
+            pulse(context, self.hand, self.knob.update(Quaternion(xr.controller_rotation)))
+            return {'RUNNING_MODAL'}
+        if event.type == 'TIMER':
+            ss = context.window_manager.xr_session_state
+            if ss is None or not session_running(context):
+                return self._stop(context)
+            if _button_value(context, ss, self.action, self.hand) <= self.threshold:
+                return self._finish(context)
+            rot = ss.controller_aim_rotation_get(context, self.hand_idx)
+            pulse(context, self.hand, self.knob.update(Quaternion(rot)))
+        return {'PASS_THROUGH'}
 
-    left_hand: BoolProperty(name="Left Hand", options={'SKIP_SAVE'})
+    def _finish(self, context):
+        outcome = self.knob.release()
+        self._stop(context)
+        if outcome == 'tap':
+            message = menus.knob_tap(context, self.side)
+            if message:
+                radial.toast(message, menus.MODE_COLORS.get(context.scene.vr_sculpt.mode, (1.0, 1.0, 1.0)))
+            haptic(context, self.hand, 0.4, 0.03)
+        elif outcome == 'done':
+            generic.flush_pending(context)
+            if self.knob.changed:
+                return {'FINISHED'}
+        return {'CANCELLED'}
 
-    def execute(self, context):
-        settings = context.scene.vr_sculpt
-        if self.left_hand:
-            settings.show_panel = not settings.show_panel
-            return {'FINISHED'}
-        if settings.mode == 'POSE':
-            settings.pose_chain = settings.pose_chain % 4 + 1
-            return {'FINISHED'}
-        prop = "paint_radius" if settings.mode == 'PAINT' else "radius"
-        bigger = [r for r in RADIUS_STEPS if r > getattr(settings, prop) + 1e-6]
-        setattr(settings, prop, bigger[0] if bigger else RADIUS_STEPS[0])
-        return {'FINISHED'}
-
-    def invoke(self, context, event):
-        if event.xr:
-            self.left_hand = event.xr.user_path == actions.HANDS[0]
-        self.execute(context)
-        if event.xr:
-            haptic(context, event.xr.user_path, 0.4, 0.03)
-        return {'FINISHED'}
+    def _stop(self, context):
+        if self.timer is not None:
+            context.window_manager.event_timer_remove(self.timer)
+            self.timer = None
+        if radial.knobs.get(self.hand_idx) is self.knob:
+            del radial.knobs[self.hand_idx]
+        return {'CANCELLED'}
 
 
 class VRSCULPT_OT_undo_stroke(bpy.types.Operator):
@@ -494,7 +643,7 @@ class VRSCULPT_OT_set_mode(bpy.types.Operator):
         return {'FINISHED'}
 
 
-classes = (VRSCULPT_OT_stroke, VRSCULPT_OT_cycle_brush, VRSCULPT_OT_cycle_radius, VRSCULPT_OT_undo_stroke,
+classes = (VRSCULPT_OT_stroke, VRSCULPT_OT_pie, VRSCULPT_OT_knob, VRSCULPT_OT_undo_stroke,
            VRSCULPT_OT_paint_setup, VRSCULPT_OT_clear_measures, VRSCULPT_OT_set_mode)
 
 

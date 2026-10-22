@@ -17,7 +17,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import vr_sculpt  # noqa: E402
-from vr_sculpt import catalog, generic, menus, primitives, vr_ui  # noqa: E402
+from vr_sculpt import catalog, generic, menus, primitives, radial  # noqa: E402
+from vr_sculpt.radial import Item, Level  # noqa: E402
 
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 import test_model as tm  # noqa: E402  (fakes and the press() helper)
@@ -107,114 +108,98 @@ def test_every_entry():
         check(ok, f"{(e.category + ' / ') if e.category else ''}{e.label}: {info}")
 
 
-def test_picker():
-    print("== Add picker")
+def test_add_pie():
+    print("== Add pie")
     ctx = bpy.context
     s = ctx.scene.vr_sculpt
     s.mode = 'MODEL'
     s.primitive = primitives.DEFAULT_ADD
     clear()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    add = vr_ui.find(widgets, "add")
-    check(add is not None and add.kind == 'select' and add.value_text == "Cube", "Add is a select showing Cube")
-    add.on_press()
-    check(menus.picker_open(), "pressing it opens the picker")
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    ids = [w.id for w in widgets]
-    check("cat_Mesh" in ids and "cat_Gears" in ids, "picker starts on categories (Mesh, Gears, ...)")
-    check(vr_ui.find(widgets, "cat_Mesh").active, "the current value's category is highlighted")
-    vr_ui.find(widgets, "cat_Gears").on_press()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    add = radial.find(menus.tool_level(ctx), "add")
+    check(add is not None and add.kind == 'branch' and add.label == "Cube",
+          "Add (B pie) is a branch named after the current primitive")
+    cats = add.children()
+    ids = {i.id for i in radial.walk(cats, depth=1)}
+    check("cat_Mesh" in ids and "cat_Gears" in ids, "it opens on the categories (Mesh, Gears, ...)")
+    check(len(cats.items) <= radial.MAX_SLICES, f"at most 8 slices ({len(cats.items)})")
+    check(radial.find(cats, "cat_Mesh").active, "the current value's category is highlighted")
     gear_key = next(e.key for e in catalog.entries() if e.idname == "mesh.primitive_gear")
-    check(vr_ui.find(widgets, "opt_" + gear_key) is not None, "Gears category lists Gear")
-    vr_ui.find(widgets, "picker_back").on_press()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    check(vr_ui.find(widgets, "cat_Gears") is not None and menus.picker_open(), "Back returns to categories")
-    vr_ui.find(widgets, "cat_Mesh").on_press()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    mesh_items = [w for w in widgets if w.id.startswith("opt_")]
-    check(len(mesh_items) == len([e for e in catalog.entries() if not e.category]), "Mesh shows all built-ins")
-    vr_ui.find(widgets, "cat_Mesh") is None
-    vr_ui.find(widgets, "picker_back").on_press()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    vr_ui.find(widgets, "cat_Gears").on_press()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    vr_ui.find(widgets, "opt_" + gear_key).on_press()
-    check(s.primitive == gear_key and not menus.picker_open(), "choosing Gear sets it and closes the picker")
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    check(vr_ui.find(widgets, "add").value_text == "Gear", "Add now shows Gear")
+    gears = radial.find(cats, "cat_Gears").children()
+    check(radial.find(gears, "opt_" + gear_key) is not None, "Gears lists Gear")
+    mesh = radial.find(cats, "cat_Mesh").children()
+    mesh_items = [i for i in radial.walk(mesh) if i.id.startswith("opt_")]
+    check(len(mesh_items) == len([e for e in catalog.entries() if not e.category]),
+          f"Mesh has all built-ins ({len(mesh_items)}), paged with More")
+    path = radial.path_to(add.children(), "opt_" + gear_key)
+    check(path is not None and len(path) >= 2, f"Gear is reachable: Add > ... > Gear ({path})")
+    radial.find(gears, "opt_" + gear_key).action()
+    check(s.primitive == gear_key, "choosing Gear sets it")
+    check(radial.find(menus.tool_level(ctx), "add").label == "Gear", "Add now shows Gear")
 
-    # Paging: a picker with many options.
-    menus.open_picker("Many", [menus.Option(i, f"Item {i}") for i in range(40)], 0, lambda v: None)
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    shown = [w for w in widgets if w.id.startswith("opt_")]
-    check(len(shown) == menus.PICKER_COLS * menus.PICKER_ROWS and vr_ui.find(widgets, "picker_next"),
-          "long lists are paged")
-    vr_ui.find(widgets, "picker_next").on_press()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    check(vr_ui.find(widgets, "opt_18") is not None and vr_ui.find(widgets, "picker_prev"), "Next shows page 2")
-    menus.close_picker()
+    # Paging: a pie with many options.
+    many = Level("Many", [Item(f"opt_{i}", f"Item {i}", action=lambda: None) for i in range(40)])
+    check(len(many.items) == radial.MAX_SLICES and many.items[-1].label == "More", "long lists are paged")
+    check(radial.find(many.items[-1].children(), "opt_18") is not None, "More shows the next page")
+    check(len([i for i in radial.walk(many) if i.id.startswith("opt_")]) == 40, "and every item is reachable")
 
 
-def test_settings_panel():
-    print("== settings rows for operator primitives")
+def test_settings_pie():
+    print("== settings pie for operator primitives")
     ctx = bpy.context
     s = ctx.scene.vr_sculpt
     s.mode = 'MODEL'
     clear()
     gear_key = next(e.key for e in catalog.entries() if e.idname == "mesh.primitive_gear")
     gear = primitives.create_from_entry(ctx, gear_key, (0, 0, 0))
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    ids = {w.id for w in widgets}
-    check("param_number_of_teeth" in ids and "param_radius" in ids, "gear shows Teeth and Radius")
+    shape = radial.find(menus.object_level(ctx), "page_shape").children()
+    ids = {i.id for i in radial.walk(shape)}
+    check("param_number_of_teeth" in ids and "param_radius" in ids, "gear shows Teeth and Radius (A > Shape)")
     check(not ({"param_change", "param_Gear", "param_name", "param_align"} & ids), "internal/placement settings hidden")
-    check("params_next" in ids, "gear's 11 settings are paged")
-    teeth = vr_ui.find(widgets, "param_number_of_teeth")
+    check(shape.items[-1].label == "More", "gear's 11 settings are paged")
+    teeth = radial.find(shape, "param_number_of_teeth")
+    check(teeth.kind == 'dial', "Teeth is a dial")
     verts = len(gear.data.vertices)
-    teeth.on_change(20)
+    teeth.dial.begin()
+    start = teeth.dial.get()
+    teeth.dial.turn((20 - start) * teeth.dial.step_angle)
     check(len(gear.data.vertices) > verts and generic.stored(gear)["number_of_teeth"] == 20,
-          "Teeth slider regenerates a gear with more teeth")
-    vr_ui.find(widgets, "params_next").on_press()
-    widgets2, _ = vr_ui.layout(menus.rows(ctx))
-    check(vr_ui.find(widgets2, "param_number_of_teeth") is None and "params_prev" in {w.id for w in widgets2},
-          "Next shows the second settings page")
+          f"twisting Teeth regenerates a gear with more teeth (from {start})")
+    second = {i.id for i in radial.walk(shape.items[-1].children())}
+    check("param_number_of_teeth" not in second and second, "More shows the other settings")
 
     clear()
     torus_key = next(e.key for e in catalog.entries() if e.idname == "mesh.primitive_torus_add")
     torus = primitives.create_from_entry(ctx, torus_key, (0, 0, 0))
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    mode = vr_ui.find(widgets, "param_mode")
-    check(mode is not None and mode.kind == 'select', "enum settings (torus Dimensions Mode) are selects")
-    mode.on_press()
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    check(vr_ui.find(widgets, "opt_EXT_INT") is not None, "the enum picker lists its items directly")
-    vr_ui.find(widgets, "opt_EXT_INT").on_press()
-    check(generic.stored(torus)["mode"] == 'EXT_INT' and not menus.picker_open(), "picking an item sets the setting")
-    # The torus has 8 settings: Generate UVs is on page 2.
-    vr_ui.find(vr_ui.layout(menus.rows(ctx))[0], "params_next").on_press()
-    uvs = vr_ui.find(vr_ui.layout(menus.rows(ctx))[0], "param_generate_uvs")
-    check(uvs is not None and uvs.kind == 'button' and uvs.active, "bool settings are toggle buttons")
-    uvs.on_press()
+    shape = radial.find(menus.object_level(ctx), "page_shape").children()
+    mode = radial.find(shape, "param_mode")
+    check(mode is not None and mode.kind == 'branch', "enum settings (torus Dimensions Mode) open a pie")
+    ext = radial.find(mode.children(), "opt_EXT_INT")
+    check(ext is not None, "it lists the enum's items directly")
+    ext.action()
+    check(generic.stored(torus)["mode"] == 'EXT_INT', "choosing an item sets the setting")
+    uvs = radial.find(menus.object_level(ctx), "param_generate_uvs")
+    check(uvs is not None and uvs.kind == 'action' and uvs.active, "bool settings are toggles")
+    uvs.action()
     check(generic.stored(torus)["generate_uvs"] is False, "toggling flips the bool")
 
 
 def test_slow_generator():
-    print("== slow generators regenerate on slider release")
+    print("== slow generators regenerate when the dial is let go")
     ctx = bpy.context
     clear()
     wall_key = next(e.key for e in catalog.entries() if e.idname == "mesh.wall_add")
     wall = primitives.create_from_entry(ctx, wall_key, (0, 0, 0))
     generic.fit(ctx, wall, (0, 0, 0), (0.1, 0.1, 0.1), 0.005)
     check(wall.get("vrs_slow", False), "Wall Factory is detected as slow")
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
-    slider = next(w for w in widgets if w.kind == 'slider' and w.id.startswith("param_"))
+    shape = radial.find(menus.object_level(ctx), "page_shape").children()
+    dial = next(i.dial for i in radial.walk(shape) if i.dial is not None and i.dial.scale != 'STEP')
     mesh_before = wall.data
     t0 = time.perf_counter()
-    slider.on_change(slider.min + (slider.max - slider.min) * 0.7)
+    dial.set(dial.lo + (dial.hi - dial.lo) * 0.7)
     ms = (time.perf_counter() - t0) * 1000
-    check(ms < 20 and wall.data == mesh_before, f"slider change on a slow generator is instant ({ms:.1f} ms), no regenerate yet")
+    check(ms < 20 and wall.data == mesh_before, f"turning a slow generator's dial is instant ({ms:.1f} ms), no regenerate yet")
     generic.flush_pending(ctx)
-    check(wall.data != mesh_before, "release (flush) regenerates it")
+    check(wall.data != mesh_before, "letting go (flush) regenerates it")
 
 
 def test_drag_gear():
@@ -225,7 +210,7 @@ def test_drag_gear():
     wm = tm.FakeWM(ss)
     ctx = tm.FakeContext(wm)
     s = bpy.context.scene.vr_sculpt
-    s.mode, s.tip_offset, s.show_panel = 'MODEL', 0.0, False
+    s.mode, s.tip_offset = 'MODEL', 0.0
     s.primitive = next(e.key for e in catalog.entries() if e.idname == "mesh.primitive_gear")
     op, r = tm.press(ctx, ss, 1, [(1, 0, 1), (1.1, 0.1, 1.02), (1.3, 0.2, 1.05)])
     obj = bpy.context.view_layer.objects.active
@@ -245,8 +230,8 @@ def main():
         clear()
         test_catalog()
         test_every_entry()
-        test_picker()
-        test_settings_panel()
+        test_add_pie()
+        test_settings_pie()
         test_slow_generator()
         test_drag_gear()
     except Exception:

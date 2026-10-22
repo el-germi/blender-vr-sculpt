@@ -17,7 +17,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 import vr_sculpt  # noqa: E402
-from vr_sculpt import drawing, menus, operators, strokes, vr_ui  # noqa: E402
+from vr_sculpt import drawing, menus, operators, radial, strokes  # noqa: E402
 import test_model as tm  # noqa: E402
 
 failures = []
@@ -107,7 +107,7 @@ def setup_trigger():
     wm = tm.FakeWM(ss)
     ctx = tm.FakeContext(wm)
     s = bpy.context.scene.vr_sculpt
-    s.mode, s.tip_offset, s.show_panel = 'DRAW', 0.0, False
+    s.mode, s.tip_offset = 'DRAW', 0.0
     s.draw_tool, s.draw_style, s.draw_color = 'DRAW', 'TUBE', 'RED'
     s.draw_width, s.draw_smoothing, s.draw_thickness = 0.02, 0.0, 'PRESSURE'
     s.mirror_x = s.mirror_y = s.mirror_z = False
@@ -160,11 +160,9 @@ def test_draw_and_undo():
 
     hold(ctx, ss, 0, path((0, 0.5, 1), (0.2, 0.6, 1.2)))
     check(len([o for o in bpy.data.objects if strokes.is_stroke(o)]) == 2, "left hand draws too")
-    b = tm.harness()  # not needed; B is the cycle_brush operator:
-    operators.VRSCULPT_OT_cycle_brush.execute(type("Op", (), {"left_hand": False, "report": lambda *a: None})(),
-                                              bpy.context)
+    message = menus.tap(bpy.context, 'TOOL')  # What a B tap does.
     left = [o for o in bpy.data.objects if strokes.is_stroke(o)]
-    check(len(left) == 1 and left[0] == obj, "B (right) deletes the most recent stroke")
+    check(len(left) == 1 and left[0] == obj and message.startswith("Undo"), "a B tap deletes the most recent stroke")
     operators.undo_last_stroke(bpy.context)
     check(not any(strokes.is_stroke(o) for o in bpy.data.objects), "undo again deletes the one before")
     check(operators.undo_last_stroke(bpy.context) is None, "nothing left to undo is fine")
@@ -438,19 +436,20 @@ def test_sculpt_forgets_and_panel():
     check(not strokes.is_stroke(obj), "sculpting a stroke turns it into a plain mesh")
 
     s.mode = 'DRAW'
-    widgets, _ = vr_ui.layout(menus.rows(bpy.context))
-    ids = {w.id for w in widgets}
-    check({"mode_draw", "tool_EDIT", "style_RIBBON", "color_GREEN", "draw_width", "mirror_x", "undo_stroke",
-           "draw_thickness"} <= ids, "Draw panel has tools, styles, colors, width, mirror, thickness and undo")
-    vr_ui.find(widgets, "draw_thickness").on_press()
-    widgets, _ = vr_ui.layout(menus.rows(bpy.context))
-    vr_ui.find(widgets, "opt_SPEED_THIN").on_press()
-    check(s.draw_thickness == 'SPEED_THIN' and not menus.picker_open(), "Thickness picker sets the mode")
-    widgets, _ = vr_ui.layout(menus.rows(bpy.context))
-    vr_ui.find(widgets, "color_GREEN").on_press()
-    vr_ui.find(widgets, "mirror_z").on_press()
+    tools = {i.id for i in radial.walk(menus.tool_level(bpy.context))}
+    obj_ids = {i.id for i in radial.walk(menus.object_level(bpy.context))}
+    check({"tool_EDIT", "style_RIBBON", "color_GREEN", "draw_width"} <= tools,
+          "Draw's tool pie (B) has tools, styles, colors and width")
+    check({"mirror_x", "undo_stroke", "draw_thickness", "draw_smoothing"} <= obj_ids,
+          "and its stroke pie (A) mirror, thickness, smoothing and undo")
+    thickness = radial.find(menus.object_level(bpy.context), "draw_thickness")
+    check(thickness.kind == 'branch', "Thickness opens its own pie")
+    radial.find(thickness.children(), "opt_SPEED_THIN").action()
+    check(s.draw_thickness == 'SPEED_THIN', "choosing in it sets the mode")
+    menus.find(bpy.context, "color_GREEN").action()
+    menus.find(bpy.context, "mirror_z").action()
     check(s.draw_color == 'GREEN' and s.mirror_z, "swatches and mirror toggles work")
-    sw = vr_ui.find(vr_ui.layout(menus.rows(bpy.context))[0], "color_GREEN")
+    sw = menus.find(bpy.context, "color_GREEN")
     check(sw.swatch is not None and sw.active, "the chosen swatch is marked")
 
 

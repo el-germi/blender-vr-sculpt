@@ -3,9 +3,10 @@
 Blender syncs one active action set, and OpenXR action sets can only be created
 before the session attaches them. So instead of a separate set, we edit the
 stock "blender_default" map right before the stock add-on turns it into
-OpenXR actions: the trigger teleport becomes our stroke action, two buttons
-get brush/radius cycling, and the thumbstick fly actions get our Walk/Fly
-navigation.
+OpenXR actions: the trigger teleport becomes our stroke action, the four face
+buttons open the pie menus (held: Y modes, B tool, A object, X time), the stick
+clicks become twist knobs, and the thumbstick fly actions get our Walk/Fly
+navigation (which gives a stick to a pie while one is open).
 """
 
 import sys
@@ -15,8 +16,9 @@ from bpy.app.handlers import persistent
 
 ACTIONMAP = "blender_default"
 ACTION_STROKE = "vrsculpt_stroke"
-ACTION_BRUSH = "vrsculpt_cycle_brush"
-ACTION_RADIUS = "vrsculpt_cycle_radius"
+ACTION_PIE = "vrsculpt_pie"  # B / Y: tool pie / mode pie
+ACTION_PIE_ALT = "vrsculpt_pie_alt"  # A / X: object pie / time pie
+ACTION_KNOB = "vrsculpt_knob"  # stick clicks
 ACTION_HAPTIC = "haptic"
 
 HANDS = ("/user/hand/left", "/user/hand/right")
@@ -24,8 +26,10 @@ HANDS = ("/user/hand/left", "/user/hand/right")
 # (new action, stock action whose bindings we copy, operator, mode, remove stock)
 _PATCHES = (
     (ACTION_STROKE, "teleport", "vrsculpt.stroke", 'MODAL', True),
-    (ACTION_BRUSH, "viewfinder_apply_action_up", "vrsculpt.cycle_brush", 'PRESS', False),  # B / Y
-    (ACTION_RADIUS, "viewfinder_swap_hands", "vrsculpt.cycle_radius", 'PRESS', False),  # stick click
+    (ACTION_PIE, "viewfinder_apply_action_up", "vrsculpt.pie", 'MODAL', False),  # B / Y
+    # A / X reset the navigation in the stock map; that moved to Mode pie > View > Reset view.
+    (ACTION_PIE_ALT, "nav_reset", "vrsculpt.pie", 'MODAL', True),
+    (ACTION_KNOB, "viewfinder_swap_hands", "vrsculpt.knob", 'MODAL', False),  # stick click
 )
 
 last_status = "VR session not started yet"
@@ -83,7 +87,7 @@ def _patch(session_state):
         ami.op_mode = 'MODAL'
     if missing:
         return "Patched, but stock actions missing: " + ", ".join(missing)
-    return "Trigger = sculpt/model/draw/tools, Y = mode, B = next brush / undo, stick clicks: L = panel, R = radius"
+    return "Trigger = do it; hold Y = modes, B = tool, A = object, X = time; stick clicks = knobs (hold + twist)"
 
 
 @persistent
@@ -100,6 +104,10 @@ def on_xr_session_start_pre(_context):
     context.window_manager.xr_session_settings.show_custom_overlays = True
     # Draw mode's Note strokes are annotations.
     context.window_manager.xr_session_settings.show_annotation = True
+    # What the buttons do, beside the controllers for the first seconds (L stick click shows it again).
+    from . import radial
+    radial.reset()
+    radial.show_hints(20.0)
     # Pick up primitives from extensions enabled since the last session.
     from . import catalog
     try:

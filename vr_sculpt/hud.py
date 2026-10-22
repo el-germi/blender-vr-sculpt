@@ -1,18 +1,18 @@
-"""Brush card: a small panel above the right controller with the brush icon and name.
+"""What the tool status at the right hand shows, and helpers for cards that face the headset.
 
-After the brush changes, it also shows a one-line description for a few seconds.
+The status is a small round badge above the right controller: the tool's icon in the tool's color,
+ringed in the mode's color (radial_draw.draw_status). After the tool changes, its name shows beside
+it for a moment; there is no text panel.
 """
 
-import math
 import time
 
 import blf
 import gpu
 import numpy as np
-from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-DESCRIPTION_SECONDS = 4.0
+TITLE_SECONDS = 1.6
 
 NATIVE_INFO = {
     "Draw": "Pushes the surface out. Left hand: pushes in",
@@ -74,11 +74,7 @@ PYTHON_INFO = {
     'INFLATE': ("Inflate", "Swells the surface outward. Left hand: shrinks"),
 }
 
-# Sizes in meters, in hand space (scaled by the VR viewer scale).
-_ICON = 0.032
-_PAD = 0.005
-_TITLE_H = 0.011
-_DESC_H = 0.0065
+# Text is drawn at _FONT_PX and scaled to the asked cap height (hand-space meters).
 _FONT_PX = 64
 _CAP = 0.72  # cap height / font size, roughly
 
@@ -184,8 +180,51 @@ def bpy_context():
     return bpy.context
 
 
-def show_description():
-    return time.monotonic() - _last["time"] < DESCRIPTION_SECONDS
+def title_alpha():
+    """How visible the tool's name is beside the badge: 1 just after a change, fading to 0."""
+    age = time.monotonic() - _last["time"]
+    return min(max((TITLE_SECONDS - age) / 0.4, 0.0), 1.0)
+
+
+def status_icon(context, settings, sculpt_brush=None):
+    """The icon name for the badge: the brush, primitive, stroke style or tool the trigger uses."""
+    mode = settings.mode
+    if mode == 'SCULPT':
+        if settings.engine == 'NATIVE':
+            return "brush_" + (sculpt_brush.name if sculpt_brush else "")
+        return "brush_" + settings.brush
+    if mode == 'MODEL':
+        if settings.model_mark != 'NONE':
+            return "mark_" + settings.model_mark
+        from . import hardsurface, menus
+        if settings.model_add_as != 'OBJECT' and hardsurface.cut_target(context) is not None:
+            return {'DIFFERENCE': 'cut', 'UNION': 'union', 'INTERSECT': 'intersect'}[settings.model_add_as]
+        return menus.PRIMITIVE_ICONS.get(settings.primitive, 'add')
+    if mode == 'DRAW':
+        return settings.draw_style.lower() if settings.draw_tool == 'DRAW' else settings.draw_tool.lower()
+    if mode == 'PAINT':
+        if settings.paint_tool == 'PICK':
+            return 'pick'
+        from . import paint
+        b = paint.brush(context)
+        return "pbrush_" + paint.SHORT.get(b.name, "") if b else 'paint'
+    if mode == 'POSE':
+        return settings.pose_tool
+    return 'camera' if settings.tool == 'CAMERA' else 'measure'
+
+
+def status(context, settings, sculpt_brush, colors):
+    """(icon, color, ring_color, title, recording) for the badge. recording: None, a countdown number or "REC"."""
+    from . import menus, puppet
+    title, _desc, color, _texture = card_content(settings, sculpt_brush, colors)
+    recording = None
+    if settings.mode == 'POSE' or puppet.state() is not None:
+        take = puppet.state()
+        if take == 'COUNTDOWN':
+            recording = int(puppet.countdown_left()) + 1
+        elif take is not None:
+            recording = "REC"
+    return status_icon(context, settings, sculpt_brush), color, menus.MODE_COLORS[settings.mode], title, recording
 
 
 def billboard(anchor, viewer, scale):
@@ -218,64 +257,6 @@ def draw_text(m, x, y, text, height, color):
     blf.color(0, *color)
     blf.draw(0, text)
     gpu.matrix.pop()
-
-
-def draw_card(anchor, viewer, scale, content, with_description=None):
-    title, desc, color, texture = content
-    if with_description is None:
-        with_description = show_description()
-    if not desc:
-        with_description = False
-    m = billboard(anchor, viewer, scale)
-
-    text_w = text_width(title, _TITLE_H)
-    if with_description:
-        text_w = max(text_w, text_width(desc, _DESC_H))
-    width = _PAD + _ICON + _PAD + text_w + _PAD
-    height = _PAD * 2 + _ICON
-    x0, y0 = -width / 2.0, 0.0
-    x1, y1 = x0 + width, y0 + height
-
-    uniform = gpu.shader.from_builtin('UNIFORM_COLOR')
-    gpu.state.blend_set('ALPHA')
-    gpu.state.depth_test_set('NONE')
-    gpu.matrix.push()
-    gpu.matrix.multiply_matrix(m)
-
-    quad = [(x0, y0, 0), (x1, y0, 0), (x1, y1, 0), (x0, y1, 0)]
-    batch = batch_for_shader(uniform, 'TRIS', {"pos": quad}, indices=((0, 1, 2), (0, 2, 3)))
-    uniform.uniform_float("color", (0.06, 0.06, 0.07, 0.82))
-    batch.draw(uniform)
-    batch = batch_for_shader(uniform, 'LINE_LOOP', {"pos": quad})
-    uniform.uniform_float("color", (*color, 0.9))
-    batch.draw(uniform)
-
-    ix0, iy0 = x0 + _PAD, y0 + _PAD
-    icon = [(ix0, iy0, 0.0002), (ix0 + _ICON, iy0, 0.0002), (ix0 + _ICON, iy0 + _ICON, 0.0002), (ix0, iy0 + _ICON, 0.0002)]
-    if texture is not None:
-        image = gpu.shader.from_builtin('IMAGE')
-        batch = batch_for_shader(image, 'TRI_FAN', {"pos": icon, "texCoord": ((0, 0), (1, 0), (1, 1), (0, 1))})
-        image.uniform_sampler("image", texture)
-        batch.draw(image)
-    else:
-        # No preview (Python brushes): a dot in the brush color, matching the cursor rings.
-        cx, cy, r = ix0 + _ICON / 2.0, iy0 + _ICON / 2.0, _ICON * 0.4
-        disc = [(cx, cy, 0.0002)] + [
-            (cx + r * math.cos(a), cy + r * math.sin(a), 0.0002)
-            for a in (2.0 * math.pi * i / 32 for i in range(33))
-        ]
-        batch = batch_for_shader(uniform, 'TRI_FAN', {"pos": disc})
-        uniform.uniform_float("color", (*color, 1.0))
-        batch.draw(uniform)
-    gpu.matrix.pop()
-
-    tx = ix0 + _ICON + _PAD
-    if with_description:
-        draw_text(m, tx, y0 + _PAD + _ICON * 0.52, title, _TITLE_H, (1.0, 1.0, 1.0, 1.0))
-        draw_text(m, tx, y0 + _PAD + _ICON * 0.12, desc, _DESC_H, (0.78, 0.78, 0.8, 1.0))
-    else:
-        draw_text(m, tx, y0 + _PAD + (_ICON - _TITLE_H) / 2.0, title, _TITLE_H, (1.0, 1.0, 1.0, 1.0))
-    gpu.state.blend_set('NONE')
 
 
 def clear():

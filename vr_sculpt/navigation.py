@@ -7,6 +7,9 @@ instead of being baked into the action map.
 Walk: the left stick moves on the horizontal plane and the floor follows the scene's surfaces
 under you (stairs, slopes), the right stick snap-turns. Fly: the left stick flies where you
 look, the right stick goes up/down and turns smoothly.
+
+While a pie (or a stick-click knob) is open on a hand, that hand's stick belongs to it: it picks
+slices (stick() reads it) and doesn't move you.
 """
 
 import math
@@ -30,6 +33,9 @@ ACTIONS = {
 }
 
 SCROLL_ACTIONS = ("fly_up", "fly_down", "fly_turnleft", "fly_turnright")  # the right stick
+# Per hand index: the actions for stick (+x, -x) and (+y, -y).
+STICK_AXES = {0: (("fly_right", "fly_left"), ("fly_forward", "fly_back")),
+              1: (("fly_turnright", "fly_turnleft"), ("fly_up", "fly_down"))}
 SCROLL_RATE = 12.0  # wheel notches per second at full tilt, over the desktop screen
 TURN_SPEED = math.radians(90.0)  # Fly: radians per second at full tilt
 DEAD_ZONE = 0.3  # stick values below this count as zero (the bindings' threshold)
@@ -47,6 +53,24 @@ def set_navigation(ss, matrix):
     loc, rot, _scale = matrix.decompose()
     ss.navigation_location = loc
     ss.navigation_rotation = rot
+
+
+def stick(context, ss, hand_index):
+    """(x, y) of a hand's thumbstick, read from the fly actions bound to its directions."""
+    def value(name):
+        try:
+            v = ss.action_state_get(context, actions.ACTIONMAP, name, actions.HANDS[hand_index])
+        except (RuntimeError, TypeError, ValueError):
+            return 0.0
+        return v if isinstance(v, float) else v[0]
+
+    def axis(pos, neg):
+        p, n = value(pos), value(neg)
+        # Both actions may report the same signed component, or each its own half.
+        return p if abs(p - n) < 1e-6 else abs(p) - abs(n)
+
+    (xp, xn), (yp, yn) = STICK_AXES[hand_index]
+    return axis(xp, xn), axis(yp, yn)
 
 
 def ramp(value):
@@ -145,6 +169,9 @@ class VRSCULPT_OT_navigate(bpy.types.Operator):
         xr = event.xr
         if xr is None or xr.action not in ACTIONS:
             return {'CANCELLED'}
+        from . import radial
+        if radial.busy(actions.hand_index(xr.user_path)):
+            return {'CANCELLED'}  # The stick is picking in a pie.
         self.action, self.hand = xr.action, xr.user_path
         self.kind, self.x, self.y = ACTIONS[xr.action]
         self.value = xr.state[0]
@@ -206,6 +233,9 @@ class VRSCULPT_OT_navigate(bpy.types.Operator):
         dt = min(now - self.last, 0.05)
         self.last = now
         settings = context.scene.vr_sculpt
+        from . import radial
+        if radial.busy(actions.hand_index(self.hand)):
+            return
         if self.kind == 'MOVE':
             move(ss, settings, self.x, self.y, self.value, dt)
             if self.floor is not None and settings.nav_mode == 'WALK':
