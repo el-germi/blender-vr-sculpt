@@ -1,6 +1,6 @@
 import bpy
 
-from . import actions, catalog, measure, native, operators, paint, pose, primitives, puppet
+from . import actions, catalog, measure, native, operators, paint, pose, primitives, puppet, rig
 
 
 class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
@@ -22,7 +22,7 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
         row = layout.grid_flow(row_major=True, columns=3, even_columns=True, align=True)
         row.active = settings.enabled
         for mode, text in (('SCULPT', "Sculpt"), ('MODEL', "Model"), ('DRAW', "Draw"), ('PAINT', "Paint"),
-                           ('POSE', "Pose"), ('TOOLS', "Tools")):
+                           ('RIG', "Rig"), ('POSE', "Pose"), ('TOOLS', "Tools")):
             row.operator("vrsculpt.set_mode", text=text, depress=settings.mode == mode).mode = mode
         row = layout.row(heading="Hand Panel")
         row.prop(settings, "show_panel", text="Show")
@@ -91,6 +91,27 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
                 col.prop(settings, "pose_show_bones")
             n = puppet.binding_count()
             col.label(text=f"Puppet bindings: {n}" if n else "Puppet: bind bones on the hand panel")
+            col.prop(settings, "tip_offset")
+            box = layout.box()
+            box.scale_y = 0.8
+            box.label(text=actions.last_status)
+            return
+        if settings.mode == 'RIG':
+            arm, obj = rig.target(context), rig.mesh(context)
+            col.label(text=f"Rig: {arm.name if arm else 'new (the first joint starts one)'}", icon='ARMATURE_DATA')
+            col.prop(settings, "rig_mesh")
+            col.prop(settings, "rig_tool", expand=True)
+            if settings.rig_tool == 'BONES':
+                col.prop(settings, "rig_mirror")
+            else:
+                if arm is not None and obj is not None and not rig.bound(obj, arm):
+                    col.label(text=f"Bind {obj.name} on the hand panel to paint it", icon='INFO')
+                col.label(text=f"Bone: {rig.active_bone(arm) or 'none'}")
+                col.prop(settings, "weight_brush", expand=True)
+                col.prop(settings, "weight_radius")
+                col.prop(settings, "weight_strength")
+                col.prop(settings, "weight_mirror")
+                col.prop(settings, "weight_show")
             col.prop(settings, "tip_offset")
             box = layout.box()
             box.scale_y = 0.8

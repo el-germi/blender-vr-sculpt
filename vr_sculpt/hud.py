@@ -62,6 +62,13 @@ POSE_INFO = {
     'IK': ("IK Pose", "Grab a bone: it follows your hand and its parent bones bend to reach"),
 }
 
+RIG_INFO = {
+    'BONES': ("Bones", "Press to place joints. Press a joint to branch, drag it to move. B ends the chain"),
+    'ADD': ("Add Weight", "Paint the bone's weights. Left hand subtracts. Touch a bone to pick it"),
+    'SUBTRACT': ("Subtract Weight", "Take the bone's weights away. Left hand adds. Touch a bone to pick it"),
+    'SMOOTH': ("Smooth Weights", "Even out the bone's weights. Touch a bone to pick it"),
+}
+
 TOOLS_INFO = {
     'MEASURE': ("Tape Measure", "Drag to measure; ends snap to vertices. B removes the last one"),
     'CAMERA': ("Scene Camera", "Hold the trigger to aim the camera. B: next camera"),
@@ -120,6 +127,14 @@ def card_content(settings, sculpt_brush):
         else:
             title, desc = POSE_INFO[settings.pose_tool]
             content = (title, desc, POSE_COLORS[settings.pose_tool], settings.pose_tool.lower())
+    elif settings.mode == 'RIG':
+        from . import rig
+        if settings.rig_tool == 'BONES':
+            title, desc = RIG_INFO['BONES']
+            content = (title, desc, rig.BONES_COLOR, "bones")
+        else:
+            title, desc = RIG_INFO[settings.weight_brush]
+            content = (title, desc, rig.BRUSH_COLORS[settings.weight_brush], "weights")
     elif settings.mode == 'TOOLS':
         title, desc = TOOLS_INFO[settings.tool]
         camera_tool = settings.tool == 'CAMERA'
@@ -166,6 +181,8 @@ def status_size(context, settings):
         return _cm(settings.draw_width) if settings.draw_tool == 'DRAW' else ""
     if mode == 'POSE':
         return f"chain {settings.pose_chain}" if settings.pose_tool == 'IK' else ""
+    if mode == 'RIG':
+        return _cm(settings.weight_radius) if settings.rig_tool == 'WEIGHTS' else ""
     if mode == 'TOOLS':
         cam = context.scene.camera
         if settings.tool == 'CAMERA' and cam is not None and cam.data.type == 'PERSP':

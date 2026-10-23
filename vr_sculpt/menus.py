@@ -13,7 +13,7 @@ import math
 import bpy
 
 from . import (anim, camera, catalog, desktop, generic, hardsurface, hud, measure, native, paint, pose, presence,
-               primitives, puppet, shading, strokes, symmetry, vr_ui)
+               primitives, puppet, rig, shading, strokes, symmetry, vr_ui)
 from .props import BRUSH_ITEMS
 
 NATIVE_SHORT = {
@@ -22,7 +22,7 @@ NATIVE_SHORT = {
 }
 
 MODES = (('SCULPT', "Sculpt", "sculpt"), ('MODEL', "Model", "model"), ('DRAW', "Draw", "draw"),
-         ('PAINT', "Paint", "paint"), ('POSE', "Pose", "pose"), ('TOOLS', "Tools", "tools"))
+         ('PAINT', "Paint", "paint"), ('RIG', "Rig", "rig"), ('POSE', "Pose", "pose"), ('TOOLS', "Tools", "tools"))
 MODE_ICONS = {ident: icon for ident, _name, icon in MODES}
 
 LABEL_W = 0.034  # row-leading labels ("Symmetry", "Mirror"): one column, so the controls line up
@@ -37,11 +37,11 @@ def _desktop_view(context):
 
 
 def set_object_mode(context, obj, mode):
-    """Switch a mesh to 'OBJECT' or 'SCULPT' mode, or an armature to 'OBJECT' or 'POSE' mode, from any
-    context (XR operators have no area)."""
+    """Switch a mesh to 'OBJECT' or 'SCULPT' mode, or an armature to 'OBJECT', 'POSE' or 'EDIT' mode, from
+    any context (XR operators have no area)."""
     if obj is None or obj.mode == mode:
         return
-    if obj.type != 'MESH' and not (obj.type == 'ARMATURE' and mode in {'OBJECT', 'POSE'}):
+    if obj.type != 'MESH' and not (obj.type == 'ARMATURE' and mode in {'OBJECT', 'POSE', 'EDIT'}):
         return
     window, view = _desktop_view(context)
     if view is None:
@@ -57,6 +57,8 @@ def set_mode(context, mode):
     settings = context.scene.vr_sculpt
     if settings.mode == 'POSE' and mode != 'POSE':
         pose.leave(context)
+    if settings.mode == 'RIG' and mode != 'RIG':
+        rig.leave(context)
     close_picker()
     close_sheet(context)
     settings.mode = mode
@@ -69,6 +71,8 @@ def set_mode(context, mode):
     elif mode == 'POSE':
         if not anim.posing(obj):
             pose.enter(context)
+    elif mode == 'RIG':
+        rig.enter(context)
     elif settings.engine == 'NATIVE':
         set_object_mode(context, obj, 'SCULPT')
     else:
@@ -861,6 +865,92 @@ def _paint_rows(context, settings):
     return _disclose('PAINT', out, more, "Spray, hue / sat / value")
 
 
+# --- Rig ------------------------------------------------------------------------
+
+RIG_TOOLS = (('bones', "Bones"), ('weights', "Weights"))
+WEIGHT_BRUSHES = (('ADD', "Add"), ('SUBTRACT', "Subtract"), ('SMOOTH', "Smooth"))
+WEIGHT_ICONS = {'ADD': "plus", 'SUBTRACT': "minus", 'SMOOTH': "smooth"}
+
+
+def open_rig_choice(context):
+    current = rig.target(context)
+    options = [Option(o.name, o.name) for o in rig.rigs(context)] + [Option("", "New rig")]
+    open_picker("Rig", options, current.name if current else "", lambda name: rig.choose_rig(context, name))
+
+
+def open_mesh_picker(context):
+    current = rig.mesh(context)
+    options = [Option(o.name, o.name) for o in rig.meshes(context)]
+    open_picker("Mesh", options, current.name if current else "", lambda name: rig.choose_mesh(context, name))
+
+
+def open_bone_picker(context):
+    arm = rig.target(context)
+    if arm is None:
+        return
+    open_picker("Paint bone", [Option(n, n) for n in rig.bone_names(arm, deform=True)], rig.active_bone(arm) or "",
+                lambda name: rig.set_active_bone(arm, name))
+
+
+def _rig_select_row(context, arm, obj):
+    return [vr_ui.select("rig_pick", "Rig", arm.name if arm else "New", lambda: open_rig_choice(context), icon="rig"),
+            vr_ui.select("rig_mesh", "Mesh", obj.name if obj else "none", lambda: open_mesh_picker(context),
+                         icon="model")]
+
+
+def _rig_rows(context, settings):
+    arm, obj = rig.target(context), rig.mesh(context)
+    tool_row = _segments("rig_tool_", "rig_tool", RIG_TOOLS, settings.rig_tool.lower(),
+                         lambda v: rig.set_tool(context, v.upper()), icons={'bones': "bones", 'weights': "weights"})
+    bone = rig.active_bone(arm)
+    said = rig.message()
+    if settings.rig_tool == 'BONES':
+        out = [
+            _header(context, settings, "Rig", said or (arm.name if arm else "touch to start a rig"), actions=[
+                vr_ui.icon_button("rig_undo", "undo", lambda: rig.undo_bone(context), "Remove the last bone")]),
+            _rig_select_row(context, arm, obj),
+            tool_row,
+            [vr_ui.button("rig_end", "End chain", rig.end_chain, icon="check"),
+             vr_ui.button("rig_delete", "Delete bone", lambda: rig.delete_active(context), danger=True, icon="trash")],
+            [vr_ui.button("rig_bind", f"Bind {obj.name}" if obj else "Bind", lambda: rig.bind(context), icon="bind",
+                          active=arm is not None and obj is not None and not rig.bound(obj, arm))],
+        ]
+        more = [[vr_ui.toggle("rig_mirror", "Mirror X", settings.rig_mirror, _toggle(settings, "rig_mirror"),
+                              icon="mirror")]]
+        return _disclose('RIG', out, more, "Mirror")
+    out = [_header(context, settings, "Rig", said or bone or "touch a bone", actions=[
+        vr_ui.icon_button("weight_undo", "undo", lambda: rig.undo_stroke(context), "Undo weight stroke")])]
+    if arm is None or obj is None or not rig.bound(obj, arm):
+        # Nothing to paint yet: what's missing, and Bind.
+        return out + [
+            tool_row,
+            _rig_select_row(context, arm, obj),
+            [vr_ui.label("Bind the mesh to paint its weights" if arm and obj else "Pick a rig and a mesh",
+                         align='CENTER')],
+            [vr_ui.button("rig_bind", "Bind with automatic weights", lambda: rig.bind(context), active=True,
+                          icon="bind")],
+        ]
+    out += [
+        tool_row,
+        [vr_ui.select("weight_bone", "Bone", bone or "none", lambda: open_bone_picker(context), icon="bones")],
+        _segments("wbrush_", "wbrush", WEIGHT_BRUSHES, settings.weight_brush,
+                  lambda v: setattr(settings, "weight_brush", v), icons=WEIGHT_ICONS),
+        [vr_ui.slider("weight_radius", "Radius", settings.weight_radius, 0.005, 0.2,
+                      lambda v: setattr(settings, "weight_radius", v), fmt=_meters)],
+        [vr_ui.slider("weight_strength", "Strength", settings.weight_strength, 0.0, 1.0,
+                      lambda v: setattr(settings, "weight_strength", v), fmt=_percent)],
+    ]
+    more = [
+        _rig_select_row(context, arm, obj),
+        [vr_ui.toggle("weight_mirror", "Mirror X", settings.weight_mirror, _toggle(settings, "weight_mirror"),
+                      icon="mirror"),
+         vr_ui.toggle("weight_show", "Show", settings.weight_show, _toggle(settings, "weight_show"), icon="eye")],
+        [vr_ui.button("weight_normalize", "Normalize", lambda: rig.normalize(context), icon="weights"),
+         vr_ui.button("rig_rebind", "Rebind", lambda: rig.bind(context), danger=True, icon="bind")],
+    ]
+    return _disclose('RIG_WEIGHTS', out, more, "Rig, mirror, normalize")
+
+
 # --- Pose -----------------------------------------------------------------------
 
 def open_rig_picker(context):
@@ -1052,7 +1142,7 @@ def _settings_rows(context, settings):
 
 
 _MODE_ROWS = {'SCULPT': _sculpt_rows, 'MODEL': _model_rows, 'DRAW': _draw_rows, 'PAINT': _paint_rows,
-              'POSE': _pose_rows, 'TOOLS': _tools_rows}
+              'RIG': _rig_rows, 'POSE': _pose_rows, 'TOOLS': _tools_rows}
 
 
 # --- timeline strip --------------------------------------------------------------

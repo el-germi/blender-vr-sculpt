@@ -32,9 +32,47 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('POSE', "Pose", "Trigger poses the bones of the active armature (FK or IK); puppeteer bones with "
                              "your hands and record takes"),
             ('TOOLS', "Tools", "Tape measure and scene camera, plus grid, desktop window and navigation options"),
+            # Last, so files saved before Rig mode keep their mode (enum values are stored by position).
+            ('RIG', "Rig", "Build an armature with the controllers, bind a mesh to it with automatic weights and "
+                           "paint its weights"),
         ),
         default='SCULPT',
     )
+    # Rig mode.
+    rig_tool: EnumProperty(
+        name="Rig Tool",
+        items=(
+            ('BONES', "Bones", "Each trigger press places the next joint of a bone chain. Press a joint to carry "
+                               "on (branch) from it, drag it to move it. Left trigger deletes a bone"),
+            ('WEIGHTS', "Weights", "Paint the active bone's weights on the bound mesh. Touch a bone to pick it"),
+        ),
+        default='BONES',
+    )
+    rig_mirror: BoolProperty(
+        name="Mirror Bones", description="Bones off the rig's X = 0 plane are built and edited in .L / .R pairs")
+    rig_mesh: PointerProperty(
+        type=bpy.types.Object, name="Rig Mesh", description="The mesh Rig mode binds to the rig and paints weights on",
+        poll=lambda self, obj: obj.type == 'MESH')
+    weight_brush: EnumProperty(
+        name="Weight Brush",
+        items=(
+            ('ADD', "Add", "Add weight (left hand subtracts)"),
+            ('SUBTRACT', "Subtract", "Take weight away (left hand adds)"),
+            ('SMOOTH', "Smooth", "Even out the weights with their neighbors"),
+        ),
+        default='ADD',
+    )
+    weight_radius: FloatProperty(
+        name="Weight Radius", description="Weight brush radius in your hand's space (meters)",
+        default=0.04, min=0.002, soft_max=0.3, subtype='DISTANCE', unit='LENGTH')
+    weight_strength: FloatProperty(name="Weight Strength", default=0.5, min=0.0, max=1.0, subtype='FACTOR')
+    weight_mirror: BoolProperty(
+        name="Mirror Weights",
+        description="Painting one side of the mesh paints the mirrored side (across its local X) on the .L / .R "
+                    "counterpart's group")
+    weight_show: BoolProperty(
+        name="Show Weights", description="Show the active bone's weights on the mesh in VR, blue (0) to red (1)",
+        default=True)
     # Paint mode.
     paint_tool: EnumProperty(
         name="Paint Tool",

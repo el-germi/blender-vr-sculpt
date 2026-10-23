@@ -225,7 +225,7 @@ def test_panel(obj):
     bpy.data.objects.remove(bare)
     ctx.view_layer.objects.active = obj
 
-    # Right stick click cycles the paint radius in Paint mode; Y goes on to Tools.
+    # Right stick click cycles the paint radius in Paint mode; Y goes on to Rig.
     op = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_radius.execute, "left_hand": False})()
     settings.paint_radius, settings.radius = 0.02, 0.04
     op.execute(ctx)
@@ -234,7 +234,7 @@ def test_panel(obj):
     ob = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_brush.execute, "left_hand": True,
                         "report": lambda *a: None})()
     ob.execute(ctx)
-    check(settings.mode == 'POSE', "Y after Paint goes to Pose")
+    check(settings.mode == 'RIG', "Y after Paint goes to Rig")
     settings.mode = 'DRAW'
     ob.execute(ctx)
     check(settings.mode == 'PAINT', "and Paint comes after Draw")

@@ -61,7 +61,7 @@ staying the fastest way to reach *everything*?
 
 ![Two panels at headset pixel density](ui_panel_detail.png)
 
-- **Rail** (left column): Sculpt, Model, Draw, Paint, Pose, Tools. The current
+- **Rail** (left column): Sculpt, Model, Draw, Paint, Rig, Pose, Tools. The current
   mode has an accent pill and a bar on the edge. Hovering an icon shows its
   name to the left of the panel. Pressing the current mode's icon returns to
   its first level from any sheet or picker.
@@ -69,7 +69,9 @@ staying the fastest way to reach *everything*?
   bone), then icon actions: the mode's undo (Draw, Paint), **Settings** (gear)
   and **Pin**.
 - **Primary controls**: 3-5 rows.
-- **More / Less**: the disclosure row, with a hint of what's inside.
+- **More / Less**: the disclosure row, with a hint of what's inside. When the rail is taller than
+  the page (a short page, now that the rail holds seven modes), it sits at the bottom of the card,
+  so it doesn't move when it opens.
 - **Second levels** replace the content (the rail stays): **object settings**
   (Model, from the selection chip), **Settings** (gear, every mode), **pickers**
   (from any select, e.g. Add, Rig, Camera, Thickness, Ease).
@@ -206,6 +208,29 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Contact / Spray | *More* > Reach |
 | Hue / saturation / value | *More* |
 
+### Rig
+
+![The Bones pages, and Weights before Bind](rig_panels.png)
+
+![Weights, Weights with More open, the bone picker](rig_panels_weights.png)
+
+| Feature | How |
+|---|---|
+| Rig to build (or a new one, started by the next joint) | **Rig** select > picker (... **New rig**) |
+| Mesh to bind and paint | **Mesh** select > picker (the mesh active when you chose Rig, to start) |
+| Bones / Weights | segmented control (Edit Mode / Object Mode on the rig) |
+| Place joints, carry on from a joint, move a joint | trigger in the scene (Bones) |
+| End the chain | **End chain**; **B**; left trigger in empty space |
+| Delete a bone | left trigger on it; **Delete bone** (the active one) |
+| Remove the last bone made | header undo icon |
+| Bind with automatic weights | **Bind** (Bones); the Weights page offers it until the mesh is bound; *More* > **Rebind** |
+| Mirror X bones (.L / .R pairs) | *More* (Bones) |
+| Bone to paint | **Bone** select > picker (deform bones); or touch the bone (nearer it than the surface) |
+| Add / Subtract / Smooth | segmented control (left hand: the opposite) |
+| Radius, strength | sliders; **right stick click** cycles the radius |
+| Undo weight stroke | header undo icon; **B** |
+| Rig / Mesh, Mirror X weights, show the heat map, Normalize, Rebind | *More* (Weights) |
+
 ### Pose
 
 | Feature | How |
@@ -300,12 +325,18 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
    the size flash? Is the status line readable without being in the way?
 9. **Timeline.** Scrub, play, key. Does the strip beside the panel feel like
    part of it?
-10. **Controllers.** Do the Quest controller models sit where your real ones are (the handle in your
+10. **Rig.** With a mesh selected, choose Rig. Click at the hips, then press up the spine: does
+    each press add the bone you expect, and does the rubber band follow your hand between presses?
+    Click the chest joint and press out to a shoulder: a branch? Drag a joint: do the bones there
+    follow? Left trigger a bone: gone, its children kept? Turn on Mirror X and build an arm. Bind,
+    switch to Weights: does the heat map sit on the mesh, readable? Paint, subtract with the left
+    hand, smooth; touch a bone to switch to it. Is 0.3 s of Bind acceptable on your meshes?
+11. **Controllers.** Do the Quest controller models sit where your real ones are (the handle in your
     hand, the face under your thumb)? Do the brush tip and the ray still come out where they did?
     Press each button: does the right part light up, and does the stick follow yours? Look at a
     hand: do the hints come up, readable, and go away once you start working? Are any of them
     wrong for the mode you're in?
-11. **Overall.** Compare with A and B on: time to reach a rare setting, time for
+12. **Overall.** Compare with A and B on: time to reach a rare setting, time for
     the top action, how calm the view is while sculpting.
 
 ## Implementation notes

@@ -24,7 +24,7 @@ blender --background --command extension install-file -r user_default -e dist/vr
 
 Background tests, one file per area (`test_brushes`, `test_modal`, `test_model`, `test_generic`,
 `test_draw`, `test_tools`, `test_paint`, `test_anim`, `test_pose`, `test_ik_limits`,
-`test_hard_surface`, `test_ui`):
+`test_hard_surface`, `test_ui`, `test_rig`):
 
 ```bash
 blender --background --factory-startup --python tests/test_tools.py
@@ -78,7 +78,7 @@ add-on's, patches the stock `blender_default` action map: trigger bindings becom
 **The trigger operator** (`operators.py`, `VRSCULPT_OT_stroke`). One modal undo operator per hand
 press. `_pick_handler()` is the central dispatch: in priority order it picks hand panel press, desktop
 screen, motion path key, edge marking, then a per-mode handler (`interactions.MoveObject` /
-`CreatePrimitive`, `drawing.pick`, `paint.pick`, `pose.pick`, `measure.Measure`,
+`CreatePrimitive`, `drawing.pick`, `paint.pick`, `rig.pick`, `pose.pick`, `measure.Measure`,
 `camera.AimCamera`). `None` means sculpt with the active engine (`brushes.py` numpy engine in Object
 Mode, or `native.py` driving `sculpt.brush_stroke` in Sculpt Mode). A handler is a plain class with
 `update(context, pose, tip_pose, value)`, `finish(context)` and a `changed` flag; `changed` decides
@@ -115,7 +115,8 @@ a cutter is identified by the Boolean modifiers pointing at it. `shading.py` own
 
 **Other modes**: `strokes.py` (mesh from stored samples, rotation-minimizing frames) +
 `drawing.py` for Draw; `paint.py` paints by temporarily aiming the largest desktop 3D view at each
-dab; `pose.py` (FK/IK via CCD, limits) + `puppet.py` (bindings, recorded takes via
+dab; `rig.py` for Rig (edit bones in Edit Mode, Bind via `parent_set` ARMATURE_AUTO, a numpy weight
+brush on vertex groups and a heat map drawn in VR); `pose.py` (FK/IK via CCD, limits) + `puppet.py` (bindings, recorded takes via
 `frame_change_post`); `anim.py`, `paths.py`, `onion.py` for the timeline strip, motion paths and
 mesh onion skin (5.x slotted actions: F-curves come from the slot's channelbag via
 `bpy_extras.anim_utils`); `desktop.py` + `winput.py` for the floating desktop window (GDI capture

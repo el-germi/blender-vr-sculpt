@@ -1,6 +1,6 @@
 # VR Sculpt for Blender (prototype)
 
-Sculpt, model, draw, paint, pose, puppeteer and measure with VR controllers inside Blender's own VR session. Pure Python
+Sculpt, model, draw, paint, rig, pose, puppeteer and measure with VR controllers inside Blender's own VR session. Pure Python
 extension, no Blender fork. Built and tested on **Blender 5.4.0 Alpha** with a
 Meta Quest over OpenXR.
 
@@ -106,6 +106,36 @@ Meta Quest over OpenXR.
   sliders, Swap, and **Pick color** (an eyedropper on the texture). B takes
   back the whole last stroke. **Set up for painting** gives a mesh UVs
   (Smart UV Project, if it has none) and a 1K / 2K / 4K image.
+- **Rig mode**: build an armature, bind a mesh to it and paint its weights.
+  Choosing Rig takes the active mesh as the one to bind (Mesh on the panel
+  changes it) and its rig, or the active armature, as the one to build; with
+  neither, the first bone starts a new rig whose origin is that bone's head.
+  - **Bones** (the rig in Edit Mode): each trigger press places the next
+    joint. A click in empty space sets a chain's root; every press after
+    that ends a bone at the tip, connected to the last one (hold and move to
+    place the joint precisely). A rubber band runs from the last joint to
+    your hand in between. Press a joint to carry on from it: the next bone
+    is that bone's child, so an inner joint branches (a root's head starts a
+    new root beside it). Drag a joint to move it, with the bones connected
+    there. **End chain** (or B, or the left trigger in empty space) ends the
+    chain; the left trigger on a bone deletes it (its children are kept),
+    as does **Delete bone** for the active one; the header's undo removes
+    the last bone made. **Mirror X** (More) builds
+    and edits bones off the rig's X = 0 plane in .L / .R pairs.
+  - **Bind** gives the mesh an Armature modifier and automatic weights
+    (Blender's bone heat; about 0.3 s for a 14k-vertex mesh). Bones that got
+    no weights (outside the mesh) are named in the header.
+  - **Weights** (the rig in Object Mode): paint the active bone's vertex
+    group with a sphere at the tip: **Add**, **Subtract** or **Smooth**,
+    pressure-sensitive, with radius and strength; the left hand does the
+    opposite (Smooth smooths with both). The weights show on the mesh as a
+    heat map, blue (0) to red (1), on the posed mesh. Pick the bone on the
+    panel, or touch it: a press near a bone, and nearer to it than to the
+    surface, picks it. B takes back the whole last stroke. More: **Mirror
+    X** (the mirrored side on the .L / .R counterpart's group), **Show**,
+    **Normalize** (deform weights add up to 1) and **Rebind**.
+
+![Weights: the spine bone's automatic weights plus a painted stroke, as the heat map](docs/rig_weights.png)
 - **Tools mode**:
   - **Tape measure**: drag to measure. Ends snap to nearby mesh vertices (or
     the grid), labels use the scene's units, and measurements stay until you
@@ -194,7 +224,7 @@ Meta Quest over OpenXR.
   the range. A take only replaces what it records, so takes layer: the head
   first, then each hand.
 - **Passthrough** toggle (Blender's own; needs a runtime that supports it).
-- **Hand panel** above the left controller: an icon rail for the six modes,
+- **Hand panel** above the left controller: an icon rail for the seven modes,
   each mode's 3-5 most used controls up front and a **More** row for the rest;
   the selected object's settings, Settings (grid, navigation, view, reveal,
   tracking) and pickers open as a second level with a Back button. It shows
@@ -207,19 +237,19 @@ Meta Quest over OpenXR.
 
 ## Controls
 
-| Input | Sculpt mode | Model mode | Draw mode | Paint mode | Pose mode | Tools mode |
-|---|---|---|---|---|---|---|
-| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Grab a bone (FK / IK), or an object without a rig | Measure / aim the camera |
-| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Same as right | Same as right |
-| Right trigger, pointing at the hand panel | Press buttons, drag sliders, step steppers (hold to repeat) | Same | Same | Same | Same | Same |
-| Y (left) | Next mode (Sculpt, Model, Draw, Paint, Pose, Tools) | Same | Same | Same | Same | Same |
-| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Switch FK / IK | Remove the last measurement / next camera |
-| Left stick | Walk / fly (move) | Same | Same | Same | Same | Same |
-| Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same | Same |
-| Left stick click | Pin / unpin the hand panel | Same | Same | Same | Same | Same |
-| Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Next IK chain length (1-4) | Same |
-| Right trigger on a motion path key | Drag the key | Same | Same | Same | Same | Same |
-| Grip, A / X | Blender's stock VR navigation (unchanged) | Same | Same | Same | Same | Same |
+| Input | Sculpt mode | Model mode | Draw mode | Paint mode | Rig mode | Pose mode | Tools mode |
+|---|---|---|---|---|---|---|---|
+| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Bones: place the next joint; on a joint, carry on from it (click) or move it (drag). Weights: paint, or pick the touched bone | Grab a bone (FK / IK), or an object without a rig | Measure / aim the camera |
+| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Bones: delete the touched bone; in empty space, end the chain. Weights: the opposite brush | Same as right | Same as right |
+| Right trigger, pointing at the hand panel | Press buttons, drag sliders, step steppers (hold to repeat) | Same | Same | Same | Same | Same | Same |
+| Y (left) | Next mode (Sculpt, Model, Draw, Paint, Rig, Pose, Tools) | Same | Same | Same | Same | Same | Same |
+| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Bones: end the chain. Weights: undo the last weight stroke | Switch FK / IK | Remove the last measurement / next camera |
+| Left stick | Walk / fly (move) | Same | Same | Same | Same | Same | Same |
+| Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same | Same | Same |
+| Left stick click | Pin / unpin the hand panel | Same | Same | Same | Same | Same | Same |
+| Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Weights: next brush radius | Next IK chain length (1-4) | Same |
+| Right trigger on a motion path key | Drag the key | Same | Same | Same | Same | Same | Same |
+| Grip, A / X | Blender's stock VR navigation (unchanged) | Same | Same | Same | Same | Same | Same |
 
 Pointing at the desktop screen (in any mode, unless the tip is touching
 something you're working on): right trigger = left mouse button, left
@@ -362,6 +392,29 @@ window, passthrough and tracking settings (including hiding the hand panel's
   around ends the take; the handler only marks it, and the timer stops
   playback, since changing frames or playback from inside a frame change
   handler isn't safe.
+- **Rig mode** ([rig.py](vr_sculpt/rig.py)): the Bones tool keeps the rig in
+  Edit Mode (switching costs well under a millisecond) and writes edit bones
+  directly: a joint is a bone's tail, or the head of a bone that isn't
+  connected to its parent. What the chain carries on from (the anchor) is
+  kept as names and a point in the rig's space, never as an `EditBone`,
+  which a mode switch or an undo frees. Mirror X names pairs `Bone.NNN.L` /
+  `.R` with both names free, so `bpy.utils.flip_name` finds a bone's
+  counterpart. Bind is `object.parent_set(type='ARMATURE_AUTO')` with the
+  mesh and rig in the override (any Armature modifier it had for the rig is
+  removed first, as parent_set adds its own). Weights are painted by our own
+  numpy brush, not `paint.weight_paint` (which, like texture paint, would
+  need the desktop view aimed at every dab, and make every dab an undo
+  step). Vertex groups aren't mesh attributes in 5.4, so a group is read
+  once per mesh and bone into a numpy array (about 30 ms for 30k vertices)
+  that the brush keeps current, and only the vertices whose weight changed
+  are written, one `VertexGroup.add` each (under a microsecond apiece; a
+  weight brought to 0 leaves the group). Positions come from the evaluated
+  mesh at the press, so you paint the posed mesh, with brushes.py's hash grid
+  and edge adjacency (Smooth). The heat map is drawn by us (Blender's weight
+  overlay isn't drawn in VR): its positions and triangles are read in the
+  app timer when the pose or the mesh changes, and the colored batch is
+  rebuilt (at most 30 times a second) when the weights change. B's undo
+  keeps each stroke's previous weights per vertex.
 - **Paint mode** ([paint.py](vr_sculpt/paint.py)): `paint.image_paint`
   projects each dab along the 3D view, so for every dab the largest desktop
   3D view is pointed at the dab (from along the surface normal for Contact,
@@ -519,6 +572,10 @@ blender --background --factory-startup --python tests/test_ik_limits.py
 blender --background --factory-startup --python tests/test_hard_surface.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_rig.py
+```
+
 `test_generic.py` enables Extra Mesh Objects for its own run (factory
 settings, so your preferences aren't touched) and checks all 42 entries.
 
@@ -537,6 +594,10 @@ overlay, the Model panel's pages and the Mark tool's edge highlights
 boolean solvers and how the finish stack shades). `stack_preview.py` draws
 the Stack page: the list, and the settings of a bevel, a Subdivision and
 the shading's group inputs.
+`rig_preview.py` builds a spine and mirrored arms with simulated presses
+(from a timer, no area), draws the Rig pages (`rig_panels*.png`), the Bones
+tool's overlay with the rubber band (`rig_bones.png`) and the heat map after
+binding and painting (`rig_weights.png`).
 `pose_preview.py` enters Pose Mode the way VR does (no area), records a
 puppet take while the timeline really plays, and draws the Pose page and
 bones (`probe_pose.py` checked the pose API).
@@ -591,6 +652,14 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   Mirror X needs .L/.R names with mirrored rest poses (as Symmetrize makes).
   Bindings last until Unbind or the end of the VR session. Takes key every
   frame (dense keys), with no smoothing yet.
+- Rig mode: bones are made with roll 0 (fix rolls on the desktop if a
+  rig needs them) and all deform. Bind runs Blender's bone heat while you
+  wait, which can take seconds on a heavy mesh, and it fails silently on
+  bones outside the mesh (they're named in the header). The heat map and the
+  brush's copy of the weights are read when you press or switch bones, so
+  weights changed on the desktop show after the next press. Mirror X for
+  weights mirrors across the mesh's own X; for bones, across the rig's.
+  Weights paints only bound meshes (Bind first).
 - Paint mode needs a desktop 3D view (it paints through it) and briefly moves
   that view for each dab. In Blender's own undo history every dab is a step;
   B in VR undoes whole strokes. Clone, Fill and Mask brushes aren't on the

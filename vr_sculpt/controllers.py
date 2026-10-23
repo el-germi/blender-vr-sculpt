@@ -36,12 +36,13 @@ KEY_NAMES = {
 
 # What hints() needs besides the settings. Gathered by context_info() in VR; tests build it by hand.
 Info = namedtuple("Info", "ray_on_panel ray_on_desktop picker_open cut_target has_rig paint_ready native_brush "
-                          "primitive", defaults=(False, False, False, False, False, True, "", "Cube"))
+                          "primitive rig_bound", defaults=(False, False, False, False, False, True, "", "Cube", True))
 
 NATIVE_LABELS = {"Draw": "Draw", "Clay Strips": "Clay", "Smooth": "Smooth", "Inflate/Deflate": "Inflate",
                  "Crease Sharp": "Crease", "Flatten/Contrast": "Flatten"}
-NEXT_MODE = {'SCULPT': "Model", 'MODEL': "Draw", 'DRAW': "Paint", 'PAINT': "Pose", 'POSE': "Tools",
+NEXT_MODE = {'SCULPT': "Model", 'MODEL': "Draw", 'DRAW': "Paint", 'PAINT': "Rig", 'RIG': "Pose", 'POSE': "Tools",
              'TOOLS': "Sculpt"}
+WEIGHT_LABELS = {'ADD': "Add weight", 'SUBTRACT': "Subtract", 'SMOOTH': "Smooth"}
 
 
 def hints(s, info):
@@ -71,8 +72,10 @@ def hints(s, info):
         right['top'] = ("chevron_right", "Next brush")
     elif mode == 'MODEL':
         right['top'] = ("chevron_right", "Next shape")
-    elif mode in {'DRAW', 'PAINT'}:
+    elif mode in {'DRAW', 'PAINT'} or (mode == 'RIG' and s.rig_tool == 'WEIGHTS'):
         right['top'] = ("undo", "Undo stroke")
+    elif mode == 'RIG':
+        right['top'] = ("check", "End chain")
     elif mode == 'POSE':
         right['top'] = ("swap", "IK" if s.pose_tool == 'FK' else "FK")
     elif mode == 'TOOLS':
@@ -89,6 +92,8 @@ def hints(s, info):
         right['stick_click'] = ("plus", "Brush size")
     elif mode == 'PAINT':
         right['stick_click'] = ("plus", "Paint size")
+    elif mode == 'RIG' and s.rig_tool == 'WEIGHTS':
+        right['stick_click'] = ("plus", "Brush size")
     elif mode == 'POSE':
         right['stick_click'] = ("plus", "IK chain")
 
@@ -125,6 +130,10 @@ def _trigger(s, info):
         return ("spray", "Spray") if s.paint_reach == 'SPRAY' else ("paint", "Paint")
     if mode == 'POSE':
         return ("bones", "Pose " + s.pose_tool) if info.has_rig else ("cursor", "Move object")
+    if mode == 'RIG':
+        if s.rig_tool == 'BONES':
+            return ("bones", "Place joint")
+        return ("weights", WEIGHT_LABELS[s.weight_brush]) if info.rig_bound else None
     if mode == 'TOOLS':
         return ("camera", "Aim camera") if s.tool == 'CAMERA' else ("ruler", "Measure")
     return None
@@ -142,12 +151,17 @@ def _left_trigger(s, info, right):
         return (right[0], "2nd color")
     if mode == 'PAINT' and right is not None:
         return ("eyedropper", "Pick 2nd color")
+    if mode == 'RIG' and s.rig_tool == 'BONES':
+        return ("trash", "Delete bone")
+    if mode == 'RIG' and right is not None:
+        from .rig import flip
+        return ("weights", WEIGHT_LABELS[flip(s.weight_brush)])
     return right
 
 
 def context_info(context, ss):
     """Info for hints() from the scene and the session."""
-    from . import desktop, hardsurface, interactions, menus, native, operators, paint, pose, presence, primitives
+    from . import desktop, hardsurface, interactions, menus, native, operators, paint, pose, presence, primitives, rig
     settings = context.scene.vr_sculpt
     right = operators.controller_pose(ss.controller_aim_location_get(context, 1),
                                       ss.controller_aim_rotation_get(context, 1))
@@ -165,6 +179,7 @@ def context_info(context, ss):
         paint_ready=obj is not None and paint.ready(obj),
         native_brush=brush.name if brush else "",
         primitive=primitives.label(settings.primitive),
+        rig_bound=settings.mode == 'RIG' and rig.bound(rig.mesh(context), rig.target(context)),
     )
 
 
