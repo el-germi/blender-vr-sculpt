@@ -78,6 +78,15 @@ def draw():
             elif kind == 'status':
                 anchor, content, size, desc = a
                 hud.draw_status(anchor, anchor + Vector((0, -1, 0)), 1.0, content, size, with_description=desc)
+            elif kind == 'controllers':
+                from vr_sculpt import controllers
+                fake, info = a
+                controllers.draw(bpy.context, fake, True)
+                if info is not None:
+                    table = controllers.hints(bpy.context.scene.vr_sculpt, info)
+                    for idx, hand in enumerate(('left', 'right')):
+                        controllers._draw_legend(bpy.context, fake, idx, hand, table[hand], 1.0,
+                                                 Vector(fake.viewer_pose_location))
             elif kind == 'ghost':
                 m, icon, hot = a
                 vr_ui.draw_ghost(m, icon, 1.0, hot)
@@ -313,8 +322,50 @@ def build_detail(ctx):
     menus.set_mode(ctx, 'SCULPT')
 
 
+class FakeHands:
+    """Two controllers held in front of a viewer, for the controllers shot; action states from a dict."""
+    viewer_scale = 1.0
+
+    def __init__(self, x, states=None):
+        self.viewer_pose_location = Vector((0.0, -0.35, 0.3))
+        self.viewer_pose_rotation = Quaternion((1, 0, 0), math.radians(58))
+        # Pointing forward (+Y) and a little down, wrists turned slightly in.
+        fwd = Vector((0.0, 1.0, -0.25)).to_track_quat('-Z', 'Z')
+        self.rot = [Quaternion((0, 1, 0), math.radians(-12)) @ fwd, Quaternion((0, 1, 0), math.radians(12)) @ fwd]
+        self.grip = [Vector((x - 0.075, 0.0, 0.0)), Vector((x + 0.075, 0.0, 0.0))]
+        self.states = states or {}
+
+    def controller_aim_rotation_get(self, context, i):
+        return self.rot[i]
+
+    def controller_grip_location_get(self, context, i):
+        return self.grip[i]
+
+    def controller_aim_location_get(self, context, i):
+        return self.grip[i] + self.rot[i] @ Vector((0.0, 0.03, -0.05))
+
+    def action_state_get(self, context, actionmap, action, user_path):
+        if (action, user_path) not in self.states:
+            raise RuntimeError("no such action")
+        return self.states[(action, user_path)]
+
+
+def build_controllers(ctx):
+    """Both controllers at rest with their button hints (Sculpt), and both with buttons pressed."""
+    from vr_sculpt import actions, controllers
+    s = ctx.scene.vr_sculpt
+    s.mode, s.engine, s.brush = 'SCULPT', 'PYTHON', 'DRAW'
+    items.append(('controllers', (FakeHands(-0.2), controllers.Info())))
+    L, R = actions.HANDS
+    pressed = {(actions.ACTION_STROKE, R): 0.85, (actions.ACTION_BRUSH, R): 1.0, ("fly_turnright", R): 0.8,
+               ("fly_turnleft", R): 0.0, ("fly_up", R): 0.4, ("fly_down", R): 0.0, ("nav_grab", L): 1.0,
+               ("nav_reset", L): 1.0, (actions.ACTION_RADIUS, L): 1.0}
+    items.append(('controllers', (FakeHands(0.2, pressed), None)))
+
+
 SHOTS = (("modes", build_modes, (0.0, 0.0, 0.34), 1.02), ("sheets", build_sheets, (0.0, 0.0, 0.34), 1.02),
-         ("overlay", build_overlay, (-0.05, 0.0, 0.24), 0.95), ("detail", build_detail, (0.0, 0.0, 0.11), 0.37))
+         ("overlay", build_overlay, (-0.05, 0.0, 0.24), 0.95), ("detail", build_detail, (0.0, 0.0, 0.11), 0.37),
+         ("controllers", build_controllers, (0.0, 0.0, 0.0), 0.62))
 
 
 def setup():
@@ -373,10 +424,15 @@ def next_shot(win, area, region, i):
         items.clear()
         build(bpy.context)
         rv3d = area.spaces.active.region_3d
-        rv3d.view_perspective = 'ORTHO'
         rv3d.view_location = center
-        rv3d.view_rotation = Quaternion((1, 0, 0), math.pi / 2)
         rv3d.view_distance = distance
+        if name == 'controllers':
+            # From where the fake viewer stands: a little above, looking down at the hands.
+            rv3d.view_perspective = 'PERSP'
+            rv3d.view_rotation = Quaternion((1, 0, 0), math.radians(58))
+        else:
+            rv3d.view_perspective = 'ORTHO'
+            rv3d.view_rotation = Quaternion((1, 0, 0), math.pi / 2)
         # Hide the scene's own objects: only the UI is of interest here.
         for o in bpy.context.scene.objects:
             o.hide_viewport = True

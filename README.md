@@ -19,6 +19,11 @@ Meta Quest over OpenXR.
     Inflate/Deflate, Crease Sharp, Flatten/Contrast.
 - **Brush cursor in the headset**: rings at each controller tip, colored per
   brush (blue when that hand inverts).
+- **Stylized controllers** instead of Blender's gray spheres (SteamVR gives no
+  controller model): pressed buttons light up, the stick tilts with yours, and a
+  small legend beside each hand says what its buttons do right now (it shows
+  when you look at that hand or hold it still). Settings > Hands switches back
+  to Blender's.
 - **Tip status** above the right controller: a slim line with the mode icon
   in the tool's color, the tool's name and its size (radius, stroke width, IK
   chain, lens), plus a one-line description for a few seconds after switching.

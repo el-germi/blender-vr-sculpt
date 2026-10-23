@@ -439,6 +439,218 @@ def test_ghost():
     check(vr_ui.GHOST_Y - vr_ui.GHOST_R > 0.0, "the disc sits above the hand, not on it")
 
 
+def test_controller_hints():
+    print("== controller button hints")
+    from vr_sculpt import controllers
+    s = bpy.context.scene.vr_sculpt
+    Info = controllers.Info
+
+    def label(hand, button, info=Info()):
+        h = controllers.hints(s, info)[hand][button]
+        return h[1] if h else None
+
+    s.mode, s.engine, s.brush, s.left_inverts = 'SCULPT', 'PYTHON', 'DRAW', True
+    check(label('right', 'trigger') == "Draw" and label('left', 'trigger') == "Draw, inverted",
+          "Sculpt: right trigger draws, left inverts")
+    s.brush = 'SMOOTH'
+    check(label('left', 'trigger') == "Smooth", "a brush that doesn't invert: the same on both hands")
+    s.engine = 'NATIVE'
+    check(label('right', 'trigger', Info(native_brush="Clay Strips")) == "Clay", "native brushes by short name")
+    s.engine, s.brush = 'PYTHON', 'DRAW'
+    check(label('right', 'top') == "Next brush" and label('right', 'stick_click') == "Brush size",
+          "Sculpt: B next brush, stick click brush size")
+
+    s.mode = 'MODEL'
+    check(label('right', 'trigger', Info(primitive="Torus")) == "Add Torus, grab", "Model: add (the primitive) or grab")
+    s.model_add_as = 'DIFFERENCE'
+    check(label('right', 'trigger', Info(cut_target=True)) == "Cut", "New as Cut, with an object to cut: Cut")
+    check(label('right', 'trigger').startswith("Add"), "nothing to cut: still adds")
+    s.model_add_as = 'OBJECT'
+    s.model_mark = 'HARD'
+    check(label('right', 'trigger') == "Mark hard" and label('left', 'trigger') == "Clear marks",
+          "edge marks: right marks, left clears")
+    s.model_mark = 'NONE'
+    check(label('right', 'top') == "Next shape" and label('right', 'stick_click') is None,
+          "Model: B next shape; the stick click has nothing to say")
+
+    s.mode, s.draw_tool, s.draw_style = 'DRAW', 'DRAW', 'RIBBON'
+    check(label('right', 'trigger') == "Ribbon" and label('right', 'top') == "Undo stroke", "Draw: the style; B undoes")
+    s.draw_tool = 'ERASE'
+    check(label('right', 'trigger') == "Erase", "Erase tool")
+    s.draw_tool, s.draw_style = 'DRAW', 'TUBE'
+
+    s.mode = 'PAINT'
+    check(label('right', 'trigger', Info(paint_ready=False)) is None, "Paint before setup: no trigger hint")
+    check(label('right', 'trigger') == "Paint" and label('left', 'trigger') == "2nd color", "Paint: left paints 2nd")
+    s.paint_reach = 'SPRAY'
+    check(label('right', 'trigger') == "Spray", "Spray")
+    s.paint_reach, s.paint_tool = 'CONTACT', 'PICK'
+    check(label('right', 'trigger') == "Pick color" and label('left', 'trigger') == "Pick 2nd color", "Pick color")
+    s.paint_tool = 'PAINT'
+
+    s.mode, s.pose_tool = 'POSE', 'IK'
+    check(label('right', 'trigger', Info(has_rig=True)) == "Pose IK" and label('right', 'top') == "FK",
+          "Pose: the tool, and B switches to the other")
+    check(label('right', 'trigger') == "Move object" and label('right', 'stick_click') == "IK chain",
+          "no rig: moves objects; stick click: IK chain")
+    s.pose_tool = 'FK'
+
+    s.mode, s.tool = 'TOOLS', 'CAMERA'
+    check(label('right', 'trigger') == "Aim camera" and label('right', 'top') == "Next camera", "Tools: camera")
+    s.tool = 'MEASURE'
+    check(label('right', 'trigger') == "Measure" and label('right', 'top') == "Undo measure", "Tools: measure")
+
+    s.mode = 'SCULPT'
+    check(label('right', 'trigger', Info(ray_on_panel=True)) == "Press", "the ray on the panel: Press")
+    check(label('right', 'trigger', Info(ray_on_panel=True, picker_open=True)) == "Choose", "in a picker: Choose")
+    desk = Info(ray_on_desktop=True)
+    check(label('right', 'trigger', desk) == "Click" and label('left', 'trigger', desk) == "Middle click" and
+          label('right', 'top', desk) == "Right click" and label('right', 'stick', desk) == "Scroll",
+          "on the desktop screen: the mouse")
+    names = {'SCULPT': "Model", 'MODEL': "Draw", 'DRAW': "Paint", 'PAINT': "Pose", 'POSE': "Tools", 'TOOLS': "Sculpt"}
+    icons = set()
+    for mode, nxt in names.items():
+        s.mode = mode
+        for info in (Info(), Info(ray_on_panel=True), desk, Info(has_rig=True, cut_target=True)):
+            table = controllers.hints(s, info)
+            icons |= {h[0] for hand in table.values() for h in hand.values() if h}
+        if label('left', 'top') != "Next: " + nxt:
+            check(False, f"{mode}: Y names the next mode")
+    check(not (icons - set(gfx.ICONS)), f"every hint icon is drawn (missing {sorted(icons - set(gfx.ICONS))})")
+    s.mode = 'SCULPT'
+    s.panel_pin = False
+    check(label('left', 'stick_click') == "Pin panel", "left stick click: Pin panel")
+    s.panel_pin = True
+    check(label('left', 'stick_click') == "Unpin panel", "pinned: Unpin panel")
+    s.panel_pin = False
+    s.nav_mode = 'FLY'
+    check(label('left', 'stick') == "Fly" and label('right', 'stick') == "Up, down, turn", "Fly sticks")
+    s.nav_mode = 'WALK'
+    check(label('left', 'stick') == "Walk" and label('right', 'stick') == "Turn", "Walk sticks")
+    check(label('left', 'grip') == "Move world" and label('right', 'bottom') == "Reset view",
+          "grips and A / X: Blender's navigation")
+
+
+class InputSS(SS):
+    """Action states by (action, hand path)."""
+
+    def __init__(self, states):
+        super().__init__()
+        self.states = states
+
+    def action_state_get(self, context, actionmap, action, user_path):
+        if (action, user_path) not in self.states:
+            raise RuntimeError("no such action")
+        return self.states[(action, user_path)]
+
+
+def test_controller_inputs():
+    print("== controller inputs, hint reveal, geometry")
+    from vr_sculpt import controllers
+    ctx = bpy.context
+    L, R = actions.HANDS
+    ss = InputSS({(actions.ACTION_STROKE, R): 0.6, ("nav_grab", R): 0.0, (actions.ACTION_BRUSH, R): 1.0,
+                  ("nav_reset", R): 0.0, (actions.ACTION_RADIUS, R): 0.0,
+                  ("fly_turnright", R): 0.8, ("fly_turnleft", R): 0.0, ("fly_up", R): 0.0, ("fly_down", R): 0.5,
+                  ("teleport", L): 0.2, ("fly_forward", L): -0.7, ("fly_back", L): -0.7,
+                  ("fly_right", L): 0.25, ("fly_left", L): 0.25})
+    r = controllers.read_inputs(ctx, ss, 1)
+    check(abs(r.trigger - 0.6) < 1e-9 and r.top and not r.bottom and not r.stick_click,
+          "right: trigger value, B pressed")
+    check(abs(r.stick_x - 0.8) < 1e-9 and abs(r.stick_y + 0.5) < 1e-9, "stick halves as magnitudes: (0.8, -0.5)")
+    lft = controllers.read_inputs(ctx, ss, 0)
+    check(abs(lft.trigger - 0.2) < 1e-9, "sculpting off: the stock trigger action is read")
+    check(abs(lft.stick_y + 0.7) < 1e-9 and abs(lft.stick_x - 0.25) < 1e-9, "stick halves reading the signed axis")
+    check(lft.grip == 0.0, "an action that isn't there reads as released")
+    check(controllers.working(r) and not controllers.working(controllers.Inputs(0, 0, False, False, False, 0.1, 0)),
+          "a pressed button or tilted stick is work; a resting hand isn't")
+
+    controllers.reset_hints()
+    a = 0.0
+    t = 0.0
+    while t < 1.0:
+        t += 0.05
+        a = controllers.update_hints(0, (0, 0, 1), 1.0, looking=False, busy=False, now=t)
+    check(a < 0.01, "not looking, still for under a second: no hints")
+    while t < 2.2:
+        t += 0.05
+        a = controllers.update_hints(0, (0, 0, 1), 1.0, looking=False, busy=False, now=t)
+    check(a > 0.9, f"held still for {controllers.STILL_TIME} s: the hints fade in ({a:.2f})")
+    for i in range(10):
+        t += 0.05
+        a = controllers.update_hints(0, (0, 0.02 * i, 1), 1.0, looking=False, busy=False, now=t)
+    check(a < 0.05, "moving the hand: they fade out")
+    for i in range(10):
+        t += 0.05
+        a = controllers.update_hints(0, (0, 0.2, 1), 1.0, looking=True, busy=False, now=t)
+    check(a > 0.9, "looking at the hand: they show")
+    for i in range(6):
+        t += 0.05
+        a = controllers.update_hints(0, (0, 0.2, 1), 1.0, looking=True, busy=True, now=t)
+    check(a < 0.05, "pressing a button (working): they fade out fast")
+    controllers.reset_hints()
+
+    for hand in ('left', 'right'):
+        p = controllers.parts(hand)
+        pts = [v for tris in p.values() for tri in tris for v in tri[:3]]
+        far = max(v.length for v in pts)
+        check(set(p) >= {'body', 'face', 'ring', 'top', 'bottom', 'stick', 'trigger', 'grip'} and far < 0.16,
+              f"{hand}: every part, within {far * 100:.1f} cm of the face")
+        where = controllers.layout(hand)
+        inward = 1 if hand == 'left' else -1
+        check(where['top'].x * inward > 0 and where['stick'].x * inward < 0 and where['top'].z < where['bottom'].z,
+              f"{hand}: face buttons on the inner side (B / Y ahead of A / X), the stick on the outer")
+    ss2 = SS()
+    m = controllers.controller_matrix(ss2, ctx, 1)
+    grip = Vector(ss2.controller_grip_location_get(ctx, 1))
+    check(abs((m.translation - grip).length - controllers.FACE_ABOVE_GRIP) < 1e-6,
+          "the model sits on the grip pose (the aim pose, the tip ring and the ray are untouched)")
+
+
+def test_controller_visibility():
+    print("== Blender's controllers hidden and restored")
+    from vr_sculpt import controllers
+    ctx = bpy.context
+    s = ctx.scene.vr_sculpt
+    xs = ctx.window_manager.xr_session_settings
+    xs.show_controllers = True
+    s.own_controllers = True
+    controllers.on_session_start(ctx)
+    check(not xs.show_controllers, "session start: Blender's controllers are hidden")
+    controllers.tick(ctx, True)
+    check(not xs.show_controllers, "and stay hidden while it runs")
+    controllers.tick(ctx, False)
+    check(xs.show_controllers, "session over: back as they were")
+    xs.show_controllers = False
+    controllers.on_session_start(ctx)
+    controllers.tick(ctx, False)
+    check(not xs.show_controllers, "a user who had them off: still off afterwards")
+    xs.show_controllers = True
+    s.own_controllers = False
+    controllers.on_session_start(ctx)
+    check(xs.show_controllers, "Stylized Controllers off: Blender's stay")
+    real = operators.session_running
+    operators.session_running = lambda context: True
+    try:
+        s.own_controllers = True
+        check(not xs.show_controllers, "switching it on mid-session hides Blender's")
+        s.own_controllers = False
+        check(xs.show_controllers, "and off again brings them back")
+        s.own_controllers = True
+        controllers.unregister()
+        check(xs.show_controllers, "turning the add-on off puts them back too")
+    finally:
+        operators.session_running = real
+    vr_ui.find(menus.layout(ctx)[0], "settings").on_press()
+    widgets = menus.layout(ctx)[0]
+    check(vr_ui.find(widgets, "controllers_blender") is not None and vr_ui.find(widgets, "controller_hints"),
+          "Settings: Hands Stylized / Blender and Hints")
+    vr_ui.find(widgets, "controllers_blender").on_press()
+    check(not s.own_controllers, "Blender's from the panel")
+    s.own_controllers = True
+    menus.reset()
+
+
 def test_status():
     print("== tip status")
     ctx = bpy.context
@@ -464,7 +676,7 @@ def main():
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o)
         for t in (test_disclosure, test_sheets, test_layout, test_stepper_and_detents, test_presence, test_ghost,
-                  test_status):
+                  test_controller_hints, test_controller_inputs, test_controller_visibility, test_status):
             try:
                 t()
             except Exception:

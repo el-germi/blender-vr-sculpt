@@ -941,6 +941,12 @@ def _settings_rows(context, settings):
                       icon="desktop", tip="Desktop window"),
          vr_ui.button("bring_desktop", "Bring here", lambda: _bring_desktop(context), icon="here")
          if settings.show_desktop else vr_ui.label("")],
+        [vr_ui.label("Hands", fixed=LABEL_W)] + _segments(
+            "controllers_", "controllers", (('ours', "Stylized"), ('blender', "Blender")),
+            'ours' if settings.own_controllers else 'blender',
+            lambda v: setattr(settings, "own_controllers", v == 'ours')) + [
+            vr_ui.toggle("controller_hints", "Hints", settings.controller_hints, _toggle(settings, "controller_hints"),
+                         icon="eye", tip="Button hints")],
         [vr_ui.label("Panel", fixed=LABEL_W)] + _segments(
             "reveal_", "reveal", REVEALS, settings.panel_reveal.lower(),
             lambda v: setattr(settings, "panel_reveal", v.upper())),

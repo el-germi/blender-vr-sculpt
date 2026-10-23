@@ -85,6 +85,31 @@ staying the fastest way to reach *everything*?
 
 ![The timeline beside the panel, the tip status per mode, the ghost](ui_panel_overlay.png)
 
+## Controllers and button hints
+
+![At rest with their hints (left pair); buttons pressed, stick tilted (right pair)](ui_panel_controllers.png)
+
+Blender draws the runtime's controller model when it gets one; SteamVR gives none, so it falls back
+to gray spheres. Instead, the add-on draws its own Touch-style controllers at the grip poses, in the
+panel's palette: body, tracking ring, thumbstick, face buttons, trigger and grip, from simple
+flat-shaded geometry (no model files). Blender's are hidden while the session runs and put back as
+they were when it ends (or when you switch back: **gear** > Hands > Blender, or VR Extras >
+Stylized Controllers).
+
+- **Press feedback**: the trigger lights up in the accent as you pull it (and swings back a
+  little), the grip, A / B / X / Y and the stick click light up while pressed (the buttons sink a
+  millimeter), and the stick tilts with yours.
+- **Button hints**: beside each controller, a small legend says what each button does right now,
+  with a faint leader to the button: the trigger's action in this mode and tool ("Draw",
+  "Cut", "Pose IK", "Pick color", "Press" on the panel, "Click" on the desktop screen), B / Y
+  ("Next brush", "Undo stroke", "IK", "Next: Model"), the sticks ("Walk" / "Fly", "Turn",
+  "Scroll"), the stick clicks ("Pin panel", "Brush size", "IK chain"), A / X and the grips
+  (Blender's "Reset view" and "Move world"). The legend shows when you look at that hand, or
+  hold it still for 1.2 s, and fades as soon as you press anything or move. **gear** > Hands >
+  Hints turns them off.
+- The model sits on the grip pose; the brush tips, rings and the panel ray still come from the aim
+  pose, so nothing you aim with has moved.
+
 ## Interaction map
 
 Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
@@ -107,6 +132,9 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Desktop window, bring it here | **gear** > Desktop Show, Bring here |
 | Tracking objects, record them | **gear** > Track Objects, Record |
 | Tip status on / off | VR Authoring > Show Tip Status (desktop) |
+| Stylized controllers or Blender's | **gear** > Hands Stylized / Blender; VR Extras > Stylized Controllers |
+| Button hints on / off | **gear** > Hands > Hints; VR Extras > Button Hints |
+| What a button does now | look at that controller (or hold it still): its legend |
 | Undo / redo in Blender | as before (every panel press is one undo step) |
 
 ### Sculpt
@@ -265,7 +293,12 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
    the size flash? Is the status line readable without being in the way?
 9. **Timeline.** Scrub, play, key. Does the strip beside the panel feel like
    part of it?
-10. **Overall.** Compare with A and B on: time to reach a rare setting, time for
+10. **Controllers.** Do the stylized controllers sit where your real ones are (the handle in your
+    hand, the face under your thumb)? Do the brush tip and the ray still come out where they did?
+    Press each button: does the right part light up, and does the stick follow yours? Look at a
+    hand: do the hints come up, readable, and go away once you start working? Are any of them
+    wrong for the mode you're in?
+11. **Overall.** Compare with A and B on: time to reach a rare setting, time for
     the top action, how calm the view is while sculpting.
 
 ## Implementation notes
@@ -279,6 +312,11 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 - [presence.py](../vr_sculpt/presence.py): the reveal rule. Thresholds: wrist
   55 degrees on / 70 off, gaze 32 on / 48 off, linger 0.6 s, fade 70 / 140 ms.
 - [hud.py](../vr_sculpt/hud.py): the tip status.
+- [controllers.py](../vr_sculpt/controllers.py): the stylized controllers, reading the buttons
+  (`action_state_get` on the add-on's and the stock actions: every Touch button already has one),
+  `hints()` (pure: settings plus an `Info` of where the ray is and what's selected), the hints'
+  reveal (look 28 degrees, still 1.2 s under 12 cm/s) and hiding / restoring Blender's
+  controllers.
 - The ghost (`vr_ui.GHOST_R`, `GHOST_HIT`): drawn radius 11 mm (12 mm when
   pointed at), hit radius 26 mm, centered 20 mm above the panel's anchor.
 - [interactions.py](../vr_sculpt/interactions.py): presses, stepper repeat,
@@ -288,4 +326,4 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
   taking presses); the other suites press the new widgets.
 - Renders: `blender --window-geometry 0 0 1920 1080 --factory-startup
   test_scene.blend --python tests/ui_preview.py` writes `tests/ui_modes.png`,
-  `ui_sheets.png`, `ui_overlay.png` and `ui_detail.png` (the images above).
+  `ui_sheets.png`, `ui_overlay.png`, `ui_detail.png` and `ui_controllers.png` (the images above).

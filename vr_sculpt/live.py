@@ -5,7 +5,7 @@ import time
 
 import bpy
 
-from . import camera, desktop, onion, operators, paths, puppet, tracking
+from . import camera, controllers, desktop, onion, operators, paths, puppet, tracking
 
 FAST = 1.0 / 90.0
 IDLE = 0.25
@@ -25,6 +25,7 @@ def _tick():
         if not operators.session_running(context):
             if puppet.active():
                 puppet.end_session(context)
+            controllers.tick(context, False)  # Blender's controllers back as they were.
             return IDLE
         ss = context.window_manager.xr_session_state
         if settings.tracking:

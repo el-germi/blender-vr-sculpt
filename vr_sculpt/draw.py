@@ -8,8 +8,8 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-from . import (camera, desktop, drawing, grid, hardsurface, hud, interactions, measure, menus, onion, operators,
-               paint, paths, presence, primitives, puppet, shading, snapping, strokes, symmetry, vr_ui)
+from . import (camera, controllers, desktop, drawing, grid, hardsurface, hud, interactions, measure, menus, onion,
+               operators, paint, paths, presence, primitives, puppet, shading, snapping, strokes, symmetry, vr_ui)
 from . import pose as pose_mode  # "pose" is a controller pose below
 
 COLORS = hud.PYTHON_COLORS
@@ -62,6 +62,7 @@ def draw_overlay(context, ss, xr=True):
     poses = [operators.controller_pose(ss.controller_aim_location_get(context, i),
                                        ss.controller_aim_rotation_get(context, i)) for i in range(2)]
     tips = [operators.brush_tip(p, settings.tip_offset * scale) for p in poses]
+    controllers.draw(context, ss, xr)
     if settings.grid_show:
         gpu.state.blend_set('ALPHA')
         gpu.state.depth_test_set('NONE')
@@ -78,6 +79,7 @@ def draw_overlay(context, ss, xr=True):
         desktop.draw(context, ss, poses[1])
     if settings.show_cursor:
         _draw_cursors(context, ss, settings, xr)
+    controllers.draw_hints(context, ss)
 
 
 def _draw_cursors(context, ss, settings, xr):
@@ -308,3 +310,4 @@ def unregister():
         bpy.types.SpaceView3D.draw_handler_remove(h, region)
     _handles.clear()
     hud.clear()
+    controllers.clear()
