@@ -589,6 +589,9 @@ def test_controller_inputs():
         a = controllers.update_hints(0, (0, 0.2, 1), 1.0, looking=True, busy=True, now=t)
     check(a < 0.05, "pressing a button (working): they fade out fast")
     controllers.reset_hints()
+    check(controllers.legend_alpha(0, 1.0, 1.0) == 0.0 and abs(controllers.legend_alpha(0, 1.0, 0.25) - 0.75) < 1e-9,
+          "the left legend fades out as the hand panel fades in over it")
+    check(controllers.legend_alpha(1, 1.0, 1.0) == 1.0, "the right one stays")
 
     check(controllers.available(), "the controller models are in the add-on")
     rest = controllers.Inputs(0.0, 0.0, False, False, False, 0.0, 0.0)

@@ -23,8 +23,9 @@ Meta Quest over OpenXR.
   instead of Blender's gray spheres (SteamVR gives no controller model): pressed
   buttons move and light up, the stick tilts with yours, and a
   small legend beside each hand says what its buttons do right now (it shows
-  when you look at that hand or hold it still). Settings > Hands switches back
-  to Blender's.
+  when you look at that hand or hold it still; the left one fades out while
+  the hand panel, which sits in the same place, is up). Settings > Hands
+  switches back to Blender's.
 - **Tip status** above the right controller: a slim line with the mode icon
   in the tool's color, the tool's name and its size (radius, stroke width, IK
   chain, lens), plus a one-line description for a few seconds after switching.
@@ -103,7 +104,10 @@ Meta Quest over OpenXR.
   - **Scene camera**: hold the trigger and the camera follows your controller
     (it looks where you point), with a live **camera preview** above your
     hand. Switch or add cameras and set the lens from the panel. The preview
-    can also be pinned next to the hand panel in every mode.
+    can also be pinned next to the hand panel in every mode. If the VR
+    landmark is the scene camera (the stock add-on's default), you stay
+    where you are: the first aim or switch pins the base pose there, and
+    it's put back when the session ends.
 - **3D grid and snapping**: a lattice of points around the controller tips,
   in scene units. Snap to Grid snaps new primitives, grabbed objects and tape
   ends. In Model mode, **Surface** makes a grabbed object sit on the mesh

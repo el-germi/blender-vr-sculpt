@@ -235,6 +235,39 @@ def test_camera():
     check(camera.wanted(ctx), "pinned preview shows in any tool")
     settings.camera_preview = False
 
+    # The VR viewer is placed by the scene camera (the stock add-on's default landmark): aiming or
+    # switching it must not drag you along.
+    from vr_sculpt import operators
+    xs = ctx.window_manager.xr_session_settings
+    xs.base_pose_type = 'SCENE_CAMERA'
+    running = operators.session_running
+    operators.session_running = lambda context: True
+    other = bpy.data.objects.new("Base", None)
+    scene.collection.objects.link(other)
+    try:
+        cam = scene.camera
+        cam.matrix_world = Matrix.LocRotScale(Vector((2, -1, 1.5)), Quaternion((0, 0, 1), 0.7) @
+                                              Quaternion((1, 0, 0), 1.4), None)
+        ctx.view_layer.update()
+        h = camera.AimCamera(ctx, pose)
+        check(xs.base_pose_type == 'CUSTOM' and close(xs.base_pose_location, (2, -1, 1.5)) and
+              abs(xs.base_pose_angle - 0.7) < 1e-5, "aiming the camera you're placed by pins the base pose there")
+        h.update(ctx, pose2, pose2, 1.0)
+        h.finish(ctx)
+        camera.next_camera(ctx)
+        check(xs.base_pose_type == 'CUSTOM' and close(xs.base_pose_location, (2, -1, 1.5)),
+              "moving and switching cameras leave it where it was")
+        camera.release_base_pose(ctx)
+        check(xs.base_pose_type == 'SCENE_CAMERA' and camera._held["type"] is None, "the session's end puts it back")
+        xs.base_pose_type, xs.base_pose_object = 'OBJECT', other
+        camera.AimCamera(ctx, pose).finish(ctx)
+        check(xs.base_pose_type == 'OBJECT', "placed by another object, aiming a camera changes nothing")
+    finally:
+        operators.session_running = running
+        camera.release_base_pose(ctx)
+        xs.base_pose_type, xs.base_pose_object = 'SCENE_CAMERA', None
+        bpy.data.objects.remove(other)
+
 
 def test_navigation():
     print("== navigation")

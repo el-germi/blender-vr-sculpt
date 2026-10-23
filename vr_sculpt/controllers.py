@@ -513,7 +513,13 @@ LEGEND_ROW = 0.0105
 LEGEND_SIDE = 0.034  # hand-space meters from the controller to the legend
 
 
-def draw_hints(context, ss, now=None, info=None):
+def legend_alpha(hand_idx, alpha, panel_alpha):
+    """A hand's legend alpha with the hand panel showing at panel_alpha: the left one gives way to it
+    (the panel sits right over the left hand, where its legend is)."""
+    return alpha * (1.0 - panel_alpha) if hand_idx == 0 else alpha
+
+
+def draw_hints(context, ss, now=None, info=None, panel_alpha=0.0):
     """The legends beside both controllers, faded per hand."""
     settings = context.scene.vr_sculpt
     if not (settings.own_controllers and settings.controller_hints and available()):
@@ -526,7 +532,8 @@ def draw_hints(context, ss, now=None, info=None):
     for idx in range(2):
         grip = Vector(ss.controller_grip_location_get(context, idx))
         looking = forward is None or (grip - head).normalized().dot(forward) > LOOK
-        alphas.append(update_hints(idx, grip, ss.viewer_scale, looking, working(read_inputs(context, ss, idx)), now))
+        alpha = update_hints(idx, grip, ss.viewer_scale, looking, working(read_inputs(context, ss, idx)), now)
+        alphas.append(legend_alpha(idx, alpha, panel_alpha))
     if max(alphas) <= 0.01:
         return
     table = hints(settings, info or context_info(context, ss))

@@ -26,6 +26,7 @@ def _tick():
             if puppet.active():
                 puppet.end_session(context)
             controllers.tick(context, False)  # Blender's controllers back as they were.
+            camera.release_base_pose(context)  # And the base pose, if aiming a camera pinned it.
             return IDLE
         ss = context.window_manager.xr_session_state
         if settings.tracking:
