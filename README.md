@@ -19,8 +19,9 @@ Meta Quest over OpenXR.
     Inflate/Deflate, Crease Sharp, Flatten/Contrast.
 - **Brush cursor in the headset**: rings at each controller tip, colored per
   brush (blue when that hand inverts).
-- **Stylized controllers** instead of Blender's gray spheres (SteamVR gives no
-  controller model): pressed buttons light up, the stick tilts with yours, and a
+- **Quest controller models** (Meta's, converted by `tools/convert_controllers.py`)
+  instead of Blender's gray spheres (SteamVR gives no controller model): pressed
+  buttons move and light up, the stick tilts with yours, and a
   small legend beside each hand says what its buttons do right now (it shows
   when you look at that hand or hold it still). Settings > Hands switches back
   to Blender's.

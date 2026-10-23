@@ -331,8 +331,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     )
     show_cursor: BoolProperty(name="Show Brush Cursor", default=True)
     own_controllers: BoolProperty(
-        name="Stylized Controllers",
-        description="Draw this add-on's controllers (pressed buttons light up) instead of Blender's, which "
+        name="Controller Models",
+        description="Draw Meta's Quest controllers (pressed buttons move and light up) instead of Blender's, which "
                     "are gray spheres when the runtime gives no model (SteamVR)",
         default=True,
         update=lambda self, context: _controllers_option(self, context),

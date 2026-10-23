@@ -590,21 +590,39 @@ def test_controller_inputs():
     check(a < 0.05, "pressing a button (working): they fade out fast")
     controllers.reset_hints()
 
+    check(controllers.available(), "the controller models are in the add-on")
+    rest = controllers.Inputs(0.0, 0.0, False, False, False, 0.0, 0.0)
     for hand in ('left', 'right'):
-        p = controllers.parts(hand)
-        pts = [v for tris in p.values() for tri in tris for v in tri[:3]]
-        far = max(v.length for v in pts)
-        check(set(p) >= {'body', 'face', 'ring', 'top', 'bottom', 'stick', 'trigger', 'grip'} and far < 0.16,
-              f"{hand}: every part, within {far * 100:.1f} cm of the face")
+        mdl = controllers.model(hand)
+        far = max(c.length for c in mdl.centers.values())
+        check(set(mdl.centers) >= {'body', 'top', 'bottom', 'stick', 'trigger', 'grip'} and far < 0.08,
+              f"{hand}: every part, within {far * 100:.1f} cm of the model's origin")
+        check(len(mdl.tris['body']) > 1000 and mdl.tex_data.shape[2] == 3, f"{hand}: a real mesh and its texture")
         where = controllers.layout(hand)
         inward = 1 if hand == 'left' else -1
         check(where['top'].x * inward > 0 and where['stick'].x * inward < 0 and where['top'].z < where['bottom'].z,
               f"{hand}: face buttons on the inner side (B / Y ahead of A / X), the stick on the outer")
+        check(where['trigger'].y < where['top'].y and where['trigger'].z < where['grip'].z,
+              f"{hand}: the trigger under the face, ahead of the grip")
+
+        def moved(name, inputs, point):
+            return mdl.part_matrix(name, inputs) @ point - point
+        trig = moved('trigger', rest._replace(trigger=1.0), mdl.centers['trigger'])
+        check(trig.z > 0.002, f"{hand}: a pulled trigger swings back toward the handle ({trig.z * 1000:.1f} mm)")
+        cap = mdl.tops['stick']
+        fwd = moved('stick', rest._replace(stick_y=1.0), cap)
+        right = moved('stick', rest._replace(stick_x=1.0), cap)
+        check(fwd.z < -0.002 and abs(fwd.x) < 0.001 and right.x > 0.002 and abs(right.z) < 0.001,
+              f"{hand}: the stick tilts the way it's pushed (forward {fwd.z * 1000:.1f} mm, right "
+              f"{right.x * 1000:.1f} mm)")
+        press = moved('top', rest._replace(top=True), mdl.centers['top'])
+        check(-0.003 < press.y < -0.001, f"{hand}: a pressed button sinks ({press.y * 1000:.1f} mm)")
+        check(moved('trigger', rest, mdl.centers['trigger']).length < 1e-9, f"{hand}: at rest nothing moves")
     ss2 = SS()
     m = controllers.controller_matrix(ss2, ctx, 1)
-    grip = Vector(ss2.controller_grip_location_get(ctx, 1))
-    check(abs((m.translation - grip).length - controllers.FACE_ABOVE_GRIP) < 1e-6,
-          "the model sits on the grip pose (the aim pose, the tip ring and the ray are untouched)")
+    aim = Vector(ss2.controller_aim_location_get(ctx, 1))
+    check(abs((m.translation - aim).length - controllers.MODEL_OFFSET.length) < 1e-6,
+          "the model sits on the aim pose (the tip ring and the ray are untouched)")
 
 
 def test_controller_visibility():
@@ -628,7 +646,7 @@ def test_controller_visibility():
     xs.show_controllers = True
     s.own_controllers = False
     controllers.on_session_start(ctx)
-    check(xs.show_controllers, "Stylized Controllers off: Blender's stay")
+    check(xs.show_controllers, "Controller Models off: Blender's stay")
     real = operators.session_running
     operators.session_running = lambda context: True
     try:
@@ -644,7 +662,7 @@ def test_controller_visibility():
     vr_ui.find(menus.layout(ctx)[0], "settings").on_press()
     widgets = menus.layout(ctx)[0]
     check(vr_ui.find(widgets, "controllers_blender") is not None and vr_ui.find(widgets, "controller_hints"),
-          "Settings: Hands Stylized / Blender and Hints")
+          "Settings: Hands Quest / Blender and Hints")
     vr_ui.find(widgets, "controllers_blender").on_press()
     check(not s.own_controllers, "Blender's from the panel")
     s.own_controllers = True

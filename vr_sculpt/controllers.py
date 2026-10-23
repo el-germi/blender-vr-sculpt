@@ -1,22 +1,24 @@
-"""Stylized controllers drawn at the hands, in the hand panel's visual style, with what each button
-does right now.
+"""The real controllers drawn at the hands, with what each button does right now.
 
 Blender draws the runtime's controller model when it gets one (XR_MSFT_controller_model); SteamVR
-gives none, so it falls back to gray spheres. With Stylized Controllers on, Blender's are hidden
-while the session runs and these are drawn instead: a Touch-like body, tracking ring, thumbstick,
-face buttons, trigger and grip, built here from simple geometry (no model files). Pressed parts
-light up in the accent color (the trigger by how far it's pulled) and the stick tilts with yours.
+gives none, so it falls back to gray spheres. With Controller Models on, Blender's are hidden while
+the session runs and Meta's Quest Pro controllers are drawn instead (assets/controllers, made by
+tools/convert_controllers.py): the buttons, trigger, grip and stick move as yours do, the way Meta's
+own press animation moves them, and pressed parts light up in the accent color (the trigger by how
+far it's pulled).
 
 Beside each controller, a short legend says what the buttons do now (hints()): it fades in while
 you look at that hand or hold it still, and out while you work, like the hand panel's reveal.
 """
 
 import math
+import os
 import time
 from collections import namedtuple
 
 import bpy
 import gpu
+import numpy as np
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Quaternion, Vector
 
@@ -264,7 +266,8 @@ _saved = {"show": None}  # Blender's show_controllers before the session hid the
 
 def on_session_start(context):
     """Hide Blender's controller drawing (runs in the session start handler)."""
-    if not context.scene.vr_sculpt.own_controllers:
+    _logged["poses"] = False
+    if not context.scene.vr_sculpt.own_controllers or not available():
         return
     xs = context.window_manager.xr_session_settings
     if _saved["show"] is None:
@@ -284,7 +287,7 @@ def restore(context):
 
 
 def on_option(settings, context):
-    """Stylized Controllers switched in the middle of a session."""
+    """Controller Models switched in the middle of a session."""
     from . import operators
     if not operators.session_running(context):
         return
@@ -300,181 +303,167 @@ def tick(context, running):
         restore(context)
 
 
-# --- geometry -------------------------------------------------------------------------
+# --- the model -----------------------------------------------------------------------------
 
-# The controller's own frame: origin at the face's center, +Y out of the face, -Z forward (toward the
-# ring), +X right: the aim pose's axes, centered above the grip. The handle leans back from it.
-FACE_TILT = math.radians(0.0)
-FACE_ABOVE_GRIP = 0.042  # hand-space meters from the grip pose to the face's center, along +Y
+# Meta's Quest Pro controller models, converted by tools/convert_controllers.py (see NOTICE.md beside them).
+ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "controllers")
 
-LIGHT = Vector((-0.35, 1.0, 0.45)).normalized()
+# The model's origin from the aim pose, in the aim frame (hand-space meters). Meta's models line up with
+# the aim pose's orientation, about 3 cm from it along Z.
+MODEL_OFFSET = Vector((0.0, 0.0, 0.03))
 
-COL_BODY = (0.17, 0.178, 0.2)
-COL_FACE = (0.23, 0.24, 0.27)
-COL_RING = (0.2, 0.21, 0.24)
-COL_BUTTON = (0.42, 0.44, 0.49)
-COL_STICK = (0.34, 0.355, 0.4)
+LIGHT_UP = 0.8  # the key light: from above, and from the head by this much
+LIGHT_HEAD = 0.6
+STICK_SINK = 0.0012  # the stick cap sinks this much when clicked (the file has no click animation)
 
-
-def _shade(color, normal):
-    k = 0.32 + 0.68 * max(normal.dot(LIGHT), 0.0) + 0.1 * max(-normal.z, 0.0)
-    return (min(color[0] * k * 1.6, 1.0), min(color[1] * k * 1.6, 1.0), min(color[2] * k * 1.6, 1.0), 1.0)
-
-
-def _loft(rings, centers, cap_bottom=True, cap_top=True):
-    """Triangles (a, b, c, outward normal) joining rings of equal length; centers: each ring's center."""
-    tris = []
-    for (r0, c0), (r1, c1) in zip(zip(rings, centers), zip(rings[1:], centers[1:])):
-        n = len(r0)
-        for i in range(n):
-            j = (i + 1) % n
-            a, b, c, d = r0[i], r0[j], r1[j], r1[i]
-            mid = (a + b + c + d) / 4
-            out = (mid - (c0 + c1) / 2)
-            normal = (b - a).cross(d - a).normalized()
-            if normal.dot(out) < 0:
-                normal = -normal
-            tris += [(a, b, c, normal), (a, c, d, normal)]
-    for ring, center, on, sign in ((rings[0], centers[0], cap_bottom, -1), (rings[-1], centers[-1], cap_top, 1)):
-        if not on:
-            continue
-        axis = (centers[-1] - centers[0]).normalized() * sign
-        for i in range(len(ring)):
-            tris.append((center, ring[i], ring[(i + 1) % len(ring)], axis))
-    return tris
-
-
-def _ellipse(center, rx, rz, n=18, y_axis=Vector((0, 1, 0))):
-    """A ring of points around center in the plane across y_axis (rx along X, rz along the rest)."""
-    x = Vector((1, 0, 0))
-    z = x.cross(y_axis).normalized()
-    x = y_axis.cross(z).normalized()
-    return [center + x * (rx * math.cos(2 * math.pi * i / n)) + z * (rz * math.sin(2 * math.pi * i / n))
-            for i in range(n)]
-
-
-def _cylinder(base, radius, height, n=14, axis=Vector((0, 1, 0))):
-    top = base + axis * height
-    return _loft([_ellipse(base, radius, radius, n, axis), _ellipse(top, radius, radius, n, axis)], [base, top])
-
-
-def _box(center, size, rot=None):
-    hx, hy, hz = size[0] / 2, size[1] / 2, size[2] / 2
-    m = rot or Matrix.Identity(3)
-    corners = [center + m @ Vector((sx * hx, sy * hy, sz * hz)) for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
-    faces = ((0, 1, 3, 2, (-1, 0, 0)), (4, 6, 7, 5, (1, 0, 0)), (0, 4, 5, 1, (0, -1, 0)), (2, 3, 7, 6, (0, 1, 0)),
-             (0, 2, 6, 4, (0, 0, -1)), (1, 5, 7, 3, (0, 0, 1)))
-    tris = []
-    for a, b, c, d, n in faces:
-        normal = m @ Vector(n)
-        tris += [(corners[a], corners[b], corners[c], normal), (corners[a], corners[c], corners[d], normal)]
-    return tris
-
-
-def _torus(center, normal, radius, tube, n=30, m=6):
-    normal = normal.normalized()
-    e1 = normal.orthogonal().normalized()
-    e2 = normal.cross(e1)
-    tris = []
-
-    def point(u, v):
-        radial = e1 * math.cos(u) + e2 * math.sin(u)
-        return center + radial * (radius + tube * math.cos(v)) + normal * (tube * math.sin(v)), \
-            radial * math.cos(v) + normal * math.sin(v)
-    for i in range(n):
-        for k in range(m):
-            u0, u1 = 2 * math.pi * i / n, 2 * math.pi * (i + 1) / n
-            v0, v1 = 2 * math.pi * k / m, 2 * math.pi * (k + 1) / m
-            (a, na), (c, nc) = point(u0, v0), point(u1, v1)
-            b, d = point(u1, v0)[0], point(u0, v1)[0]
-            normal_q = (na + nc).normalized()
-            tris += [(a, b, c, normal_q), (a, c, d, normal_q)]
-    return tris
-
-
-# Where the parts are, per hand ('left' / 'right'), in the controller frame: name -> (point, pivot).
-def layout(hand):
-    inward = 1.0 if hand == 'left' else -1.0  # toward the other hand
-    return {
-        'stick': Vector((-inward * 0.011, 0.004, -0.002)),
-        'top': Vector((inward * 0.012, 0.004, -0.013)),
-        'bottom': Vector((inward * 0.013, 0.004, 0.004)),
-        'trigger': Vector((0.0, -0.017, -0.026)),
-        'grip': Vector((inward * 0.016, -0.045, 0.004)),
-        'ring': Vector((-inward * 0.01, 0.012, -0.03)),
+_SHADER_SOURCES = (
+    "void main() { v_nor = nor; v_uv = uv; gl_Position = mvp * vec4(pos, 1.0); }",
+    """
+void main() {
+    vec3 base = texture(image, v_uv).rgb;
+    vec3 n = normalize(v_nor);
+    float key = max(dot(n, light), 0.0);
+    float rim = pow(1.0 - abs(dot(n, eye)), 3.0);
+    vec3 col = base * (0.7 + 1.5 * key) + vec3(0.025) + vec3(0.09) * rim;
+    col = mix(col, glow.rgb, glow.a * 0.7) + glow.rgb * glow.a * 0.25;
+    // As Blender's own shaders do: colors are sRGB; an sRGB target wants them linear.
+    if (srgbTarget) {
+        col = mix(col / 12.92, pow((col + 0.055) / 1.055, vec3(2.4)), step(0.04045, col));
     }
+    frag = vec4(col, alpha);
+}
+""")
 
 
-def parts(hand):
-    """{part: list of (a, b, c, normal)} for one hand, in the controller frame (meters)."""
-    p = layout(hand)
-    inward = 1.0 if hand == 'left' else -1.0
-    out = {}
-    # Handle: a tapered, slightly backward-leaning oval.
-    centers, rings = [], []
-    for y, r in ((-0.002, 0.021), (-0.02, 0.0195), (-0.045, 0.0185), (-0.07, 0.0175), (-0.092, 0.0158),
-                 (-0.103, 0.011)):
-        c = Vector((0.0, y, 0.006 - 0.42 * y))
-        centers.append(c)
-        rings.append(_ellipse(c, r * 0.92, r, 18))
-    out['body'] = _loft(rings, centers, cap_top=False)
-    # Face plate: a flat oval slab on top.
-    c0, c1 = Vector((0, -0.004, -0.004)), Vector((0, 0.004, -0.004))
-    out['face'] = _loft([_ellipse(c0, 0.03, 0.028, 22), _ellipse(c1, 0.029, 0.027, 22)], [c0, c1])
-    # Tracking ring: a halo arching over the front of the face, leaning out.
-    out['ring'] = _torus(p['ring'], Vector((-inward * 0.45, 0.35, -0.82)), 0.036, 0.0034)
-    out['top'] = _cylinder(p['top'], 0.0058, 0.003)
-    out['bottom'] = _cylinder(p['bottom'], 0.0058, 0.003)
-    # Stick: a base, then the moving part (shaft and cap) around its pivot.
-    out['stick_base'] = _cylinder(p['stick'] - Vector((0, 0.001, 0)), 0.0105, 0.0016)
-    out['stick'] = _cylinder(p['stick'], 0.003, 0.008, 10) + _cylinder(p['stick'] + Vector((0, 0.007, 0)), 0.009,
-                                                                       0.004)
-    trig_rot = Matrix.Rotation(math.radians(-25), 3, 'X')
-    out['trigger'] = _box(p['trigger'], (0.015, 0.024, 0.008), trig_rot)
-    out['grip'] = _box(p['grip'], (0.007, 0.034, 0.016), Matrix.Rotation(math.radians(12), 3, 'X'))
-    return out
+class Model:
+    """One hand's controller: a batch per part, how the moving parts move, and the texture (made on
+    first draw: it needs the GPU)."""
+
+    def __init__(self, hand):
+        data = np.load(os.path.join(ASSETS, hand + ".npz"))
+        pos, part, tris = data["pos"], data["part"], data["tris"]
+        self.names = [str(n) for n in data["parts"]]
+        self.arrays = {"pos": pos, "nor": data["nor"], "uv": data["uv"]}
+        tri_part = part[tris[:, 0]]
+        self.tris = {name: tris[tri_part == i] for i, name in enumerate(self.names)}
+        self.centers, self.tops = {}, {}
+        for i, name in enumerate(self.names):
+            sel = pos[part == i]
+            if len(sel):
+                c = sel.mean(axis=0)
+                self.centers[name] = Vector(c)
+                self.tops[name] = Vector((c[0], sel[:, 1].max(), c[2]))
+        self.moves = {str(n): (Vector(p), Vector(a), float(ang), Vector(mv))
+                      for n, p, a, ang, mv in zip(data["moves"], data["pivot"], data["axis"], data["angle"],
+                                                  data["move"])}
+        self.tex_data = data["tex"]
+        self.batches = None
+        self.texture = None
+
+    def gpu_ready(self, shader):
+        if self.batches is None:
+            self.batches = {name: batch_for_shader(shader, 'TRIS', self.arrays, indices=t)
+                            for name, t in self.tris.items() if len(t)}
+        if self.texture is None:
+            h, w = self.tex_data.shape[:2]
+            rgba = np.ones((h, w, 4), np.float32)
+            rgba[..., :3] = self.tex_data / 255.0
+            self.texture = gpu.types.GPUTexture((w, h), format='RGBA8',
+                                                data=gpu.types.Buffer('FLOAT', rgba.size, rgba.ravel()))
+
+    def part_matrix(self, name, inputs):
+        """Where the buttons move a part to, in the controller frame."""
+        def turn(key, amount):
+            pivot, axis, angle, _mv = self.moves[key]
+            return Matrix.Translation(pivot) @ Matrix.Rotation(angle * amount, 4, axis) @ Matrix.Translation(-pivot)
+        if name == 'stick' and 'stick_forward' in self.moves:
+            sink = Matrix.Translation((0.0, -STICK_SINK if inputs.stick_click else 0.0, 0.0))
+            return sink @ turn('stick_forward', inputs.stick_y) @ turn('stick_right', inputs.stick_x)
+        if name in {'trigger', 'grip'} and name in self.moves:
+            return turn(name, min(max(getattr(inputs, name), 0.0), 1.0))
+        if name in {'top', 'bottom'} and name in self.moves and getattr(inputs, name):
+            return Matrix.Translation(self.moves[name][3])
+        return Matrix.Identity(4)
 
 
-PART_COLORS = {'body': COL_BODY, 'face': COL_FACE, 'ring': COL_RING, 'top': COL_BUTTON, 'bottom': COL_BUTTON,
-               'stick_base': COL_RING, 'stick': COL_STICK, 'trigger': COL_BUTTON, 'grip': COL_BUTTON}
-
-_batches = {}  # (hand, part) -> (shaded batch, plain batch)
+_models = {}
+_gpu = {"shader": None}
 
 
-def _part_batches(hand, name, tris):
-    key = (hand, name)
-    b = _batches.get(key)
-    if b is None:
-        pos, col = [], []
-        color = PART_COLORS[name]
-        for a, bb, c, n in tris:
-            pos += [a[:], bb[:], c[:]]
-            col += [_shade(color, n)] * 3
-        smooth = gpu.shader.from_builtin('SMOOTH_COLOR')
-        plain = gpu.shader.from_builtin('UNIFORM_COLOR')
-        b = _batches[key] = (batch_for_shader(smooth, 'TRIS', {"pos": pos, "color": col}),
-                             batch_for_shader(plain, 'TRIS', {"pos": pos}))
-    return b
+def available():
+    return all(os.path.exists(os.path.join(ASSETS, h + ".npz")) for h in ('left', 'right'))
 
 
-_parts = {}
+def model(hand):
+    if hand not in _models:
+        _models[hand] = Model(hand)
+    return _models[hand]
 
 
-def _hand_parts(hand):
-    if hand not in _parts:
-        _parts[hand] = parts(hand)
-    return _parts[hand]
+def _shader():
+    if _gpu["shader"] is None:
+        info = gpu.types.GPUShaderCreateInfo()
+        info.push_constant('MAT4', "mvp")
+        info.push_constant('VEC3', "light")
+        info.push_constant('VEC3', "eye")
+        info.push_constant('VEC4', "glow")
+        info.push_constant('FLOAT', "alpha")
+        info.push_constant('BOOL', "srgbTarget")  # Set by Blender when the shader is bound.
+        info.sampler(0, 'FLOAT_2D', "image")
+        info.vertex_in(0, 'VEC3', "pos")
+        info.vertex_in(1, 'VEC3', "nor")
+        info.vertex_in(2, 'VEC2', "uv")
+        iface = gpu.types.GPUStageInterfaceInfo("vrs_controller_iface")
+        iface.smooth('VEC3', "v_nor")
+        iface.smooth('VEC2', "v_uv")
+        info.vertex_out(iface)
+        info.fragment_out(0, 'VEC4', "frag")
+        info.vertex_source(_SHADER_SOURCES[0])
+        info.fragment_source(_SHADER_SOURCES[1])
+        _gpu["shader"] = gpu.shader.create_from_info(info)
+    return _gpu["shader"]
+
+
+def layout(hand):
+    """Where the parts are, in the controller frame: the legend's leaders point here."""
+    m = model(hand)
+    return {'top': m.tops['top'], 'bottom': m.tops['bottom'], 'stick': m.tops['stick'],
+            'stick_click': m.tops['stick'], 'trigger': m.centers['trigger'], 'grip': m.centers['grip']}
 
 
 def controller_matrix(ss, context, hand_idx):
-    """World matrix of a controller's frame (scaled by the viewer scale)."""
-    aim = Quaternion(ss.controller_aim_rotation_get(context, hand_idx)).to_matrix().to_4x4()
-    rot = aim @ Matrix.Rotation(FACE_TILT, 4, 'X')
+    """World matrix of a controller's model (scaled by the viewer scale): on the aim pose."""
+    rot = Quaternion(ss.controller_aim_rotation_get(context, hand_idx)).to_matrix().to_4x4()
     scale = ss.viewer_scale
-    grip = Vector(ss.controller_grip_location_get(context, hand_idx))
     m = rot @ Matrix.Scale(scale, 4)
-    m.translation = grip + rot.to_3x3() @ Vector((0.0, FACE_ABOVE_GRIP * scale, 0.0))
+    m.translation = Vector(ss.controller_aim_location_get(context, hand_idx)) + rot.to_3x3() @ (MODEL_OFFSET * scale)
     return m
+
+
+_logged = {"poses": False}
+
+
+def _log_poses(context, ss):
+    """Once per session, print where each grip pose sits in its aim pose's frame: what MODEL_OFFSET is
+    tuned against when a runtime places the model differently."""
+    if _logged["poses"]:
+        return
+    out = []
+    for idx, hand in enumerate(('left', 'right')):
+        aim_loc = Vector(ss.controller_aim_location_get(context, idx))
+        grip_loc = Vector(ss.controller_grip_location_get(context, idx))
+        if aim_loc.length < 1e-6 and grip_loc.length < 1e-6:
+            return  # No pose yet.
+        aim = Quaternion(ss.controller_aim_rotation_get(context, idx))
+        get_grip = getattr(ss, "controller_grip_rotation_get", None)
+        grip = Quaternion(get_grip(context, idx)) if get_grip else aim
+        scale = max(ss.viewer_scale, 1e-6)
+        offset = aim.inverted() @ (grip_loc - aim_loc) / scale
+        rel = (aim.inverted() @ grip).to_euler()
+        out.append(f"{hand} grip in aim: offset {tuple(round(v * 1000, 1) for v in offset)} mm, rotation "
+                   f"{tuple(round(math.degrees(v), 1) for v in rel)} deg")
+    _logged["poses"] = True
+    print("vr_sculpt controllers: " + "; ".join(out))
 
 
 # --- drawing ----------------------------------------------------------------------------
@@ -482,14 +471,21 @@ def controller_matrix(ss, context, hand_idx):
 def draw(context, ss, xr=True):
     """Both controllers, with their pressed parts lit."""
     settings = context.scene.vr_sculpt
-    if not settings.own_controllers:
+    if not settings.own_controllers or not available():
         return
-    smooth = gpu.shader.from_builtin('SMOOTH_COLOR')
-    plain = gpu.shader.from_builtin('UNIFORM_COLOR')
+    if xr:
+        _log_poses(context, ss)
+    shader = _shader()
+    head = Vector(ss.viewer_pose_location)
     gpu.state.blend_set('ALPHA')
     gpu.state.depth_test_set('LESS_EQUAL')
     gpu.state.depth_mask_set(True)
+    view_proj = gpu.matrix.get_projection_matrix() @ gpu.matrix.get_model_view_matrix()
+    shader.bind()
     for idx, hand in enumerate(('left', 'right')):
+        mdl = model(hand)
+        mdl.gpu_ready(shader)
+        shader.uniform_sampler("image", mdl.texture)
         inputs = read_inputs(context, ss, idx)
         lit = {'trigger': inputs.trigger, 'grip': min(inputs.grip, 1.0), 'top': 1.0 if inputs.top else 0.0,
                'bottom': 1.0 if inputs.bottom else 0.0, 'stick': 1.0 if inputs.stick_click else 0.0}
@@ -497,31 +493,16 @@ def draw(context, ss, xr=True):
         if tilt > 0.3:
             lit['stick'] = max(lit['stick'], 0.35 * min(tilt, 1.0))
         m = controller_matrix(ss, context, idx)
-        where = layout(hand)
-        for name, tris in _hand_parts(hand).items():
-            local = Matrix.Identity(4)
-            if name == 'stick':
-                # Tilts with your stick (about 20 degrees at full), and sinks a little when clicked.
-                pivot = where['stick']
-                tilt_m = Matrix.Rotation(math.radians(20) * inputs.stick_x, 4, 'Z').inverted() @ \
-                    Matrix.Rotation(math.radians(20) * inputs.stick_y, 4, 'X').inverted()
-                sink = Vector((0.0, -0.0012 if inputs.stick_click else 0.0, 0.0))
-                local = Matrix.Translation(pivot + sink) @ tilt_m @ Matrix.Translation(-pivot)
-            elif name == 'trigger':
-                pivot = where['trigger'] + Vector((0, 0.012, 0))
-                local = Matrix.Translation(pivot) @ Matrix.Rotation(math.radians(14) * inputs.trigger, 4, 'X') @ \
-                    Matrix.Translation(-pivot)
-            elif name in {'top', 'bottom'} and lit[name]:
-                local = Matrix.Translation((0, -0.0015, 0))
-            shaded, flat = _part_batches(hand, name, tris)
-            gpu.matrix.push()
-            gpu.matrix.multiply_matrix(m @ local)
-            shaded.draw(smooth)
+        to_local = m.to_3x3().inverted_safe()
+        toward_head = (head - m.translation).normalized()
+        shader.uniform_float("light", (to_local @ (Vector((0.0, 0.0, LIGHT_UP)) + toward_head * LIGHT_HEAD)).normalized())
+        shader.uniform_float("eye", (to_local @ toward_head).normalized())
+        shader.uniform_float("alpha", 1.0)
+        for name, batch in mdl.batches.items():
             level = lit.get(name, 0.0)
-            if level > 0.01:
-                plain.uniform_float("color", (*vr_ui.COL_ACCENT[:3], 0.25 + 0.65 * level))
-                flat.draw(plain)
-            gpu.matrix.pop()
+            shader.uniform_float("mvp", view_proj @ m @ mdl.part_matrix(name, inputs))
+            shader.uniform_float("glow", (*vr_ui.COL_ACCENT[:3], level if level > 0.01 else 0.0))
+            batch.draw(shader)
     gpu.state.depth_mask_set(False)
     gpu.state.depth_test_set('NONE')
     gpu.state.blend_set('NONE')
@@ -535,7 +516,7 @@ LEGEND_SIDE = 0.034  # hand-space meters from the controller to the legend
 def draw_hints(context, ss, now=None, info=None):
     """The legends beside both controllers, faded per hand."""
     settings = context.scene.vr_sculpt
-    if not (settings.own_controllers and settings.controller_hints):
+    if not (settings.own_controllers and settings.controller_hints and available()):
         return
     now = time.monotonic() if now is None else now
     head = Vector(ss.viewer_pose_location)
@@ -574,10 +555,7 @@ def _draw_legend(context, ss, idx, hand, rows, alpha, head):
     cv.rect(x0, top - height, x0 + width, top, (*vr_ui.COL_CARD[:3], 0.72), 0.004)
     texts = []
     leaders = []
-    where = layout(hand)
-    part_point = {'top': where['top'], 'bottom': where['bottom'], 'stick': where['stick'] + Vector((0, 0.011, 0)),
-                  'stick_click': where['stick'] + Vector((0, 0.011, 0)), 'trigger': where['trigger'],
-                  'grip': where['grip']}
+    part_point = layout(hand)
     inv = board.inverted_safe()
     for i, (button, (icon, label)) in enumerate(rows):
         y = top - 0.002 - LEGEND_ROW * (i + 0.5)
@@ -605,8 +583,9 @@ def _draw_legend(context, ss, idx, hand, rows, alpha, head):
 
 
 def clear():
-    _batches.clear()
-    _parts.clear()
+    _models.clear()
+    _gpu["shader"] = None
+    _logged["poses"] = False
     reset_hints()
 
 

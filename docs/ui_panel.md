@@ -90,15 +90,20 @@ staying the fastest way to reach *everything*?
 ![At rest with their hints (left pair); buttons pressed, stick tilted (right pair)](ui_panel_controllers.png)
 
 Blender draws the runtime's controller model when it gets one; SteamVR gives none, so it falls back
-to gray spheres. Instead, the add-on draws its own Touch-style controllers at the grip poses, in the
-panel's palette: body, tracking ring, thumbstick, face buttons, trigger and grip, from simple
-flat-shaded geometry (no model files). Blender's are hidden while the session runs and put back as
-they were when it ends (or when you switch back: **gear** > Hands > Blender, or VR Extras >
-Stylized Controllers).
+to gray spheres. Instead, the add-on draws Meta's Quest Pro controller models on the aim poses
+(3 cm behind them, where Meta's models line up), textured and lit. They are converted from Meta's
+controller art download by `tools/convert_controllers.py` into `vr_sculpt/assets/controllers`
+(about 340 KB a hand; see the NOTICE there for the terms). Blender's are hidden while the session
+runs and put back as they were when it ends (or when you switch back: **gear** > Hands > Blender,
+or VR Extras > Controller Models).
 
-- **Press feedback**: the trigger lights up in the accent as you pull it (and swings back a
-  little), the grip, A / B / X / Y and the stick click light up while pressed (the buttons sink a
-  millimeter), and the stick tilts with yours.
+- **Press feedback**: every part moves as Meta's own press animation moves it: the trigger
+  swings back as you pull it and lights up in the accent by how far, the grip turns in, A / B /
+  X / Y sink 1.8 mm and light up, the stick tilts up to 19 degrees with yours and lights up on a
+  click or a big tilt.
+- **Placement**: once per session the log gets a line `vr_sculpt controllers: left grip in aim:
+  ...` with where the runtime's grip pose sits from its aim pose. If the models don't sit in your
+  hands, that line is what `MODEL_OFFSET` in controllers.py gets tuned against.
 - **Button hints**: beside each controller, a small legend says what each button does right now,
   with a faint leader to the button: the trigger's action in this mode and tool ("Draw",
   "Cut", "Pose IK", "Pick color", "Press" on the panel, "Click" on the desktop screen), B / Y
@@ -132,7 +137,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Desktop window, bring it here | **gear** > Desktop Show, Bring here |
 | Tracking objects, record them | **gear** > Track Objects, Record |
 | Tip status on / off | VR Authoring > Show Tip Status (desktop) |
-| Stylized controllers or Blender's | **gear** > Hands Stylized / Blender; VR Extras > Stylized Controllers |
+| Quest controller models or Blender's | **gear** > Hands Quest / Blender; VR Extras > Controller Models |
 | Button hints on / off | **gear** > Hands > Hints; VR Extras > Button Hints |
 | What a button does now | look at that controller (or hold it still): its legend |
 | Undo / redo in Blender | as before (every panel press is one undo step) |
@@ -293,7 +298,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
    the size flash? Is the status line readable without being in the way?
 9. **Timeline.** Scrub, play, key. Does the strip beside the panel feel like
    part of it?
-10. **Controllers.** Do the stylized controllers sit where your real ones are (the handle in your
+10. **Controllers.** Do the Quest controller models sit where your real ones are (the handle in your
     hand, the face under your thumb)? Do the brush tip and the ray still come out where they did?
     Press each button: does the right part light up, and does the stick follow yours? Look at a
     hand: do the hints come up, readable, and go away once you start working? Are any of them
@@ -312,7 +317,8 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 - [presence.py](../vr_sculpt/presence.py): the reveal rule. Thresholds: wrist
   55 degrees on / 70 off, gaze 32 on / 48 off, linger 0.6 s, fade 70 / 140 ms.
 - [hud.py](../vr_sculpt/hud.py): the tip status.
-- [controllers.py](../vr_sculpt/controllers.py): the stylized controllers, reading the buttons
+- [controllers.py](../vr_sculpt/controllers.py): the controller models (one batch per moving part,
+  a small textured shader), reading the buttons
   (`action_state_get` on the add-on's and the stock actions: every Touch button already has one),
   `hints()` (pure: settings plus an `Info` of where the ray is and what's selected), the hints'
   reveal (look 28 degrees, still 1.2 s under 12 cm/s) and hiding / restoring Blender's
