@@ -161,7 +161,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | New as Object / Cut / Union / Intersect | segmented control |
 | Create, grab, cut | trigger in the scene (unchanged) |
 | Duplicate, Delete | icons beside the chip (and in the object's header) |
-| Object settings | **chip** > pages Shape / Cuts / Finish / Array |
+| Object settings | **chip** > pages Shape / Cuts / Finish / Array / Stack |
 | Size X/Y/Z, subdivisions; cylinder radius, height, segments; operator settings (paged) | **chip** > Shape |
 | Mirror X / Y / Z, center at left hand | **chip** > Shape > *More* > Mirror |
 | Solidify, thickness | **chip** > Shape > *More* |
@@ -173,6 +173,8 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Mark hard / soft / clear edges | **chip** > Finish > *More* > Mark (leaving the sheet turns it off) |
 | Bevel segments | **chip** > Finish > *More* |
 | Array count, linear / radial, axis, gap, center at left hand | **chip** > Array |
+| Every modifier (ours and others): show / hide, apply (with those above it), Apply all | **chip** > Stack |
+| A modifier's settings (paged), move up / down, remove | **chip** > Stack > the modifier's row |
 | Show grid, snap to grid | *More* > Grid |
 | Snap to surface, 15 degree steps | *More* > Grab |
 

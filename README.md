@@ -68,6 +68,15 @@ Meta Quest over OpenXR.
     arrays and the mirror repeat them, and the bevel rounds the cut edges.
     Other modifiers stay where you put them. Duplicating an object copies
     its cutters and array; deleting it deletes them.
+  - **Stack** page: every modifier on the object, ours and any added on
+    the desktop, top to bottom. Each row has show / hide and **Apply**,
+    which applies that modifier and the ones above it, so the mesh is what
+    you saw (hidden ones above are skipped and stay). **Apply all** applies
+    every one that shows. Open a row for its settings, read from the
+    modifier's own properties (a Geometry Nodes modifier shows its group's
+    inputs), Up / Down and Remove. Applying or removing a cut deletes its
+    cutter, and a radial array's center goes with it. Our modifiers keep
+    their order, so Up / Down only show where a move is allowed.
 - **Selecting doesn't nudge**: a grabbed object or bone (Model and Pose
   mode) only starts to follow once your hand moves past the Grab Threshold
   (1.5 cm), turns past 8 degrees, or holds the trigger for the Grab Delay
@@ -521,7 +530,9 @@ held (that crashed Blender before the undo guard).
 slot, a union boss and a radial ring of bolts, and renders it with the VR
 overlay, the Model panel's pages and the Mark tool's edge highlights
 (`probe_hard_surface*.py` measured the
-boolean solvers and how the finish stack shades).
+boolean solvers and how the finish stack shades). `stack_preview.py` draws
+the Stack page: the list, and the settings of a bevel, a Subdivision and
+the shading's group inputs.
 `pose_preview.py` enters Pose Mode the way VR does (no area), records a
 puppet take while the timeline really plays, and draws the Pose page and
 bones (`probe_pose.py` checked the pose API).
@@ -548,7 +559,11 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   let the Auto angle decide. The bevel follows its own 30 degree limit, not
   the hard / soft marks. Bevel width is in world units when you set it; it
   scales with the object after that. Slice (cut and keep the piece) isn't
-  there yet.
+  there yet. The Stack page shows a modifier's own values, in object units
+  (the Finish and Shape sliders are in world units), and only number,
+  toggle and choice settings: pick objects, vertex groups and curves on the
+  desktop. Applying to a mesh other objects share gives the object its own
+  copy first. Adding new modifier types from VR isn't there yet.
 - Geometry-node asset primitives in Add > Mesh aren't listed yet.
 - Using the desktop window from VR needs Windows; elsewhere it's view only,
   without menus and popups (they are temporary regions). It moves your real

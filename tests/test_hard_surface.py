@@ -284,6 +284,159 @@ def test_stack():
     check(rounded > 0.5, f"Finish: the bevels are shaded round ({rounded * 100:.0f}% of their corners bent)")
 
 
+def test_modifier_stack():
+    print("== any modifier: apply, remove, move, settings")
+    clear()
+    obj = cube(0.1, (0, 0, 0), "Apply")
+    hardsurface.set_solidify(obj, True)
+    hardsurface.set_bevel(obj, True)
+    n, volume, _lo, _hi = evaluated(obj)
+    check(hardsurface.apply_modifier(bpy.context, obj, hardsurface.BEVEL), "Apply on the bevel works")
+    n1, volume1, _lo, _hi = evaluated(obj)
+    check(not obj.modifiers and n1 == n and abs(volume1 - volume) < 1e-7,
+          f"it applies the ones above too, and the mesh is what you saw ({n} -> {n1} verts)")
+    check(obj.vr_prim.kind == 'NONE', "the primitive becomes a plain mesh")
+
+    clear()
+    obj = cube(0.1, (0, 0, 0), "Hidden")
+    hardsurface.set_solidify(obj, True)
+    hardsurface.solidify(obj).show_viewport = False
+    hardsurface.set_bevel(obj, True)
+    n, _v, _lo, _hi = evaluated(obj)
+    hardsurface.apply_modifier(bpy.context, obj, hardsurface.BEVEL)
+    names = [m.name for m in obj.modifiers]
+    n1, _v, _lo, _hi = evaluated(obj)
+    check(names == [hardsurface.SOLIDIFY] and n1 == n, f"a hidden modifier above is skipped and stays ({names})")
+    check(hardsurface.apply_modifier(bpy.context, obj, hardsurface.SOLIDIFY) and not obj.modifiers,
+          "Apply on a hidden modifier applies it")
+
+    # Helpers go with what they were for.
+    clear()
+    obj = cube(0.1, (0, 0, 0), "Helpers")
+    cutter = cube(0.05, (0.05, 0.05, 0.05), "HelpersCutter")
+    hardsurface.make_cutter(bpy.context, cutter, obj)
+    hardsurface.set_array_count(bpy.context, obj, 4)
+    hardsurface.set_array_mode(bpy.context, obj, 'RADIAL')
+    empty = hardsurface.array(obj).offset_object
+    other = cube(0.05, (0.3, 0.0, 0.0), "Other")
+    hardsurface.set_bevel(other, True)
+    hardsurface.apply_modifier(bpy.context, obj, hardsurface.BOOLEAN)
+    check("HelpersCutter" not in bpy.data.objects and empty.name in bpy.data.objects,
+          "applying a cut deletes its cutter, not the array center")
+    hardsurface.remove_modifier(bpy.context, obj, hardsurface.ARRAY)
+    check("Helpers Array Center" not in bpy.data.objects and hardsurface.array(obj) is None,
+          "removing a radial array deletes its center")
+    cutter = cube(0.05, (0.05, 0.05, 0.05), "HelpersCutter2")
+    mod = hardsurface.make_cutter(bpy.context, cutter, obj)
+    hardsurface.remove_modifier(bpy.context, obj, mod.name)
+    check("HelpersCutter2" not in bpy.data.objects and not hardsurface.booleans(obj),
+          "removing a cut deletes its cutter")
+    check(hardsurface.has_bevel(other), "other objects keep theirs")
+
+    # Apply all cuts leaves a hidden one.
+    clear()
+    obj = cube(0.1, (0, 0, 0), "Cuts")
+    a = cube(0.05, (0.05, 0.05, 0.05), "CutA")
+    b = cube(0.05, (-0.05, -0.05, 0.05), "CutB")
+    hardsurface.make_cutter(bpy.context, a, obj)
+    mb = hardsurface.make_cutter(bpy.context, b, obj)
+    mb.show_viewport = False
+    hardsurface.apply_all(bpy.context, obj)
+    check("CutA" not in bpy.data.objects and "CutB" in bpy.data.objects and len(hardsurface.booleans(obj)) == 1,
+          "Apply all applies the cuts that show; a hidden one stays")
+
+    # Apply the whole stack, on a mesh another object shares.
+    clear()
+    obj = cube(0.1, (0, 0, 0), "Shared")
+    twin = obj.copy()
+    bpy.context.scene.collection.objects.link(twin)
+    twin.modifiers.clear()
+    hardsurface.set_bevel(obj, True)
+    symmetry.model_toggle(bpy.context, obj, 0)
+    n, _v, _lo, _hi = evaluated(obj)
+    check(hardsurface.apply_stack(bpy.context, obj) and not obj.modifiers, "Apply all applies the whole stack")
+    check(len(obj.data.vertices) == n and obj.data is not twin.data and len(twin.data.vertices) == 8,
+          "on its own copy of a shared mesh")
+    check(symmetry.CENTER in bpy.data.objects, "the mirror center stays (other objects use it)")
+
+    # Moving: ours keep STACK order, others go anywhere, cuts swap among themselves.
+    clear()
+    obj = cube(0.1, (0, 0, 0), "Move")
+    hardsurface.set_bevel(obj, True)
+    m1 = hardsurface.make_cutter(bpy.context, cube(0.05, (0.05, 0, 0), "M1"), obj).name
+    m2 = hardsurface.make_cutter(bpy.context, cube(0.05, (-0.05, 0, 0), "M2"), obj).name
+    mine = obj.modifiers.new("Mine", 'DISPLACE').name
+    check([m.name for m in obj.modifiers] == [m1, m2, shading.MODIFIER, hardsurface.BEVEL, mine], "starting order")
+    check(not hardsurface.can_move(obj, hardsurface.BEVEL, -1) and not hardsurface.can_move(obj, m1, -1),
+          "the bevel can't go above the shading, nor the top one up")
+    check(hardsurface.move_modifier(obj, m2, -1) and obj.modifiers[0].name == m2, "two cuts swap")
+    check(hardsurface.move_modifier(obj, mine, -1) and obj.modifiers.find(mine) == 3,
+          "someone else's modifier moves up past ours")
+    check(hardsurface.move_modifier(obj, mine, 1) and not hardsurface.can_move(obj, mine, 1),
+          "and back down, but not past the end")
+
+    # Settings from RNA, and a Geometry Nodes modifier's inputs.
+    specs = {s.id: s for s in hardsurface.modifier_settings(obj, hardsurface.bevel(obj))}
+    check(specs["width"].length and specs["segments"].type == 'INT' and specs["limit_method"].items,
+          "bevel settings: width is a length, segments a count, limit method a choice")
+    check("name" not in specs and "show_viewport" not in specs and "vertex_group" not in specs,
+          "no name, visibility flags or text fields")
+    check(specs["width"].hi <= 0.4 and specs["angle_limit"].angle, f"the width's range fits the object "
+          f"(up to {specs['width'].hi:.3f}), the angle is an angle")
+    hardsurface.set_modifier_setting(obj, hardsurface.BEVEL, "segments", 5)
+    check(hardsurface.bevel(obj).segments == 5, "a setting changes the modifier")
+    check(not hardsurface.set_modifier_setting(obj, hardsurface.BEVEL, "limit_method", "NOPE"),
+          "a value it won't take is refused")
+    specs = {s.label: s for s in hardsurface.modifier_settings(obj, shading.modifier(obj))}
+    check(specs.get("Angle") is not None and specs["Angle"].angle and specs.get("Flat") is not None,
+          f"the shading's group inputs show ({sorted(specs)})")
+    hardsurface.set_modifier_setting(obj, shading.MODIFIER, specs["Angle"].id, math.radians(45.0))
+    check(abs(shading.angle(obj) - math.radians(45.0)) < 1e-5, "and setting one changes the group input")
+
+
+def test_stack_page():
+    print("== Stack page")
+    clear()
+    ss, ctx, settings = setup()
+    obj = cube(0.1, (0, 0, 0), "Page")
+    hardsurface.set_bevel(obj, True)
+    menus.reset()
+    menus.open_sheet('OBJECT')
+    settings.model_page = 'STACK'
+    ids = panel_ids(ctx)
+    check("mod_0" in ids and "mod_1" in ids and "stack_apply_all" in ids, "the page lists the modifiers")
+    ids["mod_show_1"].on_press()
+    check(not hardsurface.bevel(obj).show_viewport, "the eye hides one")
+    ids = panel_ids(ctx)
+    ids["mod_show_1"].on_press()
+    ids["mod_1"].on_press()
+    ids = panel_ids(ctx)
+    check("mod_back" in ids and "modp_width" in ids and "mod_remove" in ids and "mod_up" not in ids,
+          "a modifier opens to its settings (no Up: the bevel stays under the shading)")
+    widgets, height = menus.layout(ctx)
+    inside = all(-vr_ui.WIDTH / 2 - 1e-9 <= w.rect[0] <= w.rect[2] <= vr_ui.WIDTH / 2 + 1e-9 for w in widgets)
+    check(inside and height < 0.32, f"its settings fit ({height:.3f} m tall)")
+    ids["modp_segments"].on_change(4)
+    check(hardsurface.bevel(obj).segments == 4, "a settings widget changes it")
+    pager = [i for i in ids if i.startswith("modp_next")]
+    if pager:
+        ids[pager[0]].on_press()
+        check("modp_width" not in panel_ids(ctx), "its settings page")
+    panel_ids(ctx)["mod_back"].on_press()
+    check("mod_0" in panel_ids(ctx), "Back goes to the list")
+    panel_ids(ctx)["mod_1"].on_press()
+    panel_ids(ctx)["mod_apply"].on_press()
+    ids = panel_ids(ctx)
+    check(not obj.modifiers and "mod_back" not in ids, "Apply applies it and goes back to the list")
+    hardsurface.set_bevel(obj, True)
+    panel_ids(ctx)["mod_1"].on_press()
+    panel_ids(ctx)["mod_remove"].on_press()
+    check([m.name for m in obj.modifiers] == [shading.MODIFIER], "Remove removes it")
+    panel_ids(ctx)["stack_apply_all"].on_press()
+    check(not obj.modifiers and "mod_0" not in panel_ids(ctx), "Apply all empties the stack")
+    menus.reset()
+
+
 def corners(obj):
     """(corner normals, their face normals, corner positions) of what you see, object space."""
     import numpy as np
@@ -531,7 +684,7 @@ def test_panel():
     ids["add_as_difference"].on_press()
     check(settings.model_add_as == 'DIFFERENCE', "Cut button sets New as")
     obj = cube(0.1, (0, 0, 0), "Panel")
-    for page in ('SHAPE', 'BOOLEAN', 'FINISH', 'ARRAY'):
+    for page in ('SHAPE', 'BOOLEAN', 'FINISH', 'ARRAY', 'STACK'):
         settings.model_page = page
         ids = panel_ids(ctx)
         check("page_" + page.lower() in ids, f"page {page} draws")
@@ -572,6 +725,8 @@ def main():
         test_arrays()
         test_snapping()
         test_panel()
+        test_modifier_stack()
+        test_stack_page()
     except Exception:
         traceback.print_exc()
         failures.append("exception")
