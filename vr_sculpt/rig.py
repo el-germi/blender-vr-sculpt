@@ -45,6 +45,12 @@ EPS = 1e-4  # weights below this leave the vertex group
 HISTORY = 20  # weight strokes B can take back
 HEAT_ALPHA = 0.7
 HEAT_FPS = 30.0  # the heat map's colors are rebuilt at most this often while painting
+HEAT_LIFT = 0.0005  # share of the mesh's size the heat map sits out along the normals
+# The heat map lies on the mesh, so the two z-fight wherever the lift along the normals is too small
+# (flat faces whose vertex normals lean away, far-off faces). Its shader pulls every vertex toward the
+# eye by this share of its distance: the same pixel, a bit nearer (1 mm at 1 m), whatever the view's
+# clip range.
+HEAT_PULL = 0.001
 
 BRUSH_COLORS = {'ADD': (1.0, 0.45, 0.3), 'SUBTRACT': (0.35, 0.6, 1.0), 'SMOOTH': (0.45, 0.9, 0.6)}
 BONES_COLOR = (0.75, 0.6, 1.0)
@@ -949,7 +955,7 @@ def tick(context):
         tris = np.empty(len(me.loop_triangles) * 3, dtype=np.int32)
         me.loop_triangles.foreach_get("vertices", tris)
         size = float(np.linalg.norm(co.max(axis=0) - co.min(axis=0))) if len(co) else 0.0
-        _heat.update(key=key, co=(co + no * (0.002 * size)).astype(np.float32), tris=tris.reshape(-1, 3),
+        _heat.update(key=key, co=(co + no * (HEAT_LIFT * size)).astype(np.float32), tris=tris.reshape(-1, 3),
                      batch=None)
     bone = active_bone(arm)
     if bone is not None:
@@ -969,17 +975,52 @@ def heat_colors(w, alpha=HEAT_ALPHA):
     return out
 
 
+_shader = {}
+
+
+def heat_shader():
+    """SMOOTH_COLOR, with each vertex pulled toward the eye (in view space) by HEAT_PULL of its
+    distance, so the heat map wins over the mesh it lies on."""
+    shader = _shader.get("heat")
+    if shader is None:
+        iface = gpu.types.GPUStageInterfaceInfo("vrs_heat_iface")
+        iface.smooth('VEC4', "finalColor")
+        info = gpu.types.GPUShaderCreateInfo()
+        info.push_constant('MAT4', "modelViewMatrix")
+        info.push_constant('MAT4', "projectionMatrix")
+        info.push_constant('FLOAT', "pull")
+        info.vertex_in(0, 'VEC3', "pos")
+        info.vertex_in(1, 'VEC4', "color")
+        info.vertex_out(iface)
+        info.fragment_out(0, 'VEC4', "fragColor")
+        info.vertex_source(
+            "void main() {"
+            "  vec4 v = modelViewMatrix * vec4(pos, 1.0);"
+            "  v.xyz *= 1.0 - pull;"
+            "  gl_Position = projectionMatrix * v;"
+            "  finalColor = color;"
+            "}")
+        info.fragment_source("void main() { fragColor = finalColor; }")
+        shader = _shader["heat"] = gpu.shader.create_from_info(info)
+        _shader["iface"] = iface  # The interface has to outlive the shader's creation info.
+    return shader
+
+
 def _draw_heat(context, obj, bone):
     co, tris = _heat["co"], _heat["tris"]
     w = _layers.get((obj.name, bone))
     if co is None or w is None or len(w) != len(co) or _heat["key"][0] != obj.name:
         return
-    shader = gpu.shader.from_builtin('SMOOTH_COLOR')
+    shader = heat_shader()
     key = (id(co), bone, _version[0])
     now = time.monotonic()
     if _heat["batch"] is None or (_heat["batch_key"] != key and now - _heat["built"] >= 1.0 / HEAT_FPS):
         _heat["batch"] = batch_for_shader(shader, 'TRIS', {"pos": co, "color": heat_colors(w)}, indices=tris)
         _heat.update(batch_key=key, built=now)
+    shader.bind()
+    shader.uniform_float("modelViewMatrix", gpu.matrix.get_model_view_matrix())
+    shader.uniform_float("projectionMatrix", gpu.matrix.get_projection_matrix())
+    shader.uniform_float("pull", HEAT_PULL)
     gpu.state.blend_set('ALPHA')
     gpu.state.depth_test_set('LESS_EQUAL')
     _heat["batch"].draw(shader)

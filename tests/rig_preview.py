@@ -245,11 +245,47 @@ def shoot_bones(win, area, region):
         for z in (0.95, 0.9, 0.85, 0.8, 0.75):
             h.dab((0.0, -0.15, z), 1.0, 0.1)
         h.finish(ctx)
+        # Sunk 0.5 mm into the mesh (the tube is ~1.25 m across): worse than any z-fighting, so only
+        # the shader's pull toward the eye can show it. The first shot, without the pull, for comparison.
+        rig.HEAT_LIFT = -0.0004
+        rig.HEAT_PULL = 0.0
         rig.tick(ctx)
         check(rig._heat["co"] is not None and (body.name, spine) in rig._layers, "the heat map's geometry and weights")
         fake.aim_loc[1] = Vector((0.0, -0.17, 0.8))  # The right tip on the painted stroke.
         fake.aim_loc[0] = Vector((-0.25, -0.4, 1.45))
-        bpy.app.timers.register(lambda: (shoot_weights(win, area, region), None)[1], first_interval=0.4)
+        bpy.app.timers.register(lambda: (shoot_unbiased(win, area, region), None)[1], first_interval=0.4)
+    except Exception:
+        log(traceback.format_exc())
+        failures.append("raised")
+        done()
+
+
+def heat_share(name):
+    """Share of the pixels in a patch of the tube's side (left of the bones) that show the heat map's
+    colors rather than the mesh's gray."""
+    img = bpy.data.images.load(os.path.join(ROOT, "tests", name), check_existing=False)
+    try:
+        w, h = img.size
+        px = list(img.pixels)
+        colored = total = 0
+        for y in range(int(h * 0.35), int(h * 0.6), 2):
+            for x in range(int(w * 0.425), int(w * 0.46), 2):
+                i = (y * w + x) * 4
+                r, g, b = px[i:i + 3]
+                total += 1
+                colored += max(r, g, b) - min(r, g, b) > 0.25
+        return colored / max(total, 1)
+    finally:
+        bpy.data.images.remove(img)
+
+
+def shoot_unbiased(win, area, region):
+    from vr_sculpt import rig
+    try:
+        screenshot(win, area, region, "rig_weights_nobias.png")
+        state["unbiased"] = heat_share("rig_weights_nobias.png")
+        rig.HEAT_PULL = 0.001
+        bpy.app.timers.register(lambda: (shoot_weights(win, area, region), None)[1], first_interval=0.3)
     except Exception:
         log(traceback.format_exc())
         failures.append("raised")
@@ -261,6 +297,10 @@ def shoot_weights(win, area, region):
     try:
         screenshot(win, area, region, "rig_weights.png")
         check(rig._heat["batch"] is not None, "the heat map was drawn")
+        share = heat_share("rig_weights.png")
+        check(share > 0.98 and state["unbiased"] < 0.5,
+              f"pulled toward the eye, the heat map shows over the mesh even sunk into it: {share:.0%} of the "
+              f"patch (without the pull: {state['unbiased']:.0%})")
         if errors:
             failures.append("draw errors")
     except Exception:

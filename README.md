@@ -413,7 +413,10 @@ window, passthrough and tracking settings (including hiding the hand panel's
   and edge adjacency (Smooth). The heat map is drawn by us (Blender's weight
   overlay isn't drawn in VR): its positions and triangles are read in the
   app timer when the pose or the mesh changes, and the colored batch is
-  rebuilt (at most 30 times a second) when the weights change. B's undo
+  rebuilt (at most 30 times a second) when the weights change. It lies on
+  the mesh, so its small shader pulls each vertex toward the eye by 0.1% of
+  its distance (same pixel, a little nearer, whatever the clip range);
+  without that it z-fought with the mesh's own faces. B's undo
   keeps each stroke's previous weights per vertex.
 - **Paint mode** ([paint.py](vr_sculpt/paint.py)): `paint.image_paint`
   projects each dab along the 3D view, so for every dab the largest desktop
