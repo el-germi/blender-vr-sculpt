@@ -1,4 +1,4 @@
-"""VR overlay: brush rings at the controller tips, brush card, hand panel, grid, measurements,
+"""VR overlay: brush rings at the controller tips, tip status, hand panel, grid, measurements,
 plus (headset only) the desktop window screen and camera previews."""
 
 import math
@@ -8,16 +8,11 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-from . import (camera, desktop, drawing, grid, hardsurface, hud, interactions, measure, onion, operators, paint,
-               paths, primitives, puppet, shading, snapping, strokes, symmetry, vr_ui)
+from . import (camera, controllers, desktop, drawing, grid, hardsurface, hud, interactions, measure, menus, onion,
+               operators, paint, paths, presence, primitives, puppet, shading, snapping, strokes, symmetry, vr_ui)
 from . import pose as pose_mode  # "pose" is a controller pose below
 
-COLORS = {
-    'DRAW': (1.0, 0.55, 0.2),
-    'SMOOTH': (0.3, 0.8, 1.0),
-    'GRAB': (0.95, 0.9, 0.3),
-    'INFLATE': (0.7, 0.45, 1.0),
-}
+COLORS = hud.PYTHON_COLORS
 INVERT_COLOR = (0.4, 0.6, 1.0)
 
 _SEGMENTS = 32
@@ -67,6 +62,7 @@ def draw_overlay(context, ss, xr=True):
     poses = [operators.controller_pose(ss.controller_aim_location_get(context, i),
                                        ss.controller_aim_rotation_get(context, i)) for i in range(2)]
     tips = [operators.brush_tip(p, settings.tip_offset * scale) for p in poses]
+    controllers.draw(context, ss, xr)
     if settings.grid_show:
         gpu.state.blend_set('ALPHA')
         gpu.state.depth_test_set('NONE')
@@ -83,6 +79,7 @@ def draw_overlay(context, ss, xr=True):
         desktop.draw(context, ss, poses[1])
     if settings.show_cursor:
         _draw_cursors(context, ss, settings, xr)
+    controllers.draw_hints(context, ss)
 
 
 def _draw_cursors(context, ss, settings, xr):
@@ -183,30 +180,51 @@ def _draw_cursors(context, ss, settings, xr):
     viewer = Vector(ss.viewer_pose_location)
     camera_tool = tools and settings.tool == 'CAMERA'
     if settings.show_brush_card:
-        # Above the right hand, facing the headset.
-        anchor = Vector(ss.controller_grip_location_get(context, 1)) + Vector((0.0, 0.0, 0.06 * scale))
-        content = hud.card_content(settings, sculpt_brush, COLORS)
-        hud.draw_card(anchor, viewer, scale, content)
+        # The tip status: a slim line above the right hand, facing the headset.
+        anchor = Vector(ss.controller_grip_location_get(context, 1)) + Vector((0.0, 0.0, 0.05 * scale))
+        content = hud.card_content(settings, sculpt_brush)
+        hud.draw_status(anchor, viewer, scale, content, hud.status_size(context, settings))
     if xr and camera_tool and context.scene.camera is not None:
-        # A viewfinder above the card: the controller is the camera.
-        anchor = Vector(ss.controller_grip_location_get(context, 1)) + Vector((0.0, 0.0, 0.11 * scale))
+        # A viewfinder above the status: the controller is the camera.
+        anchor = Vector(ss.controller_grip_location_get(context, 1)) + Vector((0.0, 0.0, 0.075 * scale))
         camera.draw_preview(hud.billboard(anchor, viewer, scale), context.scene)
+    _draw_panel(context, ss, settings, xr)
 
-    if settings.show_panel:
-        right = operators.controller_pose(ss.controller_aim_location_get(context, 1),
-                                          ss.controller_aim_rotation_get(context, 1))
-        widgets, hit, hit_matrix, _h = interactions.panel_pointer(context, ss, right)
-        hover = vr_ui.hit_test(widgets, *hit) if hit else None
-        for matrix, panel_widgets, height, width in interactions.panel_frames(context, ss):
-            vr_ui.draw_panel(matrix, panel_widgets, height, hover.id if hover else None, interactions.pressed_id,
-                             width=width)
-        if hit is not None:
-            vr_ui.draw_ray(right.translation, hit_matrix @ Vector((hit[0], hit[1], 0.0)), True)
-    if xr and settings.camera_preview and not camera_tool and context.scene.camera is not None:
+
+def _draw_panel(context, ss, settings, xr):
+    """The hand panel and timeline, faded in and out by presence.py; hidden, its ghost."""
+    if not settings.show_panel:
+        return
+    right = operators.controller_pose(ss.controller_aim_location_get(context, 1),
+                                      ss.controller_aim_rotation_get(context, 1))
+    frames = interactions.panel_frames(context, ss)
+    widgets, hit, hit_matrix, _h = interactions.panel_pointer(context, ss, right, frames)
+    was_shown = presence.shown(context, ss)
+    ghost = not was_shown and vr_ui.ghost_hit(frames[0][0], right.translation, interactions.aim_direction(right))
+    alpha = presence.update(context, ss, using=(hit is not None and was_shown) or ghost or
+                            interactions.pressed_id is not None)
+    if alpha < 0.98:
+        icon = menus.MODE_ICONS.get(settings.mode, "sculpt")
+        vr_ui.draw_ghost(frames[0][0], icon, 1.0 - alpha, ghost)
+    if alpha <= 0.01:
+        if xr:
+            interactions.note_hover(context, ss, None)
+        return
+    shown = presence.shown(context, ss)
+    hover = vr_ui.hit_test(widgets, *hit) if hit is not None and shown else None
+    if xr:
+        interactions.note_hover(context, ss, hover.id if hover else None)
+    for matrix, panel_widgets, height, width in frames:
+        pointer = hit if hit is not None and shown and matrix is hit_matrix else None
+        vr_ui.draw_panel(vr_ui.lift(matrix, alpha), panel_widgets, height, hover.id if hover else None,
+                         interactions.pressed_id, width=width, alpha=alpha, pointer=pointer)
+    if hit is not None and shown:
+        vr_ui.draw_ray(right.translation, hit_matrix @ Vector((hit[0], hit[1], 0.0)), True)
+    camera_tool = settings.mode == 'TOOLS' and settings.tool == 'CAMERA'
+    if xr and settings.camera_preview and context.scene.camera is not None and alpha > 0.5 and not camera_tool:
         # Pinned to the left of the hand panel.
-        matrix, _widgets, _height = interactions.panel_frame(context, ss)
         width = camera.PREVIEW_WIDTH
-        camera.draw_preview(matrix, context.scene, width, x=-vr_ui.WIDTH / 2 - 0.006 - width)
+        camera.draw_preview(frames[0][0], context.scene, width, x=-vr_ui.WIDTH / 2 - 0.006 - width)
 
 
 def _draw_paint_cursors(context, ss, settings):
@@ -292,3 +310,4 @@ def unregister():
         bpy.types.SpaceView3D.draw_handler_remove(h, region)
     _handles.clear()
     hud.clear()
+    controllers.clear()

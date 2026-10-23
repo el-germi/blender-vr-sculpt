@@ -70,7 +70,7 @@ def setup():
         s = ctx.scene.vr_sculpt
 
         def add(x, hover=None):
-            widgets, height = vr_ui.layout(menus.rows(ctx))
+            widgets, height = menus.layout(ctx)
             m = vr_ui.panel_matrix(Vector((x, 0.0, -0.12)), Vector((x, -0.6, 0.0)), 1.0)
             panels.append((m, widgets, height, hover))
 
@@ -92,6 +92,7 @@ def setup():
         # Gear settings page 1, torus with its Dimensions Mode select.
         gear_key = next(e.key for e in catalog.entries() if e.idname == "mesh.primitive_gear")
         primitives.create_from_entry(ctx, gear_key, (0, 5, 0))
+        menus.open_sheet('OBJECT')
         add(0.4, "param_number_of_teeth")
         torus_key = next(e.key for e in catalog.entries() if e.idname == "mesh.primitive_torus_add")
         primitives.create_from_entry(ctx, torus_key, (0, 5, 0))

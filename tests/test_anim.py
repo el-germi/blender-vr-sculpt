@@ -134,15 +134,23 @@ def test_timeline_rows(cube):
         def controller_grip_location_get(self, context, i):
             return Vector((-0.2, -0.3, 1.1))
     frames = interactions.panel_frames(ctx, SS())
-    check(len(frames) == 2 and frames[1][3] > vr_ui.WIDTH, "the timeline is a wider strip beside the hand panel")
+    check(len(frames) == 2 and frames[1][3] == interactions.TIMELINE_WIDTH, "the timeline is a strip beside the "
+          "hand panel")
     main_height = frames[0][2]
     check((frames[1][0].translation - frames[0][0].translation).length > vr_ui.WIDTH / 2,
           "next to it, not on top of it")
     widgets, height = frames[1][1], frames[1][2]
     ids = {w.id for w in widgets}
-    need = {"frame", "key_prev", "frame_prev", "play", "frame_next", "key_next", "key_insert", "key_delete",
-            "autokey", "interp", "range_start", "range_end", "show_paths", "onion"}
-    check(need <= ids, f"timeline rows (missing {sorted(need - ids)})")
+    first = {"frame", "key_prev", "frame_prev", "play", "frame_next", "key_next", "key_insert", "key_delete",
+             "autokey", "timeline_more"}
+    check(first <= ids and "onion" not in ids, f"timeline: scrubber, transport, keys (missing {sorted(first - ids)})")
+    vr_ui.find(widgets, "timeline_more").on_press()
+    frames = interactions.panel_frames(ctx, SS())
+    widgets, height = frames[1][1], frames[1][2]
+    ids = {w.id for w in widgets}
+    need = first | {"interp", "range_start", "range_end", "show_paths", "onion"}
+    check(need <= ids, f"timeline with More (missing {sorted(need - ids)})")
+    check(abs(frames[0][2] - main_height) < 1e-9, "the timeline's More leaves the hand panel alone")
     frame = vr_ui.find(widgets, "frame")
     check(len(frame.ticks) == 2 and all(0 <= t <= 1 for t in frame.ticks), f"key ticks on the scrubber ({frame.ticks})")
     frame.on_change(40)

@@ -1,4 +1,4 @@
-"""Windowed visual check of the brush card. Saves tests/hud_preview.png.
+"""Windowed visual check of the tip status. Saves tests/hud_preview.png.
 
 blender --factory-startup --python tests/hud_preview.py
 """
@@ -30,13 +30,13 @@ def draw():
     from vr_sculpt import hud
     try:
         for anchor, content, desc in cards:
-            hud.draw_card(anchor, VIEWER, 1.0, content, with_description=desc)
+            hud.draw_status(anchor, VIEWER, 1.0, content, "4.0 cm", with_description=desc)
     except Exception:
         log(traceback.format_exc())
 
 
 def setup():
-    from vr_sculpt import draw as vr_draw, hud, native
+    from vr_sculpt import hud, native
     try:
         win = bpy.context.window_manager.windows[0]
         area, region = native.largest_view3d(win)
@@ -55,12 +55,12 @@ def setup():
                     asset_library_type='ESSENTIALS',
                     relative_asset_identifier="brushes/essentials_brushes-mesh_sculpt.blend/Brush/" + name)
                 names.append(bpy.context.tool_settings.sculpt.brush)
-        native_settings = SimpleNamespace(engine='NATIVE', brush='DRAW')
-        py_settings = SimpleNamespace(engine='PYTHON', brush='GRAB')
-        c1 = hud.card_content(native_settings, names[0], vr_draw.COLORS)
-        c2 = hud.card_content(native_settings, names[1], vr_draw.COLORS)
-        c3 = hud.card_content(py_settings, None, vr_draw.COLORS)
-        log("textures:", c1[3] is not None, c2[3] is not None, "python:", c3[0], c3[2])
+        native_settings = SimpleNamespace(mode='SCULPT', engine='NATIVE', brush='DRAW')
+        py_settings = SimpleNamespace(mode='SCULPT', engine='PYTHON', brush='GRAB')
+        c1 = hud.card_content(native_settings, names[0])
+        c2 = hud.card_content(native_settings, names[1])
+        c3 = hud.card_content(py_settings, None)
+        log("native:", c1[0], c2[0], "python:", c3[0], c3[2])
         cards[:] = [(Vector((0, 0, 0.055)), c1, True), (Vector((0, 0, 0.0)), c2, False), (Vector((0, 0, -0.06)), c3, True)]
         rv3d.view_perspective = 'PERSP'
         rv3d.view_location = (0, 0, 0.01)

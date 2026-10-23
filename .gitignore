@@ -15,3 +15,6 @@ test_scene.blend
 tests/*_result.txt
 tests/*_stdout.txt
 tests/*.png
+
+# Meta controller art as downloaded (tools/convert_controllers.py makes vr_sculpt/assets/controllers)
+/controllers/

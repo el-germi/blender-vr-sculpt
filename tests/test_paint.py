@@ -194,12 +194,16 @@ def test_panel(obj):
         o.select_set(False)
     ctx.view_layer.objects.active = obj
     settings.mode = 'PAINT'
-    widgets, height = vr_ui.layout(menus.rows(ctx))
+    widgets, height = menus.layout(ctx)
     ids = {w.id for w in widgets}
-    need = {"mode_paint", "reach_contact", "reach_spray", "paint_pick", "paint_hue", "paint_sat", "paint_val",
-            "paint_radius", "paint_undo", "paint_swap"}
-    check(need <= ids, f"ready mesh: paint page (missing {sorted(need - ids)})")
-    check(height < 0.42, f"panel height {height:.3f} m")
+    first = {"mode_paint", "paint_pick", "paint_radius", "paint_undo", "paint_swap", "pbrush_Paint Hard"}
+    check(first <= ids and "paint_hue" not in ids, f"ready mesh: paint page (missing {sorted(first - ids)})")
+    menus.set_more('PAINT', True)
+    widgets, height = menus.layout(ctx)
+    ids = {w.id for w in widgets}
+    need = first | {"reach_contact", "reach_spray", "paint_hue", "paint_sat", "paint_val"}
+    check(need <= ids, f"with More: reach and HSV (missing {sorted(need - ids)})")
+    check(height < 0.32, f"panel height {height:.3f} m")
     check(sum(1 for w in widgets if w.id.startswith("pcolor_")) == 8, "8 color swatches")
     vr_ui.find(widgets, "pcolor_YELLOW").on_press()
     check(close(paint.get_color(ctx), next(rgb for i, _n, rgb in vr_sculpt.strokes.PALETTE if i == 'YELLOW')),
@@ -214,7 +218,7 @@ def test_panel(obj):
     bare = bpy.data.objects.new("Bare", bpy.data.meshes.new("Bare"))
     ctx.scene.collection.objects.link(bare)
     ctx.view_layer.objects.active = bare
-    widgets, _ = vr_ui.layout(menus.rows(ctx))
+    widgets, _ = menus.layout(ctx)
     check(vr_ui.find(widgets, "paint_setup") is not None and vr_ui.find(widgets, "paint_size_2048") is not None,
           "a mesh without UVs/image offers Set up for painting")
     check(paint.pick(ctx, settings, False, Matrix(), Matrix(), 1.0) is None, "and the trigger does nothing on it")

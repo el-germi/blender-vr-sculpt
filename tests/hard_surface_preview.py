@@ -159,7 +159,8 @@ def setup():
         def add(i, obj, page):
             primitives.make_active(ctx, obj)
             s.model_page = page
-            widgets, height = vr_ui.layout(menus.rows(ctx))
+            menus.open_sheet('OBJECT')
+            widgets, height = menus.layout(ctx)
             x = PANEL_X + (i - 1.5) * 0.2
             m = vr_ui.panel_matrix(Vector((x, 0.0, 0.0)), Vector((x, -0.6, 0.0)), 1.0)
             panels.append((m, widgets, height))
@@ -173,6 +174,7 @@ def setup():
         s.model_add_as = 'DIFFERENCE'
         s.model_page = 'BOOLEAN'
         s.show_panel = True
+        s.panel_pin = True  # The reveal needs a real wrist: keep it shown.
         primitives.make_active(ctx, slot)
         snapping.last_hit = (Vector((0.0, -0.05, 0.03)), Vector((0.0, 0.0, 1.0)))
 

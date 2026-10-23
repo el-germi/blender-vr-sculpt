@@ -24,7 +24,12 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
         for mode, text in (('SCULPT', "Sculpt"), ('MODEL', "Model"), ('DRAW', "Draw"), ('PAINT', "Paint"),
                            ('POSE', "Pose"), ('TOOLS', "Tools")):
             row.operator("vrsculpt.set_mode", text=text, depress=settings.mode == mode).mode = mode
-        layout.prop(settings, "show_panel")
+        row = layout.row(heading="Hand Panel")
+        row.prop(settings, "show_panel", text="Show")
+        row.prop(settings, "panel_pin", text="Pin")
+        sub = layout.row()
+        sub.active = settings.show_panel and not settings.panel_pin
+        sub.prop(settings, "panel_reveal")
         col = layout.column()
         col.active = settings.enabled
         if settings.mode == 'DRAW':
@@ -210,6 +215,10 @@ class VIEW3D_PT_vr_extras(bpy.types.Panel):
         sub.prop(settings, "desktop_interactive")
         sub.prop(settings, "desktop_keyboard")
         col.prop(context.window_manager.xr_session_settings, "show_passthrough", text="Passthrough")
+        col.prop(settings, "own_controllers")
+        sub = col.column()
+        sub.active = settings.own_controllers
+        sub.prop(settings, "controller_hints")
 
         col = layout.column(heading="Tracking")
         col.prop(settings, "tracking", text="Objects")

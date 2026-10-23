@@ -438,19 +438,23 @@ def test_sculpt_forgets_and_panel():
     check(not strokes.is_stroke(obj), "sculpting a stroke turns it into a plain mesh")
 
     s.mode = 'DRAW'
-    widgets, _ = vr_ui.layout(menus.rows(bpy.context))
+    widgets, _ = menus.layout(bpy.context)
     ids = {w.id for w in widgets}
-    check({"mode_draw", "tool_EDIT", "style_RIBBON", "color_GREEN", "draw_width", "mirror_x", "undo_stroke",
-           "draw_thickness"} <= ids, "Draw panel has tools, styles, colors, width, mirror, thickness and undo")
+    check({"mode_draw", "tool_EDIT", "style_RIBBON", "color_GREEN", "draw_width", "undo_stroke"} <= ids and
+          "draw_thickness" not in ids, "Draw panel: tools, styles, colors, width and undo up front")
+    menus.set_more('DRAW', True)
+    widgets, _ = menus.layout(bpy.context)
+    ids = {w.id for w in widgets}
+    check({"mirror_x", "draw_thickness", "draw_smoothing", "mirror_here"} <= ids, "More: thickness, smoothing, mirror")
     vr_ui.find(widgets, "draw_thickness").on_press()
-    widgets, _ = vr_ui.layout(menus.rows(bpy.context))
+    widgets, _ = menus.layout(bpy.context)
     vr_ui.find(widgets, "opt_SPEED_THIN").on_press()
     check(s.draw_thickness == 'SPEED_THIN' and not menus.picker_open(), "Thickness picker sets the mode")
-    widgets, _ = vr_ui.layout(menus.rows(bpy.context))
+    widgets, _ = menus.layout(bpy.context)
     vr_ui.find(widgets, "color_GREEN").on_press()
     vr_ui.find(widgets, "mirror_z").on_press()
     check(s.draw_color == 'GREEN' and s.mirror_z, "swatches and mirror toggles work")
-    sw = vr_ui.find(vr_ui.layout(menus.rows(bpy.context))[0], "color_GREEN")
+    sw = vr_ui.find(menus.layout(bpy.context)[0], "color_GREEN")
     check(sw.swatch is not None and sw.active, "the chosen swatch is marked")
 
 

@@ -102,6 +102,7 @@ def common(ctx):
     menus.set_mode(ctx, 'TOOLS')
     s.grid_show, s.grid_snap, s.grid_size = True, True, 0.04
     s.show_panel = True
+    s.panel_pin = True  # The reveal needs a real wrist: keep it shown.
     measure.clear(ctx.scene)
     measure.add(ctx.scene, (-0.25, 0.0, 1.0), (0.25, 0.0, 1.0))
     measure.add(ctx.scene, (0.25, 0.0, 1.0), (0.25, 0.0, 1.5))

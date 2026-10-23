@@ -9,7 +9,7 @@ import time
 
 from mathutils import Matrix, Vector
 
-from . import generic, grid, hardsurface, menus, primitives, snapping, vr_ui
+from . import generic, grid, hardsurface, menus, presence, primitives, snapping, vr_ui
 
 # Widget the right trigger is holding down, for drawing.
 pressed_id = None
@@ -23,14 +23,14 @@ def aim_direction(pose):
     return (pose.to_3x3() @ Vector((0.0, 0.0, -1.0))).normalized()
 
 
-TIMELINE_WIDTH = 0.22  # hand-space meters
-TIMELINE_GAP = 0.008
+TIMELINE_WIDTH = 0.2  # hand-space meters
+TIMELINE_GAP = 0.006
 
 
 def panel_frame(context, ss):
     """(matrix, widgets, height) of the hand panel above the left controller."""
     scale = ss.viewer_scale
-    widgets, height = vr_ui.layout(menus.rows(context))
+    widgets, height = menus.layout(context)
     anchor = Vector(ss.controller_grip_location_get(context, 0)) + Vector((0.0, 0.0, 0.07 * scale))
     matrix = vr_ui.panel_matrix(anchor, Vector(ss.viewer_pose_location), scale)
     return matrix, widgets, height
@@ -48,10 +48,10 @@ def panel_frames(context, ss):
     return out
 
 
-def panel_pointer(context, ss, pose):
+def panel_pointer(context, ss, pose, frames=None):
     """(widgets, hit_xy, matrix, height) for a ray from pose at the hand panel or the timeline strip;
     hit_xy is None when it misses both (then the hand panel's frame is returned)."""
-    frames = panel_frames(context, ss)
+    frames = frames or panel_frames(context, ss)
     for matrix, widgets, height, width in frames:
         hit = vr_ui.ray_hit(matrix, pose.translation, aim_direction(pose), height, ss.viewer_scale, width)
         if hit is not None:
@@ -60,8 +60,34 @@ def panel_pointer(context, ss, pose):
     return widgets, None, matrix, height
 
 
+_hover = {"id": None}
+
+
+def note_hover(context, ss, widget_id):
+    """A light tick on the right hand when the ray moves onto a new widget."""
+    if widget_id != _hover["id"]:
+        _hover["id"] = widget_id
+        if widget_id is not None:
+            presence.tick(context, ss, 1, 0.08, 0.006)
+
+
+DETENTS = 10  # slider ticks along the track (integer sliders with few values tick on each)
+REPEAT_DELAY = 0.4  # seconds a stepper press waits before repeating
+REPEAT_EVERY = 0.09
+
+
+def _detent(widget, value):
+    span = widget.max - widget.min
+    if span <= 0:
+        return 0
+    if widget.integer and span <= 30:
+        return int(round(value))
+    return int(min(max((value - widget.min) / span, 0.0), 1.0) * DETENTS + 1e-6)
+
+
 class UIPress:
-    """Trigger pressed while pointing at the hand panel. Buttons fire on press; sliders drag."""
+    """Trigger pressed while pointing at the hand panel. Buttons fire on press; sliders drag;
+    steppers step (and repeat while held)."""
 
     def __init__(self, context, ss, widget, hit):
         global pressed_id
@@ -69,37 +95,68 @@ class UIPress:
         self.widget_id = widget.id if widget else None
         self.kind = widget.kind if widget else None
         self.changed = False
+        self.step = 0
+        self.t0 = time.monotonic()
+        self.repeats = 0
         pressed_id = self.widget_id
         if widget is None:
             return
-        if widget.kind in {'button', 'select'} and widget.on_press:
+        vr_ui.pulse(widget.id)
+        if widget.kind == 'slider':
+            self.detent = _detent(widget, widget.value)
+            self._set(context, widget, hit[0])
+        elif widget.kind == 'stepper':
+            self.step = widget.step_at(hit[0])
+            self._step(widget)
+        elif widget.on_press:
             widget.on_press()
             self.changed = True
-        elif widget.kind == 'slider':
-            self._set(widget, hit[0])
 
-    def _set(self, widget, x):
+    def _set(self, context, widget, x):
         value = widget.value_at(x)
         if value != widget.value:
             widget.on_change(value)
             self.changed = True
+            detent = _detent(widget, value)
+            if detent != self.detent:
+                self.detent = detent
+                presence.tick(context, self.ss, 1, 0.22, 0.005)
 
-    def update(self, context, pose, tip_pose, value):
-        if self.kind != 'slider':
-            return
+    def _step(self, widget):
+        value = widget.stepped(self.step) if self.step else None
+        if value is not None:
+            widget.on_change(value)
+            self.changed = True
+
+    def _find(self, context):
         # Rebuild the panels: they follow the left hand, and values may have changed.
-        widget = matrix = None
         for m, widgets, _height, _width in panel_frames(context, self.ss):
             widget = vr_ui.find(widgets, self.widget_id)
             if widget is not None:
-                matrix = m
-                break
+                return widget, m
+        return None, None
+
+    def update(self, context, pose, tip_pose, value):
+        if self.kind == 'stepper' and self.step:
+            held = time.monotonic() - self.t0 - REPEAT_DELAY
+            due = int(held / REPEAT_EVERY) + 1 if held >= 0 else 0
+            if due > self.repeats:
+                self.repeats = due
+                widget, _m = self._find(context)
+                if widget is not None:
+                    self._step(widget)
+                    vr_ui.pulse(widget.id)
+                    presence.tick(context, self.ss, 1, 0.18, 0.005)
+            return
+        if self.kind != 'slider':
+            return
+        widget, matrix = self._find(context)
         if widget is None:
             return
         # Keep dragging even if the ray slides off the panel: use the panel plane.
         x = vr_ui.ray_plane_x(matrix, pose.translation, aim_direction(pose))
         if x is not None:
-            self._set(widget, x)
+            self._set(context, widget, x)
 
     def abandon(self):
         global pressed_id

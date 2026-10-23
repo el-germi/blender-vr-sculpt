@@ -228,16 +228,23 @@ def test_menus():
     for mode in ('SCULPT', 'MODEL'):
         for engine in ('PYTHON', 'NATIVE'):
             settings.mode, settings.engine = mode, engine
-            widgets, _ = vr_ui.layout(menus.rows(ctx))
+            widgets, _ = menus.layout(ctx)
             ids = {w.id for w in widgets}
-            check({"mode_sculpt", "mode_model"} <= ids, f"{mode}/{engine}: mode tabs present")
+            check({"mode_sculpt", "mode_model"} <= ids, f"{mode}/{engine}: mode rail present")
     settings.mode = 'MODEL'
     cyl = primitives.create(ctx, 'CYLINDER', (0, 0, 0))
-    ids = {w.id for w in vr_ui.layout(menus.rows(ctx))[0]}
-    check({"radius_prim", "height", "segments", "duplicate", "delete"} <= ids, "cylinder settings shown when selected")
-    seg = vr_ui.find(vr_ui.layout(menus.rows(ctx))[0], "segments")
+    ids = {w.id for w in menus.layout(ctx)[0]}
+    check({"edit_object", "duplicate", "delete"} <= ids and "segments" not in ids,
+          "a selection shows as a chip (Duplicate, Delete); its settings are one level down")
+    vr_ui.find(menus.layout(ctx)[0], "edit_object").on_press()
+    ids = {w.id for w in menus.layout(ctx)[0]}
+    check({"back", "radius_prim", "height", "segments", "duplicate", "delete"} <= ids,
+          "the object's sheet has the cylinder's settings")
+    seg = vr_ui.find(menus.layout(ctx)[0], "segments")
     seg.on_change(8)
-    check(cyl.vr_prim.segments == 8 and len(cyl.data.vertices) == 16, "panel slider edits the primitive")
+    check(cyl.vr_prim.segments == 8 and len(cyl.data.vertices) == 16, "panel stepper edits the primitive")
+    vr_ui.find(menus.layout(ctx)[0], "back").on_press()
+    check(menus.sheet() is None, "Back returns to Model")
     primitives.delete(ctx, cyl)
     settings.mode = 'SCULPT'
     settings.engine = 'PYTHON'
@@ -253,6 +260,7 @@ def test_trigger():
     settings.mode = 'MODEL'
     settings.tip_offset = 0.0
     settings.show_panel = True
+    settings.panel_pin = True  # Shown whatever the (fake) wrist does; see test_ui.py for the reveal.
 
     settings.primitive = 'mesh.primitive_cube_add'
     n = len(bpy.data.objects)
@@ -307,8 +315,8 @@ def test_trigger():
     matrix, widgets, height = interactions.panel_frame(ctx, ss)
     s = vr_ui.find(widgets, "radius")
     y = (s.rect[1] + s.rect[3]) / 2
-    left = matrix @ Vector((s.rect[0] + vr_ui.PAD, y, 0.0))
-    right = matrix @ Vector((s.rect[2] - vr_ui.PAD, y, 0.0))
+    left = matrix @ Vector((s.rect[0] + vr_ui.SLIDER_INSET, y, 0.0))
+    right = matrix @ Vector((s.rect[2] - vr_ui.SLIDER_INSET, y, 0.0))
     o1, r1 = aim_at(left, normal)
     ss.trigger = 1.0
     ss.aim_loc[1], ss.aim_rot[1] = o1, r1
@@ -334,6 +342,7 @@ def test_trigger():
     ss.aim_rot[0] = Quaternion()
     op, r = press(ctx, ss, 0, [tip, tip + Vector((0, 0.01, 0.01)), tip + Vector((0, 0.02, 0.02))])
     check(op.handler is None and cyl.vr_prim.kind == 'NONE', "sculpting a primitive makes it a plain mesh")
+    settings.panel_pin = False
 
 
 def main():

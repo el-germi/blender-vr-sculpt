@@ -200,6 +200,7 @@ def after_take(win, area, region):
         rv3d.view_rotation = Quaternion((1, 0, 0), 1.45)
         rv3d.view_distance = 1.6
         scene.vr_sculpt.show_panel = True
+        scene.vr_sculpt.panel_pin = True  # The reveal needs a real wrist: keep it shown.
         HANDLES.append(bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW'))
     except Exception:
         log(traceback.format_exc())

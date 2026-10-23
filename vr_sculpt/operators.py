@@ -5,7 +5,7 @@ from bpy.props import BoolProperty, EnumProperty
 from mathutils import Matrix, Quaternion, Vector
 
 from . import (actions, brushes, camera, catalog, desktop, drawing, hardsurface, interactions, measure, menus,
-               native, paint, paths, primitives, shading, snapping, strokes, symmetry, vr_ui)
+               native, paint, paths, presence, primitives, shading, snapping, strokes, symmetry, vr_ui)
 from . import pose as pose_mode  # "pose" is the controller pose in the handlers below
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
@@ -108,7 +108,7 @@ def _tip_engaged(context, settings, tip, scale):
 def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
     """Panel press, grab, create or draw for this trigger press; None means sculpt (or nothing)."""
     ss = context.window_manager.xr_session_state
-    if settings.show_panel and hand == actions.HANDS[1] and ss is not None:
+    if settings.show_panel and hand == actions.HANDS[1] and ss is not None and presence.shown(context, ss):
         widgets, hit, _m, _h = interactions.panel_pointer(context, ss, pose)
         if hit is not None:
             # A press anywhere on the panel belongs to the panel, even between widgets.
@@ -410,9 +410,9 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
 
 
 class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
-    """Right stick click: next brush radius (Pose: IK chain length). Left stick click: show or hide the hand panel"""
+    """Right stick click: next brush radius (Pose: IK chain length). Left stick click: pin or unpin the hand panel"""
     bl_idname = "vrsculpt.cycle_radius"
-    bl_label = "VR Next Radius / Toggle Panel"
+    bl_label = "VR Next Radius / Pin Panel"
     bl_options = {'INTERNAL'}
 
     left_hand: BoolProperty(name="Left Hand", options={'SKIP_SAVE'})
@@ -420,7 +420,7 @@ class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
     def execute(self, context):
         settings = context.scene.vr_sculpt
         if self.left_hand:
-            settings.show_panel = not settings.show_panel
+            presence.toggle_pin(context)
             return {'FINISHED'}
         if settings.mode == 'POSE':
             settings.pose_chain = settings.pose_chain % 4 + 1
