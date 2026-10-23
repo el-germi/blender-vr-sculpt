@@ -240,11 +240,19 @@ def rail_height(n):
 
 def layout_panel(panel, width=WIDTH):
     """The hand panel: content rows right of the rail, top-aligned; the rail sits at the bottom, so
-    the mode icons stay put above the hand whatever the content's height. Returns (widgets, height)."""
+    the mode icons stay put above the hand whatever the content's height. When the rail is the taller,
+    a More row at the end sits at the bottom too, so opening it doesn't move it. Returns (widgets, height)."""
     heights = [_row_height(row) for row in panel.rows]
     content = PAD * 2 + sum(heights) + GAP * max(len(panel.rows) - 1, 0)
     height = max(content, rail_height(len(panel.rail)))
-    widgets, _used = _place_rows(panel.rows, -width / 2 + RAIL_W + PAD, width / 2 - PAD, height - PAD)
+    x0, x1 = -width / 2 + RAIL_W + PAD, width / 2 - PAD
+    rows = panel.rows
+    if height > content + 1e-9 and len(rows) > 1 and any(w.kind == 'more' for w in rows[-1]):
+        widgets, _used = _place_rows(rows[:-1], x0, x1, height - PAD)
+        _place_row(rows[-1], x0, x1, PAD + heights[-1], heights[-1])
+        widgets += rows[-1]
+    else:
+        widgets, _used = _place_rows(rows, x0, x1, height - PAD)
     x0 = -width / 2 + (RAIL_W - RAIL_ITEM) / 2
     y = rail_height(len(panel.rail)) - PAD
     for w in panel.rail:

@@ -6,13 +6,13 @@ Needs the bundled "VR Scene Inspection" add-on, which starts the VR session.
 if "bpy" in locals():
     import importlib
     for _m in (brushes, native, strokes, props, catalog, primitives, generic, actions, hud, grid, symmetry,
-               shading, hardsurface, snapping, anim, paths, onion, paint, pose, puppet, measure, camera, desktop,
+               shading, hardsurface, snapping, anim, paths, onion, paint, pose, rig, puppet, measure, camera, desktop,
                tracking, navigation, gfx, vr_ui, presence, menus, interactions, drawing, operators, controllers, live, draw,
                ui):
         importlib.reload(_m)
 else:
     from . import (brushes, native, strokes, props, catalog, primitives, generic, actions, hud, grid, symmetry,
-                   shading, hardsurface, snapping, anim, paths, onion, paint, pose, puppet, measure, camera,
+                   shading, hardsurface, snapping, anim, paths, onion, paint, pose, rig, puppet, measure, camera,
                    desktop, tracking, navigation, gfx, vr_ui, presence, menus, interactions, drawing, operators,
                    controllers, live, draw, ui)
 

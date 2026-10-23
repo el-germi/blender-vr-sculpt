@@ -1,11 +1,12 @@
 """One app timer for the things that update while VR runs, outside of any operator:
-tracking objects, desktop window captures, camera preview redraws, puppet bindings and takes."""
+tracking objects, desktop window captures, camera preview redraws, puppet bindings and takes, the
+weight heat map's geometry."""
 
 import time
 
 import bpy
 
-from . import camera, controllers, desktop, onion, operators, paths, puppet, tracking
+from . import camera, controllers, desktop, onion, operators, paths, puppet, rig, tracking
 
 FAST = 1.0 / 90.0
 IDLE = 0.25
@@ -35,6 +36,7 @@ def _tick():
             puppet.tick(context, ss)
         paths.ensure(context)
         onion.update(context)
+        rig.tick(context)
         if camera.wanted(context):
             # The preview renders in the desktop 3D view's draw callback, so keep it drawing.
             now = time.monotonic()

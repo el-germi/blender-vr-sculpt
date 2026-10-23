@@ -9,7 +9,7 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
 from . import (camera, controllers, desktop, drawing, grid, hardsurface, hud, interactions, measure, menus, onion,
-               operators, paint, paths, presence, primitives, puppet, shading, snapping, strokes, symmetry, vr_ui)
+               operators, paint, paths, presence, primitives, puppet, rig, shading, snapping, strokes, symmetry, vr_ui)
 from . import pose as pose_mode  # "pose" is a controller pose below
 
 COLORS = hud.PYTHON_COLORS
@@ -74,6 +74,8 @@ def draw_overlay(context, ss, xr=True):
         paths.draw(context, scale)
     if settings.mode == 'POSE' and settings.pose_show_bones:
         pose_mode.draw(context, tips, scale)
+    if settings.mode == 'RIG':
+        rig.draw(context, tips, scale)
     puppet.draw(context, scale)
     if xr and settings.show_desktop:
         desktop.draw(context, ss, poses[1])
@@ -89,6 +91,8 @@ def _draw_cursors(context, ss, settings, xr):
     tools = settings.mode == 'TOOLS'
     posing = settings.mode == 'POSE'
     painting = settings.mode == 'PAINT'
+    rigging = settings.mode == 'RIG'
+    weights = rigging and settings.rig_tool == 'WEIGHTS'
     if painting:
         _draw_paint_cursors(context, ss, settings)
     if sketch:
@@ -96,8 +100,8 @@ def _draw_cursors(context, ss, settings, xr):
             settings.draw_tool, settings.draw_width / 2) * scale
     else:
         marking = model and settings.model_mark != 'NONE'
-        radius = (pose_mode.REACH if posing else shading.MARK_REACH if marking else
-                  interactions.TOUCH_MARGIN if model or tools else
+        radius = (settings.weight_radius if weights else pose_mode.REACH if posing else rig.REACH if rigging else
+                  shading.MARK_REACH if marking else interactions.TOUCH_MARGIN if model or tools else
                   settings.paint_radius if painting else settings.radius) * scale
     offset = settings.tip_offset * scale
 
@@ -137,6 +141,11 @@ def _draw_cursors(context, ss, settings, xr):
             color = hud.CAMERA_COLOR if settings.tool == 'CAMERA' else measure.COLOR
         elif posing:
             color = hud.POSE_COLORS[settings.pose_tool]
+        elif weights:
+            brush = rig.flip(settings.weight_brush) if idx == 0 else settings.weight_brush
+            color = rig.BRUSH_COLORS[brush]
+        elif rigging:
+            color = rig.DELETE_COLOR if idx == 0 else rig.BONES_COLOR
         elif painting:
             color = paint.get_color(context, secondary=idx == 0)
         elif idx == 0 and settings.left_inverts and (native or settings.brush in {'DRAW', 'INFLATE'}):
@@ -175,6 +184,10 @@ def _draw_cursors(context, ss, settings, xr):
             shading.draw(shader, context, tips, scale, settings.model_mark != 'NONE')
     if sketch:
         _draw_mirror_planes(shader, drawing.mirror_bits(settings), context.scene.cursor.location, scale)
+    if rigging and settings.rig_tool == 'BONES' and settings.rig_mirror:
+        arm = rig.target(context)
+        if arm is not None:
+            _draw_mirror_planes(shader, 1, arm.matrix_world.translation, scale)
     gpu.state.blend_set('NONE')
 
     viewer = Vector(ss.viewer_pose_location)

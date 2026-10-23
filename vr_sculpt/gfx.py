@@ -584,6 +584,26 @@ def _bones(p):
         p.disc(x, y, 0.2)
 
 
+def _rig(p):
+    # A bone chain with a branch, joints as dots.
+    joints = [(-0.62, -0.72), (-0.05, -0.08), (0.55, 0.68)]
+    p.path(joints, w=0.14)
+    p.line(-0.05, -0.08, 0.72, -0.42, 0.14)
+    for x, y in joints + [(0.72, -0.42)]:
+        p.disc(x, y, 0.17)
+
+
+def _weights(p):
+    # Rising bars: an amount.
+    for x0, top in ((-0.8, -0.2), (-0.2, 0.25), (0.4, 0.75)):
+        p.box(x0, -0.75, x0 + 0.4, top, 0.05, fill=True)
+
+
+def _smooth(p):
+    # A wave dying down to flat.
+    p.path([(-0.85 + 1.7 * t / 20, 0.5 * math.sin(2 * math.pi * 1.5 * t / 20) * (1 - t / 20)) for t in range(21)])
+
+
 def _bind(p):
     c, s = math.cos(math.radians(-40)), math.sin(math.radians(-40))
 
@@ -676,7 +696,7 @@ ICONS = {
     "fly": _fly, "desktop": _desktop, "passthrough": _passthrough, "timeline": _timeline, "tracking": _tracking,
     "fk": _fk, "ik": _ik, "bones": _bones, "bind": _bind, "reset": _reset, "cursor": _cursor, "object": _object,
     "cut": _cut, "union": _union, "intersect": _intersect, "bevel": _bevel, "shell": _shell, "array": _array,
-    "radial": _radial, "linear": _linear, "shading": _shading,
+    "radial": _radial, "linear": _linear, "shading": _shading, "rig": _rig, "weights": _weights, "smooth": _smooth,
 }
 
 

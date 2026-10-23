@@ -5,7 +5,7 @@ from bpy.props import BoolProperty, EnumProperty
 from mathutils import Matrix, Quaternion, Vector
 
 from . import (actions, brushes, camera, catalog, desktop, drawing, hardsurface, interactions, measure, menus,
-               native, paint, paths, presence, primitives, shading, snapping, strokes, symmetry, vr_ui)
+               native, paint, paths, presence, primitives, rig, shading, snapping, strokes, symmetry, vr_ui)
 from . import pose as pose_mode  # "pose" is the controller pose in the handlers below
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
@@ -34,6 +34,7 @@ def _on_data_swap(*_args):
     brushes.forget_caches()
     strokes.forget_caches()
     pose_mode.forget_caches()
+    rig.forget_caches()
 
 
 def get_state(obj):
@@ -102,6 +103,8 @@ def _tip_engaged(context, settings, tip, scale):
             paint.surface_near(obj, tip, settings.paint_radius * scale) is not None
     if settings.mode == 'POSE':
         return pose_mode.engaged(context, tip, scale)
+    if settings.mode == 'RIG':
+        return rig.engaged(context, settings, tip, scale)
     return False
 
 
@@ -138,6 +141,8 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         return paint.pick(context, settings, hand == actions.HANDS[0], pose, tip_pose, scale, value)
     if settings.mode == 'POSE':
         return pose_mode.pick(context, settings, tip_pose, scale)
+    if settings.mode == 'RIG':
+        return rig.pick(context, settings, hand == actions.HANDS[0], tip_pose, scale)
     if settings.mode == 'TOOLS':
         if settings.tool == 'CAMERA':
             return camera.AimCamera(context, pose)
@@ -342,7 +347,7 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         return {'FINISHED'} if self.times else {'CANCELLED'}
 
 
-MODE_CYCLE = ('SCULPT', 'MODEL', 'DRAW', 'PAINT', 'POSE', 'TOOLS')
+MODE_CYCLE = ('SCULPT', 'MODEL', 'DRAW', 'PAINT', 'RIG', 'POSE', 'TOOLS')
 
 
 def undo_last_stroke(context):
@@ -357,8 +362,9 @@ def undo_last_stroke(context):
 
 
 class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
-    """Right hand (B): next brush (Sculpt), next primitive (Model), undo last stroke (Draw),
-    FK / IK (Pose), remove the last measurement or switch camera (Tools). Left hand (Y): next mode"""
+    """Right hand (B): next brush (Sculpt), next primitive (Model), undo last stroke (Draw, Paint, Rig
+    weights), end the bone chain (Rig bones), FK / IK (Pose), remove the last measurement or switch camera
+    (Tools). Left hand (Y): next mode"""
     bl_idname = "vrsculpt.cycle_brush"
     bl_label = "VR Next Brush / Switch Mode"
     bl_options = {'INTERNAL'}
@@ -378,6 +384,11 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
             undo_last_stroke(context)
         elif settings.mode == 'PAINT':
             paint.undo_last(context)
+        elif settings.mode == 'RIG':
+            if settings.rig_tool == 'WEIGHTS':
+                rig.undo_stroke(context)
+            else:
+                rig.end_chain()
         elif settings.mode == 'POSE':
             settings.pose_tool = 'IK' if settings.pose_tool == 'FK' else 'FK'
         elif settings.mode == 'TOOLS':
@@ -410,7 +421,8 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
 
 
 class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
-    """Right stick click: next brush radius (Pose: IK chain length). Left stick click: pin or unpin the hand panel"""
+    """Right stick click: next brush radius (Pose: IK chain length; Rig: weight brush radius). Left stick click:
+    pin or unpin the hand panel"""
     bl_idname = "vrsculpt.cycle_radius"
     bl_label = "VR Next Radius / Pin Panel"
     bl_options = {'INTERNAL'}
@@ -425,7 +437,9 @@ class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
         if settings.mode == 'POSE':
             settings.pose_chain = settings.pose_chain % 4 + 1
             return {'FINISHED'}
-        prop = "paint_radius" if settings.mode == 'PAINT' else "radius"
+        if settings.mode == 'RIG' and settings.rig_tool == 'BONES':
+            return {'FINISHED'}
+        prop = {'PAINT': "paint_radius", 'RIG': "weight_radius"}.get(settings.mode, "radius")
         bigger = [r for r in RADIUS_STEPS if r > getattr(settings, prop) + 1e-6]
         setattr(settings, prop, bigger[0] if bigger else RADIUS_STEPS[0])
         return {'FINISHED'}
@@ -481,13 +495,14 @@ class VRSCULPT_OT_clear_measures(bpy.types.Operator):
 
 
 class VRSCULPT_OT_set_mode(bpy.types.Operator):
-    """Switch the VR tools between Sculpt, Model, Draw, Paint, Pose and Tools mode"""
+    """Switch the VR tools between Sculpt, Model, Draw, Paint, Rig, Pose and Tools mode"""
     bl_idname = "vrsculpt.set_mode"
     bl_label = "Set VR Mode"
     bl_options = {'INTERNAL'}
 
     mode: EnumProperty(items=(('SCULPT', "Sculpt", ""), ('MODEL', "Model", ""), ('DRAW', "Draw", ""),
-                              ('PAINT', "Paint", ""), ('POSE', "Pose", ""), ('TOOLS', "Tools", "")))
+                              ('PAINT', "Paint", ""), ('RIG', "Rig", ""), ('POSE', "Pose", ""),
+                              ('TOOLS', "Tools", "")))
 
     def execute(self, context):
         menus.set_mode(context, self.mode)
