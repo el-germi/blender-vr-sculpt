@@ -79,7 +79,7 @@ def draw_overlay(context, ss, xr=True):
         desktop.draw(context, ss, poses[1])
     if settings.show_cursor:
         _draw_cursors(context, ss, settings, xr)
-    controllers.draw_hints(context, ss)
+    controllers.draw_hints(context, ss, panel_alpha=presence.alpha())
 
 
 def _draw_cursors(context, ss, settings, xr):

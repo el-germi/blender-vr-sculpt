@@ -29,6 +29,7 @@ def cameras(scene):
 
 def new_camera(context, pose=None):
     """A new camera at pose (an aim pose: looking down its -Z), made the scene camera."""
+    hold_base_pose(context)
     data = bpy.data.cameras.new("VR Camera")
     obj = bpy.data.objects.new("VR Camera", data)
     context.scene.collection.objects.link(obj)
@@ -38,20 +39,84 @@ def new_camera(context, pose=None):
     return obj
 
 
+def set_camera(context, obj):
+    hold_base_pose(context)
+    context.scene.camera = obj
+
+
 def next_camera(context):
     scene = context.scene
     cams = cameras(scene)
     if not cams:
         return None
     i = cams.index(scene.camera) if scene.camera in cams else -1
-    scene.camera = cams[(i + 1) % len(cams)]
+    set_camera(context, cams[(i + 1) % len(cams)])
     return scene.camera
+
+
+# --- the VR base pose ------------------------------------------------------------
+#
+# Blender places the viewer relative to the session's base pose, worked out again every frame, and the
+# stock VR add-on's default landmark makes that the scene camera. Moving or switching the scene camera
+# then moves you with it: aiming it, the viewer follows the controller, which moves the camera again,
+# and you're thrown around. So before the camera tool moves or switches a camera you're placed by, the
+# base pose is pinned where it is (Custom, same spot and heading); it goes back as it was when the
+# session ends.
+
+_held = {"type": None}
+
+
+def _placed_by(context, obj):
+    """The object the base pose follows, if it's obj (any camera for None: the scene camera's)."""
+    xs = context.window_manager.xr_session_settings
+    if xs.base_pose_type == 'SCENE_CAMERA':
+        source = context.scene.camera
+    elif xs.base_pose_type == 'OBJECT':
+        source = xs.base_pose_object
+    else:
+        return None
+    return source if source is not None and (obj is None or obj == source) else None
+
+
+def hold_base_pose(context, obj=None):
+    """In VR, pin the base pose where it is if it follows obj (None: if it follows the scene camera)."""
+    from . import operators
+    if not operators.session_running(context):
+        return
+    source = _placed_by(context, obj)
+    if source is None:
+        return
+    xs = context.window_manager.xr_session_settings
+    if _held["type"] is None:
+        _held.update(type=xs.base_pose_type, object=xs.base_pose_object, location=tuple(xs.base_pose_location),
+                     angle=xs.base_pose_angle)
+    mw = source.matrix_world
+    # Blender only keeps an object's turn about Z (it's leveled with the floor), like a Custom pose's angle.
+    xs.base_pose_location = mw.translation
+    xs.base_pose_angle = mw.to_euler('XYZ').z
+    xs.base_pose_type = 'CUSTOM'
+
+
+def release_base_pose(context):
+    """Put the base pose back as it was (session over, add-on off)."""
+    if _held["type"] is None:
+        return
+    try:
+        xs = context.window_manager.xr_session_settings
+    except AttributeError:
+        return  # No window manager (e.g. quitting); keep it for next time.
+    xs.base_pose_type = _held["type"]
+    xs.base_pose_object = _held["object"]
+    xs.base_pose_location = _held["location"]
+    xs.base_pose_angle = _held["angle"]
+    _held["type"] = None
 
 
 class AimCamera:
     """Trigger handler: the scene camera follows the controller (it looks where the controller points)."""
 
     def __init__(self, context, pose):
+        hold_base_pose(context, context.scene.camera)
         cam = context.scene.camera
         if cam is None:
             cam = new_camera(context, pose)
@@ -192,6 +257,7 @@ def register():
 
 def unregister():
     global _handle, _offscreen
+    release_base_pose(bpy.context)
     if _handle is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_handle, 'WINDOW')
         _handle = None

@@ -844,7 +844,7 @@ def open_camera_picker(context):
     def choose(name):
         obj = scene.objects.get(name)
         if obj is not None:
-            scene.camera = obj
+            camera.set_camera(context, obj)
 
     open_picker("Scene camera", options, current, choose)
 
