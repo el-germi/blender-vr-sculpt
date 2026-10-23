@@ -243,6 +243,7 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('BOOLEAN', "Cuts", "Cutters and booleans"),
             ('FINISH', "Finish", "Bevel and smooth shading"),
             ('ARRAY', "Array", "Linear and radial arrays"),
+            ('STACK', "Stack", "Every modifier: show, apply, remove, settings"),
         ),
         default='SHAPE',
     )

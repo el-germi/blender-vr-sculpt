@@ -190,7 +190,7 @@ def test_layout():
     for mode in MODES:
         for expanded in (False, True):
             states.append((mode, expanded, None))
-    for page in ('SHAPE', 'BOOLEAN', 'FINISH', 'ARRAY'):
+    for page in ('SHAPE', 'BOOLEAN', 'FINISH', 'ARRAY', 'STACK'):
         states.append(('MODEL', True, page))
     states.append(('TOOLS', False, 'SETTINGS'))
     rail = None

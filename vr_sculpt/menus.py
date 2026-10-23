@@ -163,6 +163,8 @@ def reset():
     global _sheet
     _sheet = None
     _open.clear()
+    _stack_open.clear()
+    _stack_pages.clear()
     close_picker()
 
 
@@ -376,7 +378,8 @@ def _sculpt_rows(context, settings):
 # --- Model ----------------------------------------------------------------------
 
 ADD_AS = (('OBJECT', "Object"), ('DIFFERENCE', "Cut"), ('UNION', "Union"), ('INTERSECT', "Intersect"))
-MODEL_PAGES = (('SHAPE', "Shape"), ('BOOLEAN', "Cuts"), ('FINISH', "Finish"), ('ARRAY', "Array"))
+MODEL_PAGES = (('SHAPE', "Shape"), ('BOOLEAN', "Cuts"), ('FINISH', "Finish"), ('ARRAY', "Array"),
+               ('STACK', "Stack"))
 
 
 def _selected(context):
@@ -451,6 +454,8 @@ def _object_rows(context, settings, obj):
         rows, more, hint = _finish_rows(context, settings, obj)
     elif page == 'ARRAY':
         rows, more, hint = _array_rows(context, obj)
+    elif page == 'STACK':
+        rows, more, hint = _stack_rows(context, obj)
     else:
         rows, more, hint = _shape_rows(context, obj)
     return _disclose('OBJECT_' + page, out + rows, more, hint)
@@ -458,6 +463,7 @@ def _object_rows(context, settings, obj):
 
 def _set_model_page(settings, page):
     settings.model_page = page
+    _stack_open.clear()  # The Stack page opens on its list.
     if page != 'FINISH':
         settings.model_mark = 'NONE'  # Its buttons are on the Finish page; don't leave it on unseen.
 
@@ -468,13 +474,16 @@ _param_pages = {}
 
 
 def _param_widget(context, obj, spec):
-    wid = "param_" + spec.id
-
     def set_value(v, ident=spec.id):
         # Slow generators (e.g. Wall Factory) regenerate when the slider is released.
         live = not (spec.type in {'INT', 'FLOAT'} and obj.get("vrs_slow", False))
         generic.set_param(context, obj, ident, v, live=live)
 
+    return _spec_widget("param_" + spec.id, spec, set_value)
+
+
+def _spec_widget(wid, spec, set_value):
+    """The widget for a setting spec (generic.Param, hardsurface.Setting)."""
     if spec.type == 'ENUM':
         names = dict(spec.items)
         return vr_ui.select(wid, spec.label, names.get(spec.value, str(spec.value)),
@@ -634,6 +643,89 @@ def _array_rows(context, obj):
     else:
         out.append([vr_ui.slider("array_gap", "Gap", hardsurface.array_gap(obj), -0.5, 2.0,
                                  lambda v: hardsurface.set_array_gap(context, obj, v), fmt=_percent)])
+    return out, [], ""
+
+
+# The Stack page: every modifier on the object, top to bottom; one opens to its settings.
+STACK_PER_PAGE = 5
+MODIFIER_ICONS = {'BOOLEAN': "cut", 'BEVEL': "bevel", 'SOLIDIFY': "shell", 'ARRAY': "array", 'MIRROR': "mirror"}
+_stack_open = {}  # object name -> the name of the modifier whose settings show
+_stack_pages = {}  # object name (list) or "object/modifier" (settings) -> page
+
+
+def _type_name(mod):
+    return mod.bl_rna.properties["type"].enum_items[mod.type].name
+
+
+def _modifier_icon(mod):
+    return "shading" if mod.name == shading.MODIFIER else MODIFIER_ICONS.get(mod.type)
+
+
+def _toggle_modifier(obj, name):
+    mod = obj.modifiers.get(name)
+    if mod is not None:
+        mod.show_viewport = not mod.show_viewport
+
+
+def _stack_rows(context, obj):
+    key = obj.name
+    open_name = _stack_open.get(key)
+    if open_name is not None:
+        if obj.modifiers.get(open_name) is not None:
+            return _modifier_rows(context, obj, obj.modifiers[open_name])
+        del _stack_open[key]  # Applied or removed.
+    if not obj.modifiers:
+        return [[vr_ui.label("No modifiers")]], [], ""
+    shown, page, pages = _paged(list(obj.modifiers), _stack_pages.get(key, 0), STACK_PER_PAGE)
+    _stack_pages[key] = page
+    out = []
+    for mod in shown:
+        i, name = obj.modifiers.find(mod.name), mod.name
+        kind = _type_name(mod)
+        out.append([
+            vr_ui.select(f"mod_{i}", name, "" if kind in name else kind,
+                         (lambda n=name: _stack_open.__setitem__(key, n)), icon=_modifier_icon(mod), weight=3.0),
+            vr_ui.icon_button(f"mod_show_{i}", "eye", (lambda n=name: _toggle_modifier(obj, n)),
+                              "Hide" if mod.show_viewport else "Show", active=mod.show_viewport),
+            vr_ui.icon_button(f"mod_apply_{i}", "check", (lambda n=name: hardsurface.apply_modifier(context, obj, n)),
+                              "Apply (and those above)"),
+        ])
+    if pages > 1:
+        out.append(_pager("stack", page, pages, lambda p: _stack_pages.__setitem__(key, p)))
+    out.append([vr_ui.button("stack_apply_all", "Apply all", lambda: hardsurface.apply_stack(context, obj),
+                             danger=True, icon="check", tip="Apply every modifier that shows")])
+    return out, [], ""
+
+
+def _modifier_rows(context, obj, mod):
+    """One modifier: move it, its settings, show / apply / remove."""
+    key, name = obj.name, mod.name
+    head = [vr_ui.icon_button("mod_back", "back", lambda: _stack_open.pop(key, None), "Back to the stack"),
+            vr_ui.title(name, _type_name(mod))]
+    if hardsurface.can_move(obj, name, -1):
+        head.append(vr_ui.icon_button("mod_up", "chevron_up", lambda: hardsurface.move_modifier(obj, name, -1),
+                                      "Move up"))
+    if hardsurface.can_move(obj, name, 1):
+        head.append(vr_ui.icon_button("mod_down", "chevron_down", lambda: hardsurface.move_modifier(obj, name, 1),
+                                      "Move down"))
+    out = [head]
+    specs = hardsurface.modifier_settings(obj, mod)
+    pkey = key + "/" + name
+    shown, page, pages = _paged(specs, _stack_pages.get(pkey, 0), PARAMS_PER_PAGE)
+    _stack_pages[pkey] = page
+    out += [[_spec_widget("modp_" + s.id, s, (lambda v, i=s.id: hardsurface.set_modifier_setting(obj, name, i, v)))]
+            for s in shown]
+    if not specs:
+        out.append([vr_ui.label("No settings to show here")])
+    if pages > 1:
+        out.append(_pager("modp", page, pages, lambda p: _stack_pages.__setitem__(pkey, p)))
+    out.append([
+        vr_ui.toggle("mod_show", "Show", mod.show_viewport, lambda: _toggle_modifier(obj, name), icon="eye"),
+        vr_ui.button("mod_apply", "Apply", lambda: hardsurface.apply_modifier(context, obj, name), icon="check",
+                     tip="Apply (and those above)"),
+        vr_ui.icon_button("mod_remove", "trash", lambda: hardsurface.remove_modifier(context, obj, name), "Remove",
+                          danger=True),
+    ])
     return out, [], ""
 
 

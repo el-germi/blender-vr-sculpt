@@ -14,6 +14,9 @@ Array, Mirror, Shading, Bevel. So cuts happen once on the base shape, arrays and
 them, and the bevel rounds the cut edges too. The shading (shading.py) has to come before the bevel:
 Harden Normals bakes the shading as it finds it, so with flat faces at that point the curved walls
 of a cut stay faceted.
+
+The Stack page works on any modifier, ours or not: apply (with those above it), remove, move,
+show / hide, and its settings.
 """
 
 import math
@@ -22,7 +25,7 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
-from . import primitives, shading, symmetry
+from . import generic, primitives, shading, symmetry
 
 BOOLEAN = "VR Boolean"  # one per cutter: "VR Boolean", "VR Boolean.001", ...
 BEVEL = "VR Bevel"
@@ -39,26 +42,39 @@ BEVEL_SEGMENTS = 3
 
 # --- modifier stack ----------------------------------------------------------
 
-def _rank(mod):
+def _rank_of(name):
     for i, prefix in enumerate(STACK):
-        if mod.name == prefix or mod.name.startswith(prefix + "."):
+        if name == prefix or name.startswith(prefix + "."):
             return i
     return None
 
 
-def sort_stack(obj):
-    """Put our modifiers in STACK order. Others stay where they are: ours are sorted within the
-    slots they already take."""
+def _rank(mod):
+    return _rank_of(mod.name)
+
+
+def _stack_order(names):
+    """names (a modifier stack, top to bottom) with ours in STACK order. Others stay where they are:
+    ours are sorted within the slots they already take."""
+    slots = [i for i, n in enumerate(names) if _rank_of(n) is not None]
+    ours = sorted((names[i] for i in slots), key=_rank_of)  # stable: booleans keep their order
+    out = list(names)
+    for slot, name in zip(slots, ours):
+        out[slot] = name
+    return out
+
+
+def _set_order(obj, names):
     mods = obj.modifiers
-    names = [m.name for m in mods]
-    slots = [i for i, m in enumerate(mods) if _rank(m) is not None]
-    ours = sorted((mods[i] for i in slots), key=_rank)  # stable: booleans keep their order
-    for slot, mod in zip(slots, ours):
-        names[slot] = mod.name
     for i, name in enumerate(names):
         j = mods.find(name)
         if j != i:
             mods.move(j, i)
+
+
+def sort_stack(obj):
+    """Put our modifiers in STACK order (see _stack_order)."""
+    _set_order(obj, _stack_order([m.name for m in obj.modifiers]))
 
 
 def _world_scale(obj):
@@ -192,21 +208,40 @@ def refresh_solver(cutter):
         mod.solver = best_solver(target_of(cutter), cutter)
 
 
-def _apply(context, obj, names):
-    """Apply the named modifiers of obj, top to bottom. The mesh becomes plain (not an editable
-    primitive any more)."""
+def _apply(context, obj, names, last=None):
+    """Apply the named modifiers of obj, top to bottom, and delete the cutters and array centers of
+    the ones applied. Hidden ones are skipped, except last (the one asked for): Blender would apply
+    them, and they showed nothing. One Blender refuses (e.g. a Boolean without an object) is left
+    in place. The mesh becomes plain (not an editable primitive any more). Returns the names
+    applied."""
     from . import menus
+    names = [n for n in names if obj.modifiers.get(n) is not None and (obj.modifiers[n].show_viewport or n == last)]
+    if not names:
+        return []
+    owned = {n: _owned(obj.modifiers[n]) for n in names}
     window, view = menus._desktop_view(context)
     override = {"object": obj, "active_object": obj, "selected_objects": [obj], "selected_editable_objects": [obj]}
     if view is not None:
         override.update(window=window, area=view[0], region=view[1])
     if obj.mode != 'OBJECT':
         menus.set_object_mode(context, obj, 'OBJECT')
+    if obj.data.users > 1:
+        obj.data = obj.data.copy()  # Blender won't apply to a mesh other objects share.
+    done = []
     with context.temp_override(**override):
         for name in names:
-            if obj.modifiers.get(name) is not None:
+            try:
                 bpy.ops.object.modifier_apply(modifier=name)
-    primitives.forget(obj)
+                done.append(name)
+            except RuntimeError as ex:
+                print(f"VR Sculpt: applying {name} on {obj.name} failed: {ex}", flush=True)
+    if done:
+        primitives.forget(obj)
+    for name in done:
+        helper = owned[name]
+        if helper is not None and not _in_use(helper):
+            delete(context, helper)
+    return done
 
 
 def apply_cutter(context, cutter):
@@ -218,24 +253,19 @@ def apply_cutter(context, cutter):
         return False
     index = target.modifiers.find(mod.name)
     names = [m.name for m in target.modifiers[:index] if _rank(m) == 0] + [mod.name]
-    _apply(context, target, names)
-    _delete_object(cutter)
+    done = _apply(context, target, names, last=mod.name)
     primitives.make_active(context, target)
-    return True
+    return mod.name in done
 
 
 def apply_all(context, target):
-    """Apply every cut on target (and the Solidify above them); remove the cutters."""
+    """Apply every cut on target (and the Solidify above them); remove the cutters. Hidden cuts stay."""
     mods = booleans(target)
     if not mods:
         return False
     last = max(target.modifiers.find(m.name) for m in mods)
     names = [m.name for m in target.modifiers[:last + 1] if _rank(m) in {0, 1}]
-    gone = [m.object for m in mods if m.object is not None]
-    _apply(context, target, names)
-    for cutter in gone:
-        _delete_object(cutter)
-    return True
+    return bool(_apply(context, target, names))
 
 
 def _delete_object(obj):
@@ -524,3 +554,175 @@ def set_array_center(context, obj, point):
     """Radial center at a world point (the left hand's tip)."""
     obj["vrs_array_center"] = (obj.matrix_world.inverted_safe() @ Vector(point))[:]
     _update_array(context, obj)
+
+
+# --- any modifier (the Stack page) ------------------------------------------------
+#
+# Every modifier on the object, ours or not: show / hide, apply, remove, move, and its settings,
+# read from its RNA properties (a Geometry Nodes modifier's from its group's inputs).
+
+def _owned(mod):
+    """The helper object that only exists for mod: a Boolean's cutter, an Array's radial center."""
+    if mod.type == 'BOOLEAN' and is_cutter(mod.object):
+        return mod.object
+    if mod.type == 'ARRAY' and mod.offset_object is not None and mod.offset_object.get("vrs_helper", False):
+        return mod.offset_object
+    return None
+
+
+def _in_use(helper):
+    """Whether a modifier on any object still points at helper."""
+    for obj in bpy.data.objects:
+        for m in getattr(obj, "modifiers", ()):
+            if getattr(m, "object", None) == helper or getattr(m, "offset_object", None) == helper:
+                return True
+    return False
+
+
+def apply_modifier(context, obj, name):
+    """Apply a modifier and every one above it, so the mesh is what you saw at that point. Hidden ones
+    above it are skipped and stay."""
+    index = obj.modifiers.find(name)
+    if index < 0:
+        return False
+    return name in _apply(context, obj, [m.name for m in obj.modifiers[:index + 1]], last=name)
+
+
+def apply_stack(context, obj):
+    """Apply every modifier that shows. Hidden ones stay."""
+    return bool(_apply(context, obj, [m.name for m in obj.modifiers]))
+
+
+def remove_modifier(context, obj, name):
+    """Remove a modifier, and the cutter or array center that only existed for it."""
+    mod = obj.modifiers.get(name)
+    if mod is None:
+        return False
+    helper = _owned(mod)
+    obj.modifiers.remove(mod)
+    if helper is not None and not _in_use(helper):
+        delete(context, helper)
+    return True
+
+
+def _moved(names, name, step):
+    """The stack order after moving name up (-1) or down (+1), or None if it can't move: past the
+    ends, or out of STACK order."""
+    i = names.index(name)
+    j = i + step
+    if not 0 <= j < len(names):
+        return None
+    out = list(names)
+    out[i], out[j] = out[j], out[i]
+    return out if _stack_order(out) == out else None
+
+
+def can_move(obj, name, step):
+    names = [m.name for m in obj.modifiers]
+    return name in names and _moved(names, name, step) is not None
+
+
+def move_modifier(obj, name, step):
+    names = [m.name for m in obj.modifiers]
+    order = _moved(names, name, step) if name in names else None
+    if order is None:
+        return False
+    _set_order(obj, order)
+    return True
+
+
+# Not settings: UI state of the desktop's modifier panel.
+_UI_PROPS = {"show_group_selector", "show_manage_panel"}
+
+
+class Setting:
+    """One setting on the Stack page (like generic.Param): a modifier property, or a node group input."""
+
+    def __init__(self, id, label, prop, value, lo=0.0, hi=1.0, items=()):
+        self.id, self.label, self.type, self.value = id, label, prop.type, value
+        self.lo, self.hi = lo, hi
+        self.items = items  # (identifier, name) for enums
+        # By unit only: generic.is_length's name guess fits operators, not e.g. Bevel's Width Percent.
+        self.length = prop.type == 'FLOAT' and (prop.unit == 'LENGTH' or prop.subtype == 'DISTANCE')
+        self.angle = generic.is_angle(prop)
+
+
+def _local_size(obj):
+    dims = [abs(d) / max(abs(s), 1e-9) for d, s in zip(obj.dimensions, obj.scale)]
+    return max(dims + [0.01])
+
+
+def _setting(ident, label, p, value, size):
+    """A Setting for RNA property p with a range that suits a slider, or None if it isn't one."""
+    if p.type not in {'FLOAT', 'INT', 'BOOLEAN', 'ENUM'} or p.is_readonly:
+        return None
+    if p.type == 'ENUM':
+        items = [(i.identifier, i.name) for i in p.enum_items]
+        return Setting(ident, label, p, value, items=items) if items and not p.is_enum_flag else None
+    if p.array_length > 0:
+        return None
+    if p.type == 'BOOLEAN':
+        return Setting(ident, label, p, bool(value))
+    lo, hi = max(p.soft_min, p.hard_min), min(p.soft_max, p.hard_max)
+    if p.type == 'INT':
+        if hi - lo > 64:
+            cap = max(abs(value) * 4, abs(p.default) * 4, 16)
+            lo, hi = max(lo, -cap), min(hi, cap)
+        return Setting(ident, label, p, int(value), int(lo), int(max(hi, lo + 1)))
+    if p.unit == 'LENGTH' or p.subtype == 'DISTANCE':
+        cap = max(abs(value) * 4, size)  # local units, like the value
+        lo, hi = max(lo, -cap), min(hi, cap)
+    elif generic.is_angle(p):
+        lo, hi = max(lo, -2 * math.pi), min(hi, 2 * math.pi)
+    elif hi - lo > 1000:
+        cap = max(abs(value) * 4, abs(p.default) * 4, 1.0)
+        lo, hi = max(lo, -cap), min(hi, cap)
+    return Setting(ident, label, p, float(value), lo, max(hi, lo + 0.01))
+
+
+def _node_inputs(mod):
+    """(identifier, name, input) for a Geometry Nodes modifier's group inputs (5.x)."""
+    props = getattr(mod, "properties", None)
+    if mod.node_group is None or props is None:
+        return []
+    out = []
+    for item in mod.node_group.interface.items_tree:
+        if getattr(item, "item_type", None) == 'SOCKET' and item.in_out == 'INPUT':
+            inp = getattr(props.inputs, item.identifier, None)
+            if inp is not None and hasattr(inp, "value"):
+                out.append((item.identifier, item.name, inp))
+    return out
+
+
+def modifier_settings(obj, mod):
+    """The Settings of mod the panel can show, in its own order."""
+    size = _local_size(obj)
+    if mod.type == 'NODES':
+        out = [_setting(ident, name, inp.bl_rna.properties["value"], inp.value, size)
+               for ident, name, inp in _node_inputs(mod)]
+    else:
+        base = {p.identifier for p in bpy.types.Modifier.bl_rna.properties}
+        out = [_setting(p.identifier, p.name or p.identifier, p, getattr(mod, p.identifier), size)
+               for p in mod.bl_rna.properties
+               if p.identifier not in base and p.identifier not in _UI_PROPS and not p.identifier.startswith("open_")
+               and not p.is_hidden]
+    return [s for s in out if s is not None]
+
+
+def set_modifier_setting(obj, name, ident, value):
+    mod = obj.modifiers.get(name)
+    if mod is None:
+        return False
+    try:
+        if mod.type == 'NODES':
+            inp = next((i for k, _n, i in _node_inputs(mod) if k == ident), None)
+            if inp is None:
+                return False
+            inp.value = value
+        else:
+            setattr(mod, ident, value)
+    except (TypeError, ValueError, AttributeError) as ex:
+        print(f"VR Sculpt: {name}.{ident}={value!r} rejected: {ex}", flush=True)
+        return False
+    obj.update_tag()
+    return True
