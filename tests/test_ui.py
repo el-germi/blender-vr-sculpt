@@ -418,6 +418,27 @@ def test_presence():
     menus.set_mode(ctx, 'SCULPT')
 
 
+def test_ghost():
+    print("== the hidden panel's ghost")
+    m = vr_ui.panel_matrix(Vector((0, 0, 1)), Vector((0, -1, 1)), 1.0)
+    center = m @ Vector((0.0, vr_ui.GHOST_Y, 0.0))
+    normal = (m.to_3x3() @ Vector((0, 0, 1))).normalized()
+
+    def points_at(dx, dy):
+        target = m @ Vector((dx, vr_ui.GHOST_Y + dy, 0.0))
+        origin = target + normal * 0.4
+        return vr_ui.ghost_hit(m, origin, target - origin)
+
+    check(vr_ui.GHOST_R >= 0.011, f"it's drawn {vr_ui.GHOST_R * 2000:.0f} mm across")
+    check(vr_ui.GHOST_HIT > vr_ui.GHOST_R * 2, "and its hit area is about twice that")
+    check(points_at(0, 0) and points_at(0.02, 0) and points_at(0, -0.02) and points_at(-0.015, 0.015),
+          "pointing within 2 cm of it counts, below it too")
+    check(not points_at(0.035, 0) and not points_at(0, -0.035), "3.5 cm away doesn't")
+    origin = center + normal * 0.4
+    check(not vr_ui.ghost_hit(m, origin, origin - center), "pointing away doesn't")
+    check(vr_ui.GHOST_Y - vr_ui.GHOST_R > 0.0, "the disc sits above the hand, not on it")
+
+
 def test_status():
     print("== tip status")
     ctx = bpy.context
@@ -442,7 +463,8 @@ def main():
     try:
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o)
-        for t in (test_disclosure, test_sheets, test_layout, test_stepper_and_detents, test_presence, test_status):
+        for t in (test_disclosure, test_sheets, test_layout, test_stepper_and_detents, test_presence, test_ghost,
+                  test_status):
             try:
                 t()
             except Exception:

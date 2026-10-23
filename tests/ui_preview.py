@@ -81,6 +81,17 @@ def draw():
             elif kind == 'ghost':
                 m, icon, hot = a
                 vr_ui.draw_ghost(m, icon, 1.0, hot)
+                # Where pointing counts (not drawn in VR).
+                from vr_sculpt import gfx
+                import gpu
+                cv = gfx.Canvas()
+                cv.ring(0.0, vr_ui.GHOST_Y, vr_ui.GHOST_HIT, 0.0005, (1.0, 1.0, 1.0, 0.35))
+                gpu.state.blend_set('ALPHA')
+                gpu.matrix.push()
+                gpu.matrix.multiply_matrix(m)
+                cv.draw()
+                gpu.matrix.pop()
+                gpu.state.blend_set('NONE')
     except Exception:
         if not errors:
             log(traceback.format_exc())
@@ -276,7 +287,7 @@ def build_overlay(ctx):
         items.append(('status', (Vector((-0.58 + i * 0.2, 0.0, 0.1)), content, size, desc)))
     s.mode = 'SCULPT'
     items.append(('ghost', (facing(0.4, 0.3), "sculpt", False)))
-    items.append(('caption', (facing(0.4, 0.3), "Hidden")))
+    items.append(('caption', (facing(0.4, 0.3), "Hidden (ring: hit area)")))
     items.append(('ghost', (facing(0.54, 0.3), "model", True)))
     items.append(('caption', (facing(0.54, 0.3), "Pointed at")))
     anim.set_frame(ctx, 24)

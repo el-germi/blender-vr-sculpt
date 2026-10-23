@@ -77,8 +77,9 @@ staying the fastest way to reach *everything*?
   system, with its own More.
 - **Tip status**: above the right controller, always visible (unless turned
   off in VR Authoring > Show Tip Status).
-- **Ghost**: a small disc with the mode icon where the panel lives, while it's
-  hidden.
+- **Ghost**: a disc with the mode icon (22 mm across) just above the left
+  hand, where the panel lives, while it's hidden. Pointing anywhere within
+  26 mm of its center counts, so it's easy to hit without being big.
 
 ![Second levels: object pages, Settings, pickers, native brushes](ui_panel_sheets.png)
 
@@ -278,6 +279,8 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 - [presence.py](../vr_sculpt/presence.py): the reveal rule. Thresholds: wrist
   55 degrees on / 70 off, gaze 32 on / 48 off, linger 0.6 s, fade 70 / 140 ms.
 - [hud.py](../vr_sculpt/hud.py): the tip status.
+- The ghost (`vr_ui.GHOST_R`, `GHOST_HIT`): drawn radius 11 mm (12 mm when
+  pointed at), hit radius 26 mm, centered 20 mm above the panel's anchor.
 - [interactions.py](../vr_sculpt/interactions.py): presses, stepper repeat,
   detents, hover ticks.
 - Tests: [tests/test_ui.py](../tests/test_ui.py) (disclosure, sheets, layout of

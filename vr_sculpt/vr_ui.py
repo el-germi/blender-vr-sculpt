@@ -737,7 +737,7 @@ def draw_ghost(matrix, icon, alpha, hot):
     """What's left of a hidden panel: a small disc with the mode icon, where the panel shows."""
     h = ease(("ghost", "hover"), 1.0 if hot else 0.0, HOVER_IN if hot else HOVER_OUT, None, 0.0)
     cv = gfx.Canvas()
-    r = GHOST_R * (1.0 + 0.25 * h)
+    r = GHOST_R * (1.0 + 0.12 * h)
     cv.disc(0.0, GHOST_Y, r + 0.0007, COL_EDGE)
     cv.disc(0.0, GHOST_Y, r, COL_CARD)
     if h > 0.01:
@@ -752,14 +752,23 @@ def draw_ghost(matrix, icon, alpha, hot):
     gpu.state.blend_set('NONE')
 
 
-GHOST_R = 0.0075
-GHOST_Y = 0.012
+GHOST_R = 0.011  # drawn radius (hand-space meters)
+GHOST_Y = 0.02  # its center above the panel's anchor
+GHOST_HIT = 0.026  # pointing this close to its center counts: easier to hit than it looks
 
 
 def ghost_hit(matrix, origin, direction):
-    """Whether the ray points at the hidden panel's ghost (a little more generous than it looks)."""
-    p = ray_hit(matrix, origin, direction, GHOST_Y + 3 * GHOST_R, 1.0, 6 * GHOST_R)
-    return p is not None and math.hypot(p[0], p[1] - GHOST_Y) <= 2.2 * GHOST_R
+    """Whether the ray points at the hidden panel's ghost."""
+    inv = matrix.inverted_safe()
+    o = inv @ Vector(origin)
+    d = inv.to_3x3() @ Vector(direction)
+    if abs(d.z) < 1e-9:
+        return False
+    t = -o.z / d.z
+    if t <= 0 or (d * t).length > RAY_LENGTH:
+        return False
+    p = o + d * t
+    return math.hypot(p.x, p.y - GHOST_Y) <= GHOST_HIT
 
 
 def draw_ray(origin, end, hit):
