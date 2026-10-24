@@ -5,15 +5,16 @@ The panel is an icon rail (the six modes) beside the content. The content is:
   - the mode's 3-5 most used controls;
   - a More row that opens the rest (it opens upward, so the row stays under the pointer).
 Second levels replace the content, with a Back button in the header: the selected object's
-settings (Model), Settings (from the gear, in every mode) and pickers (from any select).
+settings (Model), the Kit of parts (Model), Settings (from the gear, in every mode) and pickers
+(from any select).
 """
 
 import math
 
 import bpy
 
-from . import (anim, camera, catalog, desktop, generic, hardsurface, hud, measure, native, paint, pose, presence,
-               primitives, puppet, rig, shading, strokes, symmetry, vr_ui)
+from . import (anim, camera, catalog, desktop, generic, hardsurface, hud, kit, measure, native, paint, pose,
+               presence, primitives, puppet, rig, shading, strokes, symmetry, vr_ui)
 from .props import BRUSH_ITEMS
 
 NATIVE_SHORT = {
@@ -120,7 +121,7 @@ def _toggle(settings, prop):
 
 # --- panel state: sheets, disclosure, picker ------------------------------------
 
-_sheet = None  # None, 'OBJECT' (the selected object's settings) or 'SETTINGS'
+_sheet = None  # None, 'OBJECT' (the selected object's settings), 'KIT' or 'SETTINGS'
 _open = set()  # disclosure keys whose More is open
 
 
@@ -281,10 +282,14 @@ def panel(context):
     settings = context.scene.vr_sculpt
     if _sheet == 'OBJECT' and (settings.mode != 'MODEL' or _selected(context) is None):
         close_sheet(context)  # The object went away (deleted, deselected) or the mode changed.
+    if _sheet == 'KIT' and settings.mode != 'MODEL':
+        close_sheet(context)
     if _picker is not None:
         content = _picker_rows()
     elif _sheet == 'SETTINGS':
         content = _settings_rows(context, settings)
+    elif _sheet == 'KIT':
+        content = _kit_rows(context, settings)
     elif _sheet == 'OBJECT':
         content = _object_rows(context, settings, _selected(context))
     else:
@@ -401,13 +406,14 @@ def _model_rows(context, settings):
     out = [
         _header(context, settings, "Model"),
         [vr_ui.select("add", "Add", primitives.label(settings.primitive), lambda: open_add_picker(context),
-                      icon="model")],
+                      icon="kit" if kit.is_key(settings.primitive) else "model"),
+         vr_ui.icon_button("kit", "kit", lambda: open_kit(context), "Kit parts")],
         _segments("add_as_", "add_as", [(i.lower(), n) for i, n in ADD_AS], settings.model_add_as.lower(),
                   lambda v: setattr(settings, "model_add_as", v.upper())),
     ]
     obj = _selected(context)
     if obj is None:
-        out.append([vr_ui.label("Drag in empty space to add", align='CENTER')])
+        out.append([vr_ui.label("Right: add. Left: select", align='CENTER')])
     else:
         cutter = hardsurface.is_cutter(obj)
         out.append([
@@ -417,6 +423,119 @@ def _model_rows(context, settings):
             vr_ui.icon_button("delete", "trash", lambda: hardsurface.delete(context, obj), "Delete", danger=True),
         ])
     return _disclose('MODEL', out, _snap_rows(settings), "Snapping")
+
+
+# --- Kit (Model mode's library of parts) ---------------------------------------------
+
+KIT_COLS = 4
+KIT_ROWS = 3
+ALL = "*"  # the catalog value for every part of a library
+
+# What the Kit sheet shows: a library, one of its catalogs (None: all of them) and a page.
+_kit = {"library": None, "catalog": None, "page": 0}
+
+
+def open_kit(context):
+    """Open the Kit sheet; the libraries are looked at again (changed files go to the worker)."""
+    kit.scan(context)
+    if kit.library(_kit["library"], context) is None:
+        asset = kit.find(context.scene.vr_sculpt.primitive)
+        libs = kit.cached(context)
+        if asset is not None and kit.library(asset.library, context) is not None:
+            _kit.update(library=asset.library, catalog=asset.catalog, page=0)
+        else:
+            first = next((lib for lib in libs if lib.assets), libs[0] if libs else None)
+            _kit.update(library=first.name if first else None, catalog=None, page=0)
+    open_sheet('KIT')
+
+
+def choose_part(context, key):
+    """Make key the part the trigger places. A cutter part switches New As from Object to Cut, and a
+    plain part chosen after one switches it back."""
+    settings = context.scene.vr_sculpt
+    before = kit.find(settings.primitive)
+    asset = kit.find(key)
+    settings.primitive = key
+    if asset is None:
+        return
+    if asset.cutter and settings.model_add_as == 'OBJECT':
+        settings.model_add_as = 'DIFFERENCE'
+    elif not asset.cutter and before is not None and before.cutter and settings.model_add_as == 'DIFFERENCE':
+        settings.model_add_as = 'OBJECT'
+
+
+def _set_kit_view(value):
+    name, catalog = value.split("\n", 1)
+    _kit.update(library=name, catalog=None if catalog == ALL else catalog, page=0)
+
+
+def _kit_view_value(name, catalog):
+    return f"{name}\n{ALL if catalog is None else catalog}"
+
+
+def open_catalog_picker(context):
+    """Libraries, then each one's catalogs."""
+    options = []
+    for lib in kit.cached(context):
+        options.append(Option(_kit_view_value(lib.name, None), "All parts", lib.name))
+        options += [Option(_kit_view_value(lib.name, cat), kit.catalog_label(cat), lib.name) for cat in lib.catalogs()]
+    open_picker("Kit", options, _kit_view_value(_kit["library"], _kit["catalog"]), _set_kit_view)
+
+
+def _add_to_kit(context):
+    try:
+        asset = kit.add_to_kit(context, _selected(context))
+    except ValueError as ex:
+        kit.say(str(ex))
+        return
+    if asset is not None:
+        _kit.update(library=asset.library, catalog=asset.catalog, page=0)
+
+
+def _set_kit_page(page):
+    _kit["page"] = page
+
+
+def _kit_rows(context, settings):
+    """Second level of Model: the parts of a library catalog as thumbnails. Choosing one makes it what
+    the trigger places, and the sheet stays open to drop it (or stamp it) right away."""
+    lib = kit.library(_kit["library"], context)
+    parts = lib.in_catalog(_kit["catalog"]) if lib is not None else []
+    cells = [vr_ui.tile("part_" + a.key, a.name, (lambda k=a.key: choose_part(context, k)), image=kit.thumb(a),
+                        icon="cut" if a.cutter else "kit", active=a.key == settings.primitive) for a in parts]
+    shown, page, pages = _paged(cells, _kit["page"], KIT_COLS * KIT_ROWS)
+    _kit["page"] = page
+    where = "All parts" if _kit["catalog"] is None else kit.catalog_label(_kit["catalog"])
+    listing = kit.pending()  # Parts come in as the background worker lists the libraries.
+    out = [
+        [vr_ui.icon_button("back", "back", lambda: close_sheet(context), "Back"),
+         vr_ui.title("Kit", kit.message() or ("listing parts\u2026" if listing else lib.name if lib else "")),
+         vr_ui.icon_button("kit_add", "kit_add", lambda: _add_to_kit(context), "Add selection to " + kit.MINE)],
+        [vr_ui.select("kit_catalog", "In", where, lambda: open_catalog_picker(context), weight=3.0)] +
+        (_pager("kit", page, pages, _set_kit_page) if pages > 1 else []),
+    ]
+    if shown:
+        for row in _grid(shown, KIT_COLS):
+            out.append(row + [vr_ui.label("") for _ in range(KIT_COLS - len(row))])
+    elif listing:
+        out.append([vr_ui.label("Listing parts\u2026", align='CENTER')])
+    elif lib is not None and lib.name == kit.MINE:
+        out.append([vr_ui.label("Select an object, then + to add it here", align='CENTER')])
+    else:
+        out.append([vr_ui.label("No parts here", align='CENTER')])
+    out.append(_segments("add_as_", "add_as", [(i.lower(), n) for i, n in ADD_AS], settings.model_add_as.lower(),
+                         lambda v: setattr(settings, "model_add_as", v.upper())))
+    out.append(_segments("kit_place_", "kit_place", (('drop', "Drop"), ('stamp', "Stamp")),
+                         'stamp' if settings.kit_stamp else 'drop',
+                         lambda v: setattr(settings, "kit_stamp", v == 'stamp'),
+                         icons={'drop': "kit", 'stamp': "stamp"}))
+    more = [
+        [vr_ui.slider("kit_size", "Part size", settings.kit_scale, 0.1, 4.0,
+                      lambda v: setattr(settings, "kit_scale", v), fmt=_percent)],
+        [vr_ui.slider("kit_spacing", "Stamp spacing", settings.kit_spacing, 0.005, 0.2,
+                      lambda v: setattr(settings, "kit_spacing", v), fmt=_meters)],
+    ]
+    return _disclose('KIT', out, more, "Size, spacing")
 
 
 def _snap_rows(settings):

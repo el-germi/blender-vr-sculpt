@@ -36,7 +36,8 @@ KEY_NAMES = {
 
 # What hints() needs besides the settings. Gathered by context_info() in VR; tests build it by hand.
 Info = namedtuple("Info", "ray_on_panel ray_on_desktop picker_open cut_target has_rig paint_ready native_brush "
-                          "primitive rig_bound", defaults=(False, False, False, False, False, True, "", "Cube", True))
+                          "primitive rig_bound kit_part",
+                  defaults=(False, False, False, False, False, True, "", "Cube", True, False))
 
 NATIVE_LABELS = {"Draw": "Draw", "Clay Strips": "Clay", "Smooth": "Smooth", "Inflate/Deflate": "Inflate",
                  "Crease Sharp": "Crease", "Flatten/Contrast": "Flatten"}
@@ -115,7 +116,9 @@ def _trigger(s, info):
             op = s.model_add_as
             return ({'DIFFERENCE': "cut", 'UNION': "union"}.get(op, "intersect"),
                     {'DIFFERENCE': "Cut", 'UNION': "Union"}.get(op, "Intersect"))
-        return ("model", "Add " + info.primitive + ", grab")
+        if s.kit_stamp and info.kit_part:
+            return ("stamp", "Stamp " + info.primitive)
+        return ("kit" if info.kit_part else "model", "Add " + info.primitive)
     if mode == 'DRAW':
         if s.draw_tool == 'EDIT':
             return ("edit", "Edit stroke")
@@ -147,6 +150,8 @@ def _left_trigger(s, info, right):
             return ("sculpt", right[1] + ", inverted")
     if mode == 'MODEL' and s.model_mark != 'NONE':
         return ("edit", "Clear marks")
+    if mode == 'MODEL':
+        return ("object", "Select, move")
     if mode == 'PAINT' and right is not None and s.paint_tool != 'PICK':
         return (right[0], "2nd color")
     if mode == 'PAINT' and right is not None:
@@ -161,7 +166,8 @@ def _left_trigger(s, info, right):
 
 def context_info(context, ss):
     """Info for hints() from the scene and the session."""
-    from . import desktop, hardsurface, interactions, menus, native, operators, paint, pose, presence, primitives, rig
+    from . import (desktop, hardsurface, interactions, kit, menus, native, operators, paint, pose, presence,
+                   primitives, rig)
     settings = context.scene.vr_sculpt
     right = operators.controller_pose(ss.controller_aim_location_get(context, 1),
                                       ss.controller_aim_rotation_get(context, 1))
@@ -180,6 +186,7 @@ def context_info(context, ss):
         native_brush=brush.name if brush else "",
         primitive=primitives.label(settings.primitive),
         rig_bound=settings.mode == 'RIG' and rig.bound(rig.mesh(context), rig.target(context)),
+        kit_part=kit.is_key(settings.primitive),
     )
 
 

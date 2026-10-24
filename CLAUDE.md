@@ -24,7 +24,7 @@ blender --background --command extension install-file -r user_default -e dist/vr
 
 Background tests, one file per area (`test_brushes`, `test_modal`, `test_model`, `test_generic`,
 `test_draw`, `test_tools`, `test_paint`, `test_anim`, `test_pose`, `test_ik_limits`,
-`test_hard_surface`, `test_ui`, `test_rig`):
+`test_hard_surface`, `test_ui`, `test_rig`, `test_kit`):
 
 ```bash
 blender --background --factory-startup --python tests/test_tools.py
@@ -111,7 +111,13 @@ update callbacks), `catalog.py` (reads Blender's Add > Mesh menu, including exte
 recording layout) and `generic.py` (re-runs a menu operator to regenerate). Booleans, bevel, array,
 solidify are modifiers managed by `hardsurface.py`, which enforces a fixed order for our modifiers;
 a cutter is identified by the Boolean modifiers pointing at it. `shading.py` owns the
-"VR Shading" Geometry Nodes group and the `sharp_edge` / `vrs_soft` edge marks.
+"VR Shading" Geometry Nodes group and the `sharp_edge` / `vrs_soft` edge marks. Kit parts (`kit.py`)
+are mesh / collection assets from the asset libraries plus the starter kit in `vr_sculpt/assets/kit`
+(rebuilt by `tests/make_starter_kit.py`); `settings.primitive` holds `kit:<blend>|<type>|<name>` for
+one, and `interactions.PlaceAsset` (drop) / `StampAssets` (stamp) place them. Libraries are listed by
+`kit_worker.py` in a background Blender into an on-disk cache (`kit.tick()` from `live.py` picks results
+up); it's a script, not a module, so it's not in `__init__`'s lists. In Model mode the left trigger
+selects / moves (`MoveObject`, `Deselect`) and the right one only creates.
 
 **Other modes**: `strokes.py` (mesh from stored samples, rotation-minimizing frames) +
 `drawing.py` for Draw; `paint.py` paints by temporarily aiming the largest desktop 3D view at each

@@ -16,6 +16,7 @@ Widget kinds:
   slider     value inside the track, dragged with the ray
   stepper    label, then - value + (holding repeats)
   swatch     a color
+  tile       a thumbnail (a texture, or an icon without one) over a name; kit parts
   more       the disclosure row (More / Less)
   rail       a mode in the icon rail
 """
@@ -41,6 +42,8 @@ LABEL_H = 0.013
 HEADER_H = 0.024
 SWATCH_H = 0.017
 MORE_H = 0.015
+TILE_H = 0.04
+TILE_TEXT = 0.0085  # the name strip under a tile's thumbnail
 CORNER = 0.004
 CARD_CORNER = 0.008
 SLIDER_INSET = 0.003  # the slider's ends: pointing this close to an end gives min / max
@@ -79,7 +82,7 @@ class Widget:
     def __init__(self, kind, id="", text="", *, active=False, danger=False, on_press=None,
                  value=0.0, min=0.0, max=1.0, integer=False, fmt=None, on_change=None, value_text="",
                  swatch=None, ticks=None, icon=None, group=None, dot=None, tip="", weight=1.0, fixed=None,
-                 align='LEFT'):
+                 align='LEFT', image=None):
         self.kind, self.id, self.text = kind, id, text
         self.ticks = ticks or ()  # slider: marks at these fractions of the track (keyframes)
         self.value_text = value_text
@@ -90,12 +93,13 @@ class Widget:
         self.on_change = on_change
         self.icon, self.group, self.dot, self.tip = icon, group, dot, tip or text
         self.weight, self.fixed, self.align = weight, fixed, align
+        self.image = image  # tile: anything with texture() -> GPUTexture or None, hashable
         self.icon_only = False  # drawn without its text (set while drawing)
         self.rect = (0.0, 0.0, 0.0, 0.0)
 
     def height(self):
         return {'label': LABEL_H, 'section': LABEL_H, 'title': HEADER_H, 'swatch': SWATCH_H, 'more': MORE_H,
-                'rail': RAIL_ITEM}.get(self.kind, ROW_H)
+                'rail': RAIL_ITEM, 'tile': TILE_H}.get(self.kind, ROW_H)
 
     def pressable(self):
         return self.kind not in {'label', 'section', 'title'}
@@ -178,6 +182,20 @@ def stepper(id, text, value, lo, hi, on_change, fmt=None, weight=1.0):
 
 def swatch_button(id, rgb, on_press, active=False):
     return Widget('swatch', id, "", active=active, on_press=on_press, swatch=rgb)
+
+
+def tile(id, text, on_press, image=None, icon=None, active=False):
+    """A thumbnail over a name. image: see Widget.image; without one, icon is drawn instead."""
+    return Widget('tile', id, text, active=active, on_press=on_press, image=image, icon=icon)
+
+
+def tile_image_rect(rect):
+    """Where a tile's thumbnail goes: a square above the name strip."""
+    x0, y0, x1, y1 = rect
+    side = min(x1 - x0, y1 - y0 - TILE_TEXT) - 0.004
+    cx = (x0 + x1) / 2
+    top = y1 - 0.002
+    return (cx - side / 2, top - side, cx + side / 2, top)
 
 
 def more(id, is_open, on_press, hidden=""):
@@ -469,11 +487,11 @@ def draw_panel(matrix, widgets, height, hover_id=None, pressed_id=None, title=No
     built = _built.get(key)
     if built is None or not built[4]:
         _moving[0] = 0
-        cv, texts, over, over_texts = _build(widgets, height, width, hover_id, pressed_id, pointer)
+        cv, texts, over, over_texts, images = _build(widgets, height, width, hover_id, pressed_id, pointer)
         if len(_built) > 32:
             _built.clear()
-        built = _built[key] = (cv, texts, over, over_texts, _moving[0] == 0)
-    cv, texts, over, over_texts, _settled = built
+        built = _built[key] = (cv, texts, over, over_texts, _moving[0] == 0, images)
+    cv, texts, over, over_texts, _settled, images = built
     cursor = gfx.Canvas(0.0006)
     if pointer is not None:
         px, py = pointer
@@ -485,6 +503,7 @@ def draw_panel(matrix, widgets, height, hover_id=None, pressed_id=None, title=No
     gpu.matrix.push()
     gpu.matrix.multiply_matrix(matrix)
     cv.draw(alpha)
+    _draw_images(images, alpha)
     gpu.matrix.pop()
     texts.draw(matrix, alpha)
     gpu.matrix.push()
@@ -496,7 +515,28 @@ def draw_panel(matrix, widgets, height, hover_id=None, pressed_id=None, title=No
     gpu.state.blend_set('NONE')
 
 
-_built = {}  # panel signature -> (canvas, texts, overlay canvas, overlay texts, settled)
+_built = {}  # panel signature -> (canvas, texts, overlay canvas, overlay texts, settled, images)
+
+
+def _draw_images(images, alpha):
+    """Tile thumbnails: [image, rect, batch], the batch made on first draw. An image whose texture
+    isn't ready yet (they load a few per frame) is skipped this time."""
+    if not images:
+        return
+    shader = gpu.shader.from_builtin('IMAGE_COLOR')
+    for item in images:
+        tex = item[0].texture()
+        if tex is None:
+            continue
+        if item[2] is None:
+            x0, y0, x1, y1 = item[1]
+            z = 0.0002
+            item[2] = batch_for_shader(shader, 'TRI_FAN', {
+                "pos": ((x0, y0, z), (x1, y0, z), (x1, y1, z), (x0, y1, z)),
+                "texCoord": ((0, 0), (1, 0), (1, 1), (0, 1))})
+        shader.uniform_sampler("image", tex)
+        shader.uniform_float("color", (1.0, 1.0, 1.0, alpha))
+        item[2].draw(shader)
 
 
 def _signature(widgets, height, width, hover_id, pressed_id, pointer):
@@ -506,7 +546,8 @@ def _signature(widgets, height, width, hover_id, pressed_id, pointer):
         value = w.fmt(w.value) if w.kind in {'slider', 'stepper'} else None
         sig.append((w.kind, w.id, w.text, w.value_text, w.active, w.danger, w.icon, w.group, w.rect, value,
                     round(w.fraction(), 4) if w.kind == 'slider' else None, tuple(w.ticks),
-                    tuple(w.swatch) if w.swatch is not None else None, tuple(w.dot) if w.dot is not None else None))
+                    tuple(w.swatch) if w.swatch is not None else None, tuple(w.dot) if w.dot is not None else None,
+                    w.image))
         if w.kind == 'stepper' and w.id == hover_id and pointer is not None:
             sig.append(w.step_at(pointer[0]))
     return tuple(sig)
@@ -518,6 +559,7 @@ def _build(widgets, height, width, hover_id, pressed_id, pointer):
     texts = _Texts()
     over = gfx.Canvas(0.0004)
     over_texts = _Texts()
+    images = []
     x0, x1 = -width / 2, width / 2
     has_rail = any(w.kind == 'rail' for w in widgets)
 
@@ -566,9 +608,12 @@ def _build(widgets, height, width, hover_id, pressed_id, pointer):
         rect = _inset(w.rect, 0.0007 * q)
         size = groups[w.group][5] if w.kind == 'segment' else TEXT_H
         _draw_widget(cv, texts, w, rect, h, q, now, pointer if hot else None, size)
-        if h > 0.02 and w.tip and (w.kind in {'rail', 'icon'} or w.icon_only):
+        if w.kind == 'tile' and w.image is not None:
+            images.append([w.image, tile_image_rect(rect), None])
+        cut_short = w.kind == 'tile' and hud.text_width(w.text, SMALL_H) > w.rect[2] - w.rect[0] - 0.003
+        if h > 0.02 and w.tip and (w.kind in {'rail', 'icon'} or w.icon_only or cut_short):
             _tooltip(over, over_texts, w, h, x0)
-    return cv, texts, over, over_texts
+    return cv, texts, over, over_texts, images
 
 
 def _tooltip(cv, texts, w, h, panel_x0):
@@ -681,6 +726,17 @@ def _draw_widget(cv, texts, w, rect, h, q, now, pointer, size=TEXT_H):
         if w.active:
             cv.ring(cx, mid, r + 0.0017, 0.0008, COL_TEXT)
         cv.disc(cx, mid, r, (*w.swatch[:3], 1.0))
+    elif k == 'tile':
+        cv.rect(x0, y0, x1, y1, gfx.mix(COL_SURFACE, COL_SURFACE_HOT, h), CORNER)
+        if q > 0:
+            cv.rect(x0, y0, x1, y1, (1.0, 1.0, 1.0, 0.2 * q), CORNER)
+        if w.active:
+            cv.frame(x0, y0, x1, y1, 0.0012, COL_ACCENT, CORNER)
+        if w.image is None:
+            ix0, iy0, ix1, iy1 = tile_image_rect(rect)
+            gfx.icon(cv, w.icon or "object", (ix0 + ix1) / 2, (iy0 + iy1) / 2, ICON * 1.3, COL_FAINT)
+        color = COL_TEXT if w.active else gfx.mix(COL_DIM, COL_TEXT, h)
+        texts.add(x0 + 0.0015, y0 + TILE_TEXT / 2 + 0.0008, w.text, x1 - x0 - 0.003, color, 'CENTER', SMALL_H)
     elif k == 'more':
         cv.rect(x0, y1 - 0.00025, x1, y1 + 0.00025, (1.0, 1.0, 1.0, 0.06))
         color = gfx.mix(COL_FAINT, COL_TEXT, h)

@@ -118,7 +118,7 @@ def test_cutters():
     n0, v0, _lo, _hi = evaluated(target)
 
     settings.model_add_as = 'DIFFERENCE'
-    # Start inside the target (that would grab it as an Object) and drag out past its corner.
+    # Start inside the target (the right trigger never grabs) and drag out past its corner.
     op, r = tm.press(ctx, ss, 1, [(0.15, 0.15, 0.15), (0.2, 0.2, 0.2), (0.25, 0.25, 0.25)])
     cutter = bpy.context.view_layer.objects.active
     check(type(op.handler).__name__ == "CreatePrimitive", "Cut: a press on the selected object starts a cutter")
@@ -141,10 +141,10 @@ def test_cutters():
     check(abs((v0 - v2) - 0.1 ** 3) < 1e-6, f"a bigger cutter cuts more ({v0 - v2:.6f})")
     cutter.vr_prim.size = (0.1, 0.1, 0.1)
 
-    # Grab the cutter (the smaller object under the tip) and move it out of the target.
-    op, r = tm.press(ctx, ss, 1, [(0.22, 0.22, 0.22), (0.4, 0.22, 0.22), (0.6, 0.22, 0.22)])
+    # Grab the cutter (the smaller object under the tip) with the left hand and move it out of the target.
+    op, r = tm.press(ctx, ss, 0, [(0.22, 0.22, 0.22), (0.4, 0.22, 0.22), (0.6, 0.22, 0.22)])
     check(type(op.handler).__name__ == "MoveObject" and op.handler.obj == cutter,
-          "Cut: a press on a cutter grabs it")
+          "the left trigger on a cutter grabs it")
     _n, v3, _lo, _hi = evaluated(target)
     check(abs(v3 - v0) < 1e-6, "moved clear of the target, nothing is cut")
     # Moving the target takes its cutters along.
@@ -607,11 +607,11 @@ def test_snapping():
     part = cube(0.04, (0.5, 0, 0.5), "Part")
     settings.snap_surface = True
     # Grab the part at its center and bring it 1.5 cm over the top: it lands on it.
-    op, r = tm.press(ctx, ss, 1, [(0.5, 0, 0.5), (0.3, 0, 0.3), (0.02, 0.01, 0.135)])
+    op, r = tm.press(ctx, ss, 0, [(0.5, 0, 0.5), (0.3, 0, 0.3), (0.02, 0.01, 0.135)])
     check(close(part.location, (0.02, 0.01, 0.12)), f"snapped: standing on the top face ({tuple(part.location)})")
     check(snapping.last_hit is None, "the snap marker goes when you let go")
     # Too far above: free.
-    op, r = tm.press(ctx, ss, 1, [(0.02, 0.01, 0.12), (0.02, 0.01, 0.2), (0.02, 0.01, 0.25)])
+    op, r = tm.press(ctx, ss, 0, [(0.02, 0.01, 0.12), (0.02, 0.01, 0.2), (0.02, 0.01, 0.25)])
     check(close(part.location, (0.02, 0.01, 0.25)), "out of reach: it follows the hand")
 
     # A tilted base: the part turns to its normal, even with the controller held straight.
@@ -620,7 +620,7 @@ def test_snapping():
     normal = base.matrix_world.to_3x3() @ Vector((0, 0, 1))
     top = base.matrix_world @ Vector((0, 0, 0.1))
     near = top + normal * 0.035  # Part center (2 cm half size + 1.5 cm gap)
-    op, r = tm.press(ctx, ss, 1, [(0.02, 0.01, 0.25), (0.02, 0.01, 0.4), tuple(near)])
+    op, r = tm.press(ctx, ss, 0, [(0.02, 0.01, 0.25), (0.02, 0.01, 0.4), tuple(near)])
     z = part.matrix_world.to_3x3() @ Vector((0, 0, 1))
     bottom = part.matrix_world @ Vector((0, 0, -0.02))
     check(z.angle(normal) < 1e-3, f"its Z turned to the surface normal ({math.degrees(z.angle(normal)):.2f} deg)")
@@ -633,19 +633,19 @@ def test_snapping():
     settings.snap_angle = True
     part.matrix_world = Matrix.Translation((1, 0, 0))
     bpy.context.view_layer.update()
-    ss.aim_rot[1] = Quaternion()
-    tm.press(ctx, ss, 1, [(1, 0, 0), (1.05, 0, 0), (1.1, 0, 0)], Quaternion())
+    ss.aim_rot[0] = Quaternion()
+    tm.press(ctx, ss, 0, [(1, 0, 0), (1.05, 0, 0), (1.1, 0, 0)], Quaternion())
     op = tm.harness()
     ss.trigger = 1.0
-    ss.aim_loc[1] = Vector((1.1, 0, 0))
-    op.invoke(ctx, tm.FakeEvent('XR_ACTION', 'PRESS', tm.FakeXR((1.1, 0, 0))))
-    ss.aim_rot[1] = Quaternion((0, 0, 1), math.radians(20))
+    ss.aim_loc[0] = Vector((1.1, 0, 0))
+    op.invoke(ctx, tm.FakeEvent('XR_ACTION', 'PRESS', tm.FakeXR((1.1, 0, 0), hand=tm.actions.HANDS[0])))
+    ss.aim_rot[0] = Quaternion((0, 0, 1), math.radians(20))
     time.sleep(0.01)
     op.modal(ctx, tm.FakeEvent('TIMER'))
     ss.trigger = 0.0
     time.sleep(0.01)
     op.modal(ctx, tm.FakeEvent('TIMER'))
-    ss.aim_rot[1] = Quaternion()
+    ss.aim_rot[0] = Quaternion()
     angle = math.degrees(part.matrix_world.to_euler().z)
     check(abs(angle - round(angle / 15) * 15) < 1e-3 and abs(angle) > 1, f"Snap Rotation: turned in 15 degree "
           f"steps ({angle:.2f})")
@@ -657,7 +657,7 @@ def test_snapping():
     hole = cube(0.04, (0.5, 0, 0.5), "Hole")
     hardsurface.make_cutter(bpy.context, hole, base)
     settings.snap_surface = True
-    op, r = tm.press(ctx, ss, 1, [(0.5, 0, 0.5), (0.3, 0, 0.3), (0.0, 0.0, 0.115)])
+    op, r = tm.press(ctx, ss, 0, [(0.5, 0, 0.5), (0.3, 0, 0.3), (0.0, 0.0, 0.115)])
     check(close(hole.matrix_world.translation, (0.0, 0.0, 0.1)), "a cutter's center lands on its target's surface "
           f"({tuple(round(c, 4) for c in hole.matrix_world.translation)})")
     _n, v, _lo, _hi = evaluated(base)

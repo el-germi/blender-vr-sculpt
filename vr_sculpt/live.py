@@ -1,12 +1,12 @@
 """One app timer for the things that update while VR runs, outside of any operator:
 tracking objects, desktop window captures, camera preview redraws, puppet bindings and takes, the
-weight heat map's geometry."""
+weight heat map's geometry, and kit listings coming in from their background worker."""
 
 import time
 
 import bpy
 
-from . import camera, controllers, desktop, onion, operators, paths, puppet, rig, tracking
+from . import camera, controllers, desktop, kit, onion, operators, paths, puppet, rig, tracking
 
 FAST = 1.0 / 90.0
 IDLE = 0.25
@@ -23,6 +23,7 @@ def _tick():
         if settings is None:
             return IDLE
         desktop.tick(context)
+        kit.tick(context)
         if not operators.session_running(context):
             if puppet.active():
                 puppet.end_session(context)
@@ -30,6 +31,8 @@ def _tick():
             camera.release_base_pose(context)  # And the base pose, if aiming a camera pinned it.
             return IDLE
         ss = context.window_manager.xr_session_state
+        if settings.mode == 'MODEL':
+            kit.prewarm(context)  # Listed in the background before the Kit is first opened.
         if settings.tracking:
             tracking.update(context, ss)
         if puppet.active():

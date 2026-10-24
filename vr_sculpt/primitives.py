@@ -83,8 +83,10 @@ def forget(obj):
 
 
 def label(key):
-    """Display name for an Add entry key."""
-    from . import catalog
+    """Display name for an Add entry key (or a kit part's)."""
+    from . import catalog, kit
+    if kit.is_key(key):
+        return kit.label(key)
     entry = catalog.find(key)
     return entry.label if entry else key.split(".")[-1]
 
@@ -154,21 +156,61 @@ def delete(context, obj):
         bpy.data.meshes.remove(mesh)
 
 
+def is_instance(obj):
+    """An empty showing a collection (a placed collection kit part)."""
+    return (obj is not None and obj.type == 'EMPTY' and obj.instance_type == 'COLLECTION' and
+            obj.instance_collection is not None)
+
+
+def _own_world(obj):
+    """obj's world matrix from its own transforms: an object only an instance shows is never evaluated,
+    so its matrix_world can be stale."""
+    m = obj.matrix_basis.copy()
+    while obj.parent is not None:
+        m = obj.parent.matrix_basis @ obj.matrix_parent_inverse @ m
+        obj = obj.parent
+    return m
+
+
+def local_bounds(obj):
+    """(lo, hi) of what obj shows, in its own space: its bounding box, or for a collection instance,
+    the box around the collection's meshes."""
+    if is_instance(obj):
+        coll = obj.instance_collection
+        offset = Vector(coll.instance_offset)
+        pts = []
+        for o in coll.all_objects:
+            if o.type != 'MESH':
+                continue
+            corners = [Vector(c) for c in o.bound_box]
+            if all(c.length < 1e-12 for c in corners):  # Never evaluated: from the mesh itself.
+                from . import generic
+                lo, hi = generic.mesh_bounds(o.data)
+                corners = [lo, hi]
+            pts += [_own_world(o) @ c - offset for c in corners]
+        if pts:
+            return (Vector([min(p[i] for p in pts) for i in range(3)]),
+                    Vector([max(p[i] for p in pts) for i in range(3)]))
+        return Vector((0.0, 0.0, 0.0)), Vector((0.0, 0.0, 0.0))
+    corners = [Vector(c) for c in obj.bound_box]
+    return (Vector([min(c[i] for c in corners) for i in range(3)]),
+            Vector([max(c[i] for c in corners) for i in range(3)]))
+
+
 def touching(context, point, margin):
-    """The visible mesh object whose bounds contain point (+margin), smallest first, or None."""
+    """The visible mesh object (or collection instance) whose bounds contain point (+margin), smallest
+    first, or None."""
     best, best_vol = None, None
     for obj in context.view_layer.objects:
-        if obj is None or obj.type != 'MESH' or not obj.visible_get():
+        if obj is None or not (obj.type == 'MESH' or is_instance(obj)) or not obj.visible_get():
             continue
         inv = obj.matrix_world.inverted_safe()
         p = inv @ Vector(point)
         scale = max(obj.matrix_world.to_scale())
         m = margin / max(scale, 1e-9)
-        corners = [Vector(c) for c in obj.bound_box]
-        lo = Vector([min(c[i] for c in corners) - m for i in range(3)])
-        hi = Vector([max(c[i] for c in corners) + m for i in range(3)])
-        if all(lo[i] <= p[i] <= hi[i] for i in range(3)):
-            dims = obj.dimensions
+        lo, hi = local_bounds(obj)
+        if all(lo[i] - m <= p[i] <= hi[i] + m for i in range(3)):
+            dims = Vector([(hi[i] - lo[i]) * abs(s) for i, s in enumerate(obj.matrix_world.to_scale())])
             vol = dims.x * dims.y * dims.z
             if best is None or vol < best_vol:
                 best, best_vol = obj, vol

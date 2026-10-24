@@ -73,7 +73,8 @@ staying the fastest way to reach *everything*?
   the page (a short page, now that the rail holds seven modes), it sits at the bottom of the card,
   so it doesn't move when it opens.
 - **Second levels** replace the content (the rail stays): **object settings**
-  (Model, from the selection chip), **Settings** (gear, every mode), **pickers**
+  (Model, from the selection chip), the **Kit** of parts (Model, from the icon
+  beside Add; it stays open while you place), **Settings** (gear, every mode), **pickers**
   (from any select, e.g. Add, Rig, Camera, Thickness, Ease).
 - **Timeline strip** (when on): beside the panel, bottom-aligned, same visual
   system, with its own More.
@@ -160,8 +161,12 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Feature | How |
 |---|---|
 | Primitive to add (every Add > Mesh entry) | **Add** select > picker (categories, pages); **B** next primitive |
+| Kit part to place (asset libraries) | **Kit** icon beside Add > thumbnails (pages); **In** select > library, catalog; **B** next part in the catalog |
+| Drop or Stamp, part size, stamp spacing | Kit sheet: segmented control; *More* > sliders |
+| Add the selection to My Kit | Kit sheet header **+** |
 | New as Object / Cut / Union / Intersect | segmented control |
-| Create, grab, cut | trigger in the scene (unchanged) |
+| Create, cut, drop or stamp kit parts | right trigger in the scene (never grabs) |
+| Select, and move what's selected | left trigger: touch an object (hold to move it); in empty space, select nothing |
 | Duplicate, Delete | icons beside the chip (and in the object's header) |
 | Object settings | **chip** > pages Shape / Cuts / Finish / Array / Stack |
 | Size X/Y/Z, subdivisions; cylinder radius, height, segments; operator settings (paged) | **chip** > Shape |

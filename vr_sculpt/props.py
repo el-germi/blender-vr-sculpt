@@ -307,8 +307,19 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     primitive: StringProperty(
         name="Add",
         default="mesh.primitive_cube_add",
-        description="Add > Mesh entry the trigger creates in Model mode (see catalog.py)",
+        description="Add > Mesh entry (see catalog.py) or kit part (see kit.py) the trigger creates in Model mode",
     )
+    kit_stamp: BoolProperty(
+        name="Stamp",
+        description="Kit parts: the trigger sweeps across surfaces placing a copy every Spacing, instead of "
+                    "dropping one part",
+    )
+    kit_scale: FloatProperty(
+        name="Part Size", description="Kit parts are placed at this times their own size",
+        default=1.0, min=0.05, soft_max=4.0, subtype='FACTOR')
+    kit_spacing: FloatProperty(
+        name="Spacing", description="Distance between stamped kit parts (hand-space meters)",
+        default=0.03, min=0.002, soft_max=0.3, subtype='DISTANCE', unit='LENGTH')
     show_panel: BoolProperty(name="Show Hand Panel", description="Menu panel above the left controller", default=True)
     panel_pin: BoolProperty(
         name="Pin Hand Panel",

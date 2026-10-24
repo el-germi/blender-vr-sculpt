@@ -682,6 +682,32 @@ def _cube_add(p):
     _model(p)
 
 
+def _nut(p, cx, cy, r):
+    p.path([(cx + r * math.cos(math.pi / 6 + k * math.pi / 3), cy + r * math.sin(math.pi / 6 + k * math.pi / 3))
+            for k in range(6)], closed=True)
+    p.circle(cx, cy, r * 0.42)
+
+
+def _kit(p):
+    # A hex nut: hardware, parts.
+    _nut(p, 0.0, 0.0, 0.8)
+
+
+def _kit_add(p):
+    _nut(p, -0.25, -0.25, 0.6)
+    p.line(0.62, 0.3, 0.62, 0.94)
+    p.line(0.3, 0.62, 0.94, 0.62)
+
+
+def _stamp(p):
+    # A rubber stamp over the copies it left.
+    p.disc(0.0, 0.66, 0.2)
+    p.line(0.0, 0.5, 0.0, 0.05)
+    p.box(-0.55, -0.32, 0.55, 0.05, 0.08, fill=True)
+    for x in (-0.6, 0.0, 0.6):
+        p.disc(x, -0.72, 0.13)
+
+
 ICONS = {
     "sculpt": _sculpt, "model": _model, "draw": _draw, "paint": _paint, "pose": _pose, "tools": _tools,
     "pin": _pin, "pinned": _pinned, "gear": _gear, "back": _chevron(math.pi), "chevron_right": _chevron(0.0),
@@ -697,6 +723,7 @@ ICONS = {
     "fk": _fk, "ik": _ik, "bones": _bones, "bind": _bind, "reset": _reset, "cursor": _cursor, "object": _object,
     "cut": _cut, "union": _union, "intersect": _intersect, "bevel": _bevel, "shell": _shell, "array": _array,
     "radial": _radial, "linear": _linear, "shading": _shading, "rig": _rig, "weights": _weights, "smooth": _smooth,
+    "kit": _kit, "kit_add": _kit_add, "stamp": _stamp,
 }
 
 
