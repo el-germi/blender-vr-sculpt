@@ -461,7 +461,8 @@ def test_controller_hints():
           "Sculpt: B next brush, stick click brush size")
 
     s.mode = 'MODEL'
-    check(label('right', 'trigger', Info(primitive="Torus")) == "Add Torus, grab", "Model: add (the primitive) or grab")
+    check(label('right', 'trigger', Info(primitive="Torus")) == "Add Torus", "Model: the right trigger adds")
+    check(label('left', 'trigger', Info(primitive="Torus")) == "Select, move", "Model: the left trigger selects")
     s.model_add_as = 'DIFFERENCE'
     check(label('right', 'trigger', Info(cut_target=True)) == "Cut", "New as Cut, with an object to cut: Cut")
     check(label('right', 'trigger').startswith("Add"), "nothing to cut: still adds")

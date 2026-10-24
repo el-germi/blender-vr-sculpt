@@ -4,7 +4,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty
 from mathutils import Matrix, Quaternion, Vector
 
-from . import (actions, brushes, camera, catalog, desktop, drawing, hardsurface, interactions, measure, menus,
+from . import (actions, brushes, camera, catalog, desktop, drawing, interactions, kit, measure, menus,
                native, paint, paths, presence, primitives, rig, shading, snapping, strokes, symmetry, vr_ui)
 from . import pose as pose_mode  # "pose" is the controller pose in the handlers below
 from .props import BRUSH_ITEMS, RADIUS_STEPS
@@ -128,12 +128,15 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         how = 'CLEAR' if hand == actions.HANDS[0] else settings.model_mark
         return shading.EdgeMark(context, how, scale)
     if settings.mode == 'MODEL':
-        obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale)
-        # Making cutters, a press on the object being cut starts a new cutter there (anything else
-        # in reach, e.g. one of its cutters, is grabbed).
-        cutting = settings.model_add_as != 'OBJECT' and obj is not None and obj == hardsurface.cut_target(context)
-        if obj is not None and not cutting:
+        if hand == actions.HANDS[0]:
+            # The left trigger selects what it touches (and moves it, held), or clears the selection in
+            # empty space; the right one only makes things, so it never grabs by accident.
+            obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale)
+            if obj is None:
+                return interactions.Deselect(context)
             return interactions.MoveObject(context, obj, tip_pose, scale)
+        if kit.is_key(settings.primitive):
+            return interactions.pick_kit(context, settings, tip_pose, scale)
         return interactions.CreatePrimitive(context, settings.primitive, tip_pose.translation, scale)
     if settings.mode == 'DRAW':
         return drawing.pick(context, settings, tip_pose, value, scale)
@@ -397,10 +400,15 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
             else:
                 measure.undo_last(context.scene)
         elif settings.mode == 'MODEL':
-            keys = [e.key for e in catalog.entries()]
+            # A kit part steps to the next part in its catalog.
+            kit_part = kit.is_key(settings.primitive)
+            keys = kit.siblings(settings.primitive) if kit_part else [e.key for e in catalog.entries()]
             if keys:
                 i = keys.index(settings.primitive) if settings.primitive in keys else -1
-                settings.primitive = keys[(i + 1) % len(keys)]
+                if kit_part:
+                    menus.choose_part(context, keys[(i + 1) % len(keys)])
+                else:
+                    settings.primitive = keys[(i + 1) % len(keys)]
         elif settings.engine == 'NATIVE':
             try:
                 native.cycle_brush(context)

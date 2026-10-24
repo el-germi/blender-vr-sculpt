@@ -7,9 +7,11 @@ held and finish(context) on release; `changed` decides whether an undo step is p
 import math
 import time
 
+import bmesh
+import bpy
 from mathutils import Matrix, Vector
 
-from . import generic, grid, hardsurface, menus, presence, primitives, snapping, vr_ui
+from . import generic, grid, hardsurface, kit, menus, presence, primitives, snapping, vr_ui
 
 # Widget the right trigger is holding down, for drawing.
 pressed_id = None
@@ -221,6 +223,7 @@ class MoveObject:
         self.changed = False
         self.scale = scale
         self.surface = None
+        self.snap = None  # snap to surfaces: None follows Snap to Surface
         primitives.make_active(context, obj)
 
     def update(self, context, pose, tip_pose, value):
@@ -232,7 +235,7 @@ class MoveObject:
         settings = context.scene.vr_sculpt
         new = tip_pose @ self.pose_inv @ self.start
         placed = None
-        if settings.snap_surface:
+        if settings.snap_surface if self.snap is None else self.snap:
             if self.surface is None:
                 self.surface = snapping.SurfaceSnap(context, self.obj, self.scale)
             placed = self.surface.place(context, new, settings.snap_angle)
@@ -256,6 +259,21 @@ class MoveObject:
         if self.changed:
             from . import anim
             anim.auto_key(context, self.obj)
+
+
+class Deselect:
+    """Left trigger in empty space (Model mode): nothing is selected any more, so what the right trigger
+    makes next is an object of its own, not a cutter on the old selection."""
+
+    def __init__(self, context):
+        self.changed = any(o is not None and o.select_get() for o in context.view_layer.objects)
+        primitives.make_active(context, None)
+
+    def update(self, context, pose, tip_pose, value):
+        pass
+
+    def finish(self, context):
+        pass
 
 
 class CreatePrimitive:
@@ -299,3 +317,174 @@ class CreatePrimitive:
             hardsurface.refresh_solver(self.obj)
         # Refresh bounds now, so the new object can be grabbed right away.
         context.view_layer.update()
+
+
+def _cut_target(context, asset):
+    """What a new kit part cuts with New as Cut / Union / Intersect (collection instances can't cut)."""
+    if context.scene.vr_sculpt.model_add_as == 'OBJECT' or asset.id_type != 'OBJECT':
+        return None
+    return hardsurface.cut_target(context)
+
+
+class PlaceAsset(MoveObject):
+    """Drop a kit part: it appears at the tip and follows the hand like a grabbed object, settling on
+    any surface in reach whatever Snap to Surface says (parts are made to sit on things). With New as
+    Cut / Union / Intersect and an object selected, it's a cutter on that object from the start."""
+
+    def __init__(self, context, asset, tip_pose, scale):
+        settings = context.scene.vr_sculpt
+        self.target = _cut_target(context, asset)
+        obj = kit.place(context, asset, settings.kit_scale)
+        if self.target is not None:
+            hardsurface.make_cutter(context, obj, self.target, settings.model_add_as, parent=False)
+        # The part hangs from the tip by its anchor (bottom center, or the center for a cutter).
+        rs = obj.matrix_world.to_3x3()
+        obj.matrix_world = Matrix.Translation(tip_pose.translation - rs @ snapping.anchor(obj)) @ rs.to_4x4()
+        super().__init__(context, obj, tip_pose, scale)
+        self.snap = True
+        self.gate.open = True
+        self.update(context, tip_pose, tip_pose, 1.0)
+        self.changed = True
+
+    def finish(self, context):
+        snapping.clear()
+        if self.target is not None:
+            # Placed in world space while carried; from now on it moves with its target.
+            hardsurface.attach(self.obj, self.target)
+            hardsurface.refresh_solver(self.obj)
+        context.view_layer.update()
+
+
+def surface_frame(normal, along):
+    """Rotation with Z on normal and X along the given direction (its part across the surface)."""
+    z = Vector(normal).normalized()
+    x = Vector(along) - z * Vector(along).dot(z)
+    if x.length < 1e-6:
+        x = Vector((1.0, 0.0, 0.0)) if abs(z.x) < 0.9 else Vector((0.0, 1.0, 0.0))
+        x -= z * x.dot(z)
+    x.normalize()
+    return Matrix((x, z.cross(x), z)).transposed()
+
+
+STAMPS_PER_UPDATE = 16
+
+
+class StampAssets:
+    """Sweep across surfaces to place a kit part every Spacing, each standing on the surface and
+    turned along the sweep, like a brush (bolts along a seam, greebles across a hull). Nothing is
+    placed away from surfaces. Copies share their mesh. With New as Cut / Union / Intersect and an
+    object selected, the stamps make one cutter on it together: one Boolean however many there are."""
+
+    def __init__(self, context, asset, tip_pose, scale):
+        settings = context.scene.vr_sculpt
+        self.asset = asset
+        self.size = settings.kit_scale
+        self.spacing = settings.kit_spacing * scale
+        self.target = _cut_target(context, asset)
+        self.operation = settings.model_add_as
+        self.surface = snapping.SurfaceSnap(context, None, scale, target=self.target)
+        self.first = None  # the first stamp: later ones share its data (or join its mesh, as a cutter)
+        self.first_matrix = None
+        self.rs = None  # the part's own rotation and scale, times Part Size
+        self.anchor = None  # object-space point that lands on the surface
+        self.part_mesh = None  # cutter stamps: the part's mesh, added to the cutter at each stamp
+        self.bm = None
+        self.last = None
+        self.count = 0
+        self.changed = False
+        self.update(context, tip_pose, tip_pose, 1.0)
+
+    def _start(self, context):
+        part = kit.place(context, self.asset, self.size, select=False)
+        context.view_layer.update()
+        self.rs = part.matrix_world.to_3x3()
+        if self.target is None:
+            self.first = part
+            self.anchor = snapping.anchor(part)
+            return
+        lo, hi = primitives.local_bounds(part)
+        self.anchor = (lo + hi) / 2  # Cutters sink halfway in.
+        self.part_mesh = part.data
+        bpy.data.objects.remove(part)
+        mesh = self.part_mesh.copy()
+        mesh.name = self.asset.name + " Stamps"
+        self.first = bpy.data.objects.new(mesh.name, mesh)
+        context.collection.objects.link(self.first)
+        hardsurface.make_cutter(context, self.first, self.target, self.operation, parent=False)
+        self.bm = bmesh.new()
+        self.bm.from_mesh(mesh)
+
+    def _stamp(self, context, point, normal, along):
+        if self.first is None:
+            self._start(context)
+        full = surface_frame(normal, along) @ self.rs
+        matrix = Matrix.Translation(point - full @ self.anchor) @ full.to_4x4()
+        if self.count == 0:
+            self.first.matrix_world = matrix
+            self.first_matrix = matrix
+        elif self.bm is None:
+            obj = self.first.copy()  # Shares the mesh (or the instanced collection).
+            for coll in self.first.users_collection:
+                coll.objects.link(obj)
+            obj.matrix_world = matrix
+        else:
+            n = len(self.bm.verts)
+            self.bm.from_mesh(self.part_mesh)  # Adds to what's there.
+            self.bm.verts.ensure_lookup_table()
+            bmesh.ops.transform(self.bm, matrix=self.first_matrix.inverted_safe() @ matrix, verts=self.bm.verts[n:])
+            self.bm.to_mesh(self.first.data)
+            self.first.data.update()
+        self.count += 1
+        self.changed = True
+
+    def update(self, context, pose, tip_pose, value):
+        hit = self.surface.nearest(context, tip_pose.translation)
+        if hit is None:
+            return
+        point, normal = hit
+        stamped = False
+        if self.last is None:
+            self._stamp(context, point, normal, tip_pose.to_3x3() @ Vector((1.0, 0.0, 0.0)))
+            self.last = point
+            stamped = True
+        # Stamps go exactly Spacing apart along the sweep, however fast it moves (a fast one gets several).
+        for _ in range(STAMPS_PER_UPDATE):
+            step = point - self.last
+            if step.length < self.spacing - 1e-9:
+                break
+            hit = self.surface.nearest(context, self.last + step.normalized() * self.spacing)
+            if hit is None or (hit[0] - self.last).length < 1e-6:
+                break
+            self._stamp(context, hit[0], hit[1], step)
+            self.last = hit[0]
+            stamped = True
+        ss = context.window_manager.xr_session_state
+        if stamped and ss is not None:
+            presence.tick(context, ss, 1, 0.3, 0.01)
+
+    def _free(self):
+        if self.bm is not None:
+            self.bm.free()
+            self.bm = None
+
+    def abandon(self):
+        self._free()
+
+    def finish(self, context):
+        self._free()
+        if self.part_mesh is not None and self.part_mesh.users == 0:
+            bpy.data.meshes.remove(self.part_mesh)
+        if self.target is not None and self.first is not None:
+            hardsurface.attach(self.first, self.target)
+            hardsurface.refresh_solver(self.first)
+        context.view_layer.update()
+
+
+def pick_kit(context, settings, tip_pose, scale):
+    """The trigger's handler for the current kit part: stamp or drop."""
+    asset = kit.find(settings.primitive)
+    if asset is None:
+        raise RuntimeError(f"Kit part '{kit.label(settings.primitive)}' is gone (was its file moved?)")
+    if settings.kit_stamp:
+        return StampAssets(context, asset, tip_pose, scale)
+    return PlaceAsset(context, asset, tip_pose, scale)

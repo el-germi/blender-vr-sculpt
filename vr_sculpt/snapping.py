@@ -17,7 +17,7 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
-from . import hardsurface
+from . import hardsurface, primitives
 
 REACH = 0.03  # hand-space meters from the anchor to a surface that it snaps to
 ANGLE_STEP = math.radians(15.0)
@@ -27,10 +27,7 @@ last_hit = None
 
 
 def _bounds(obj):
-    corners = [Vector(c) for c in obj.bound_box]
-    lo = Vector([min(c[i] for c in corners) for i in range(3)])
-    hi = Vector([max(c[i] for c in corners) for i in range(3)])
-    return lo, hi
+    return primitives.local_bounds(obj)
 
 
 def anchor(obj):
@@ -62,14 +59,16 @@ def _descendants(obj):
 
 class SurfaceSnap:
     """Snaps one grabbed object. Trees for the meshes near it are built on first use and kept for
-    the rest of the grab."""
+    the rest of the grab.
 
-    def __init__(self, context, obj, scale):
+    obj None only finds surfaces (nearest()); target then stands for its own target (kit stamps)."""
+
+    def __init__(self, context, obj, scale, target=None):
         self.obj = obj
         self.reach = REACH * scale
-        self.anchor = anchor(obj)
-        self.own_target = hardsurface.target_of(obj)
-        skip = {obj} | _descendants(obj)
+        self.anchor = anchor(obj) if obj is not None else None
+        self.own_target = hardsurface.target_of(obj) if obj is not None else target
+        skip = {obj} | _descendants(obj) if obj is not None else set()
         self.candidates = [o for o in context.view_layer.objects
                            if o is not None and o.type == 'MESH' and o not in skip and o.visible_get()
                            and not hardsurface.is_cutter(o)]

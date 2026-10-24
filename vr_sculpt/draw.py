@@ -8,8 +8,9 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-from . import (camera, controllers, desktop, drawing, grid, hardsurface, hud, interactions, measure, menus, onion,
-               operators, paint, paths, presence, primitives, puppet, rig, shading, snapping, strokes, symmetry, vr_ui)
+from . import (camera, controllers, desktop, drawing, grid, hardsurface, hud, interactions, kit, measure, menus,
+               onion, operators, paint, paths, presence, primitives, puppet, rig, shading, snapping, strokes, symmetry,
+               vr_ui)
 from . import pose as pose_mode  # "pose" is a controller pose below
 
 COLORS = hud.PYTHON_COLORS
@@ -100,8 +101,11 @@ def _draw_cursors(context, ss, settings, xr):
             settings.draw_tool, settings.draw_width / 2) * scale
     else:
         marking = model and settings.model_mark != 'NONE'
+        # Stamping, the ring is half the spacing: stamps go where neighboring rings would touch.
+        stamping = model and settings.kit_stamp and kit.is_key(settings.primitive)
         radius = (settings.weight_radius if weights else pose_mode.REACH if posing else rig.REACH if rigging else
-                  shading.MARK_REACH if marking else interactions.TOUCH_MARGIN if model or tools else
+                  shading.MARK_REACH if marking else settings.kit_spacing / 2 if stamping else
+                  interactions.TOUCH_MARGIN if model or tools else
                   settings.paint_radius if painting else settings.radius) * scale
     offset = settings.tip_offset * scale
 
@@ -132,11 +136,15 @@ def _draw_cursors(context, ss, settings, xr):
             color = {'HARD': shading.HARD_COLOR, 'SOFT': shading.SOFT_COLOR}.get(settings.model_mark, (1.0, 1.0, 1.0))
             if idx == 0:
                 color = (1.0, 1.0, 1.0)  # The left hand clears.
-        elif model:
-            color = hud.CUT_COLORS.get(settings.model_add_as, hud.MODEL_COLOR)                 if hardsurface.cut_target(context) is not None else hud.MODEL_COLOR
+        elif model and idx == 0:
+            # The left trigger selects: the ring is the selection's color, and what it would select is boxed.
+            color = SELECT_COLOR
             touched = primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale)
             if touched is not None:
                 _draw_bounds(shader, touched, (1.0, 0.85, 0.3, 0.9))
+        elif model:
+            color = (hud.CUT_COLORS.get(settings.model_add_as, hud.MODEL_COLOR)
+                     if hardsurface.cut_target(context) is not None else hud.MODEL_COLOR)
         elif tools:
             color = hud.CAMERA_COLOR if settings.tool == 'CAMERA' else measure.COLOR
         elif posing:
@@ -159,10 +167,11 @@ def _draw_cursors(context, ss, settings, xr):
         batch = batch_for_shader(shader, 'LINES', {"pos": coords})
         shader.uniform_float("color", (*color, alpha))
         batch.draw(shader)
+    selected = None
     if model:
         active = context.view_layer.objects.active
         if active is not None and active.select_get() and active.visible_get():
-            _draw_bounds(shader, active, (1.0, 1.0, 1.0, 0.35))
+            selected = active
             target = hardsurface.cut_target(context)
             if target is not None and hardsurface.cutters_visible(context):
                 # The cuts of the object being worked on (cutters are wireframes, easy to lose).
@@ -176,6 +185,7 @@ def _draw_cursors(context, ss, settings, xr):
                 center = mod.mirror_object.matrix_world.translation if mod.mirror_object else \
                     active.matrix_world.translation
                 _draw_mirror_planes(shader, bits, center, scale)
+            _draw_selected(shader, active)  # Last, over the cut boxes.
         snapping.draw(shader, scale)
         if settings.model_page == 'FINISH' or settings.model_mark != 'NONE':
             tips = [operators.brush_tip(operators.controller_pose(ss.controller_aim_location_get(context, i),
@@ -191,6 +201,12 @@ def _draw_cursors(context, ss, settings, xr):
     gpu.state.blend_set('NONE')
 
     viewer = Vector(ss.viewer_pose_location)
+    if selected is not None:
+        # Its name above it, so you know what the left trigger picked.
+        top = max(_box(selected), key=lambda c: c.z)
+        center = sum(_box(selected), Vector()) / 8
+        hud.draw_tag(Vector((center.x, center.y, top.z)) + Vector((0.0, 0.0, 0.012 * scale)), viewer, scale,
+                     selected.name, SELECT_COLOR)
     camera_tool = tools and settings.tool == 'CAMERA'
     if settings.show_brush_card:
         # The tip status: a slim line above the right hand, facing the headset.
@@ -301,11 +317,35 @@ def _draw_mirror_planes(shader, bits, center, scale, half=0.3, lines=6):
         batch.draw(shader)
 
 
+SELECT_COLOR = (0.45, 0.72, 1.0)  # the selection's box, name tag and the left (selecting) ring
 _BOX_EDGES = ((0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7))
 
 
+def _box(obj):
+    """obj's bounds as 8 world corners, in bound_box order."""
+    lo, hi = primitives.local_bounds(obj)
+    box = [(lo.x, lo.y, lo.z), (lo.x, lo.y, hi.z), (lo.x, hi.y, hi.z), (lo.x, hi.y, lo.z),
+           (hi.x, lo.y, lo.z), (hi.x, lo.y, hi.z), (hi.x, hi.y, hi.z), (hi.x, hi.y, lo.z)]
+    return [obj.matrix_world @ Vector(c) for c in box]
+
+
+def _draw_selected(shader, obj):
+    """The selected object: a faint box with bright corner brackets, easy to tell from the touch box."""
+    corners = _box(obj)
+    coords = [corners[i] for edge in _BOX_EDGES for i in edge]
+    shader.uniform_float("color", (*SELECT_COLOR, 0.3))
+    batch_for_shader(shader, 'LINES', {"pos": coords}).draw(shader)
+    brackets = []
+    for a, b in _BOX_EDGES:
+        p, q = corners[a], corners[b]
+        k = min(0.25, 0.03 / max((q - p).length, 1e-9))  # a quarter of the edge, at most 3 cm
+        brackets += [p, p.lerp(q, k), q, q.lerp(p, k)]
+    shader.uniform_float("color", (*SELECT_COLOR, 1.0))
+    batch_for_shader(shader, 'LINES', {"pos": brackets}).draw(shader)
+
+
 def _draw_bounds(shader, obj, color):
-    corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+    corners = _box(obj)
     coords = [corners[i] for edge in _BOX_EDGES for i in edge]
     batch = batch_for_shader(shader, 'LINES', {"pos": coords})
     shader.uniform_float("color", color)

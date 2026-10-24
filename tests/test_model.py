@@ -273,15 +273,27 @@ def test_trigger():
     check(not wm.timers, "timer removed")
 
     settings.primitive = 'mesh.primitive_cylinder_add'
-    op, r = press(ctx, ss, 0, [(3, 0, 1), (3.002, 0, 1)])
+    op, r = press(ctx, ss, 1, [(3, 0, 1), (3.002, 0, 1)])
     cyl = bpy.context.view_layer.objects.active
     check(cyl.vr_prim.kind == 'CYLINDER' and abs(cyl.vr_prim.height - primitives.DEFAULT_SIZE) < 1e-6,
-          "a click (tiny drag) makes a default-size cylinder, left hand works too")
+          "a click (tiny drag) makes a default-size cylinder")
 
-    # Grab the cube from inside and move it.
+    # The left trigger selects: in empty space it clears the selection, and makes nothing.
+    n = len(bpy.data.objects)
+    op, r = press(ctx, ss, 0, [(5, 0, 1), (5.1, 0, 1)])
+    check(type(op.handler).__name__ == "Deselect" and len(bpy.data.objects) == n and not cyl.select_get(),
+          "left trigger in empty space deselects (nothing created)")
+    # The right trigger inside an object makes a new one there instead of grabbing it.
+    op, r = press(ctx, ss, 1, [(1.1, 0.05, 1.075), (1.1, 0.05, 1.075)])
+    made = bpy.context.view_layer.objects.active
+    check(type(op.handler).__name__ == "CreatePrimitive" and made not in (obj, cyl), "right trigger never grabs")
+    primitives.delete(bpy.context, made)
+
+    # Grab the cube from inside with the left hand and move it.
     start = obj.matrix_world.copy()
-    op, r = press(ctx, ss, 1, [(1.1, 0.05, 1.075), (1.3, 0.05, 1.075), (1.6, 0.25, 1.075)])
-    check(type(op.handler).__name__ == "MoveObject", "trigger inside an object grabs it")
+    op, r = press(ctx, ss, 0, [(1.1, 0.05, 1.075), (1.3, 0.05, 1.075), (1.6, 0.25, 1.075)])
+    check(type(op.handler).__name__ == "MoveObject" and obj.select_get(),
+          "left trigger inside an object selects and grabs it")
     check(close(obj.location, (1.6, 0.25, 1.075), 1e-5), f"grabbed object follows the controller ({tuple(obj.location)})")
     check(obj.matrix_world.to_3x3() == start.to_3x3(), "no rotation when the controller doesn't rotate")
     check(r == {'FINISHED'}, "move pushes an undo step")
@@ -290,14 +302,15 @@ def test_trigger():
     p = Vector((1.6, 0.25, 1.075))
     op = harness()
     ss.trigger = 1.0
-    op.invoke(ctx, FakeEvent('XR_ACTION', 'PRESS', FakeXR(p)))
-    ss.aim_rot[1] = Quaternion((0, 0, 1), 1.5708)
+    ss.aim_loc[0] = p.copy()
+    op.invoke(ctx, FakeEvent('XR_ACTION', 'PRESS', FakeXR(p, hand=actions.HANDS[0])))
+    ss.aim_rot[0] = Quaternion((0, 0, 1), 1.5708)
     time.sleep(0.01)
     op.modal(ctx, FakeEvent('TIMER'))
     ss.trigger = 0.0
     time.sleep(0.01)
     op.modal(ctx, FakeEvent('TIMER'))
-    ss.aim_rot[1] = Quaternion()
+    ss.aim_rot[0] = Quaternion()
     check(abs(obj.matrix_world.to_euler().z - 1.5708) < 1e-3, "grab follows controller rotation")
 
     # Pointing at the panel and pressing "Sculpt" switches mode instead of creating.

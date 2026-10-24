@@ -31,9 +31,14 @@ Meta Quest over OpenXR.
   chain, lens), plus a one-line description for a few seconds after switching.
 - **Haptics** on contact with the surface.
 - One undo step per stroke (Python engine).
-- **Model mode**: drag out any Add > Mesh primitive in empty space, grab
-  objects to move and rotate them, and edit the primitive's settings
-  afterwards. Primitives stay editable until you sculpt them.
+- **Model mode**: drag out any Add > Mesh primitive with the right trigger,
+  and edit the primitive's settings afterwards. Primitives stay editable
+  until you sculpt them. The **left trigger selects**: touch an object to
+  select it (hold and move to move and rotate it), press in empty space to
+  select nothing. The right trigger only makes things, so it never grabs
+  what it starts in. The selection has bright blue corner brackets and its
+  name above it; the left hand's ring is the same blue, and what it would
+  select gets a yellow box.
 - **Hard surface modeling** (Model mode). It's all modifiers, so primitives
   stay editable and nothing is final until you apply it:
   - **Live booleans**: set New to **Cut**, **Union** or **Intersect** and drag
@@ -78,6 +83,37 @@ Meta Quest over OpenXR.
     inputs), Up / Down and Remove. Applying or removing a cut deletes its
     cutter, and a radial array's center goes with it. Our modifiers keep
     their order, so Up / Down only show where a move is allowed.
+- **Kit parts (kitbashing)**, in Model mode: the **Kit** button beside Add
+  opens your asset libraries on the hand panel, as thumbnails by catalog.
+  Choose a part and the trigger places it:
+  - **Drop**: pull one out of thin air and hold it to a surface. It stands on
+    it, turned to its normal (twist the controller to turn it about the
+    normal), whatever Snap to Surface says.
+  - **Stamp**: sweep across a surface and a copy goes down every *Spacing*,
+    standing on the surface and lined up with the sweep, for rows of bolts
+    and greebles. Nothing is placed in the air. The tip ring shows the
+    spacing.
+  - With New as **Cut** / **Union** / **Intersect** and an object selected, a
+    part is a live cutter on it, sunk halfway into the surface, so vents and
+    holes cut as soon as you drop them. Parts tagged `cutter` (the starter
+    kit's vents) switch New as to Cut when you choose them. Stamped cutters
+    make one cutter together: one Boolean however many there are.
+  - **Part size** scales what you place; **B** steps to the next part in the
+    catalog.
+  - Where parts come from: the **Starter Kit** that ships with the add-on
+    (panels, vents, bolts, pipes, greebles, made by
+    `tests/make_starter_kit.py`), **My Kit**, and every asset library in
+    Preferences > File Paths. Mesh objects and collections marked as assets
+    are parts; a collection is placed as a collection instance. Copies of a
+    part share its mesh, as with Append (Reuse Data).
+  - **Add to My Kit** (the + on the Kit's header) saves the selected mesh as
+    it looks (modifiers applied, its scale baked in) as a new part, with a
+    thumbnail rendered in VR. A cutter is saved as a cutter part. My Kit is
+    a folder in the extension's user directory: add it in Preferences > File
+    Paths > Asset Libraries to see your parts in the desktop Asset Browser.
+
+  ![The Kit sheet](docs/kit_panels.png)
+  ![Kit parts dropped, stamped and cut on a box](docs/kit_scene.png)
 - **Selecting doesn't nudge**: a grabbed object or bone (Model and Pose
   mode) only starts to follow once your hand moves past the Grab Threshold
   (1.5 cm), turns past 8 degrees, or holds the trigger for the Grab Delay
@@ -350,6 +386,28 @@ window, passthrough and tracking settings (including hiding the hand panel's
   Mesh menu's draw functions (including ones extensions appended) against a
   recording layout, collecting each `layout.operator(...)` with its preset
   properties and following `layout.menu(...)` into submenus.
+- **Kit parts** ([kit.py](vr_sculpt/kit.py)): reading a .blend reads the
+  whole file, and asset libraries hold files of hundreds of megabytes, so
+  libraries are listed by a background Blender
+  ([kit_worker.py](vr_sculpt/kit_worker.py), `--background
+  --factory-startup`), never in the session. It links each file's assets
+  and writes their catalog, tags and preview (raw RGBA, at most 128 px) to
+  a cache folder in the extension's user directory, one json per file,
+  checked against the file's size and time. The session only reads that
+  cache: the live timer takes each file in as the worker finishes it, so
+  parts appear while it works. Listing starts when you're in Model mode in
+  VR, so it's usually done before you open the Kit, and a later session
+  lists from the cache with no worker at all (here: 7 ms to start, 1.1 s
+  of worker for a 2.9 GB library, 3 ms from the cache, 5 ms for 44
+  thumbnails). The catalogs come from the library's
+  `blender_assets.cats.txt`. Thumbnails become GPU textures a few per frame
+  as the panel draws them (a `tile` widget). Placing appends with `reuse_local_id` and `clear_asset_data`;
+  a collection appended once is reused for every instance. Drop is a
+  `MoveObject` that always surface-snaps; Stamp projects the tip onto the
+  nearest surface (the same BVH trees) and places parts at exact spacing
+  along the sweep, joining cutter stamps into one mesh with bmesh. Add to Kit
+  writes the part with `bpy.data.libraries.write` and renders its preview
+  offscreen with `gpu` (a lit three-quarter view, cutters in red).
 - **Operator primitives** ([generic.py](vr_sculpt/generic.py)): the object
   stores its menu entry and the settings changed in VR; a change re-runs the
   operator and swaps the new mesh in. Drag-to-create scales length settings,
@@ -482,6 +540,28 @@ window, passthrough and tracking settings (including hiding the hand panel's
   with `blf` under a `gpu.matrix` transform; brush icons come from the brush
   asset previews.
 
+### What we learned about asset previews (5.4.0 Alpha)
+
+Found with [tests/probe_asset_previews.py](tests/probe_asset_previews.py)
+(the kit now reads previews from the linked IDs in its worker, but this is
+the way to get one without linking anything):
+
+- `bpy.utils.previews.new().load(name, "lib.blend/Object/Name", 'BLEND')`
+  returns that ID's own preview, read from the file without appending or
+  linking anything (`/` or `\` both work; `Collection/Name` too). Loading
+  the bare .blend path gives the file's thumbnail instead (empty here).
+- `bpy.data.libraries.load(path, assets_only=True)` lists names only.
+  Linking gives `asset_data` (catalog id, tags) and the preview, and
+  `bpy.data.temp_data()` lets that happen in a separate Main, so the open
+  file never sees it.
+- Appending with `reuse_local_id=True` makes a new object that shares the
+  mesh appended before, but a new collection every time.
+- Appended IDs keep their asset data unless `clear_asset_data=True`.
+- An object that only a collection instance shows is never evaluated: its
+  `matrix_world` can be stale, so instance bounds use its own transforms.
+- `gpu.init()` makes `gpu` work in `--background`, so tests and the starter
+  kit's build can render previews.
+
 ### What we learned about `paint.image_paint` (5.4.0 Alpha)
 
 - The dab lands where the element's `mouse` looks in the 3D view; its
@@ -579,6 +659,18 @@ blender --background --factory-startup --python tests/test_hard_surface.py
 blender --background --factory-startup --python tests/test_rig.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_kit.py
+```
+
+`test_kit.py` registers a temporary asset library and points My Kit at a
+temporary folder, so neither your preferences nor your kit are touched.
+Rebuild the starter kit (`vr_sculpt/assets/kit`) with:
+
+```bash
+blender --background --factory-startup --python tests/make_starter_kit.py
+```
+
 `test_generic.py` enables Extra Mesh Objects for its own run (factory
 settings, so your preferences aren't touched) and checks all 42 entries.
 
@@ -604,6 +696,8 @@ binding and painting (`rig_weights.png`).
 `pose_preview.py` enters Pose Mode the way VR does (no area), records a
 puppet take while the timeline really plays, and draws the Pose page and
 bones (`probe_pose.py` checked the pose API).
+`kit_preview.py` draws the Kit sheet (`kit_panels.png`) and a box dressed
+with dropped, stamped and cut starter parts (`kit_scene.png`).
 `paint_preview.py`
 paints real Contact and Spray strokes with simulated controllers and checks
 color, size, undo and picking (`probe_texpaint*.py` found how).
@@ -633,6 +727,13 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   desktop. Applying to a mesh other objects share gives the object its own
   copy first. Adding new modifier types from VR isn't there yet.
 - Geometry-node asset primitives in Add > Mesh aren't listed yet.
+- Kit parts: only mesh objects and collections are parts (no curves,
+  geometry-node assets or materials). A collection part can't be a cutter.
+  Remote (online) asset libraries are listed only as far as they're already
+  downloaded. Stamping doesn't follow Snap Rotation, and stamps don't stamp
+  onto each other (the surfaces are the ones there when the sweep starts).
+  Assets without a stored preview show an icon. A library of thousands of
+  files is listed in part (the first 2000).
 - Using the desktop window from VR needs Windows; elsewhere it's view only,
   without menus and popups (they are temporary regions). It moves your real
   mouse while you point at it. The Blender window must be on screen and not

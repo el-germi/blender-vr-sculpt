@@ -49,10 +49,12 @@ MARK_INFO = {
     'CLEAR': ("Clear Edge Marks", "Touch edges to clear their hard or soft mark"),
 }
 CUT_INFO = {
-    'DIFFERENCE': ("Cut with", "Drag on the selected object to cut into it. Touch a cutter to move it"),
-    'UNION': ("Union with", "Drag on the selected object to add to it. Touch a cutter to move it"),
+    'DIFFERENCE': ("Cut with", "Drag on the selected object to cut into it. Left hand selects a cutter"),
+    'UNION': ("Union with", "Drag on the selected object to add to it. Left hand selects a cutter"),
     'INTERSECT': ("Intersect with", "Drag on the selected object: only the overlap stays"),
 }
+KIT_DROP_INFO = "Pull a part out and hold it to a surface: it sits on it"
+KIT_STAMP_INFO = "Sweep across a surface: a part every Spacing"
 CAMERA_COLOR = (0.6, 0.75, 1.0)
 MEASURE_COLOR = (1.0, 0.82, 0.25)
 POSE_COLORS = {'FK': (0.55, 0.85, 1.0), 'IK': (1.0, 0.6, 0.85)}
@@ -140,7 +142,7 @@ def card_content(settings, sculpt_brush):
         camera_tool = settings.tool == 'CAMERA'
         content = (title, desc, CAMERA_COLOR if camera_tool else MEASURE_COLOR, "camera" if camera_tool else "ruler")
     elif settings.mode == 'MODEL':
-        from . import hardsurface, primitives, shading
+        from . import hardsurface, kit, primitives, shading
         op = settings.model_add_as
         if settings.model_mark != 'NONE':
             title, desc = MARK_INFO[settings.model_mark]
@@ -148,11 +150,18 @@ def card_content(settings, sculpt_brush):
             content = (title, desc, color, "edit")
         elif op in CUT_INFO and hardsurface.cut_target(bpy_context()) is not None:
             verb, desc = CUT_INFO[op]
+            if kit.is_key(settings.primitive):
+                desc = KIT_STAMP_INFO if settings.kit_stamp else KIT_DROP_INFO
             content = (f"{verb} {primitives.label(settings.primitive)}", desc, CUT_COLORS[op],
                        {'DIFFERENCE': "cut", 'UNION': "union"}.get(op, "intersect"))
+        elif kit.is_key(settings.primitive):
+            verb = "Stamp" if settings.kit_stamp else "Place"
+            content = (f"{verb} {primitives.label(settings.primitive)}",
+                       KIT_STAMP_INFO if settings.kit_stamp else KIT_DROP_INFO + ". Left hand selects",
+                       MODEL_COLOR, "stamp" if settings.kit_stamp else "kit")
         else:
             title = "Add " + primitives.label(settings.primitive)
-            content = (title, "Drag in empty space to create. Touch an object to grab it", MODEL_COLOR, "model")
+            content = (title, "Drag to create. Left hand: touch to select and move", MODEL_COLOR, "model")
     elif settings.engine == 'NATIVE':
         name = sculpt_brush.name if sculpt_brush else "No brush"
         content = (name, NATIVE_INFO.get(name, ""), NATIVE_COLORS.get(name, (0.9, 0.9, 0.9)), "sculpt")
@@ -232,6 +241,33 @@ def draw_text(m, x, y, text, height, color):
     blf.color(0, *color)
     blf.draw(0, text)
     gpu.matrix.pop()
+
+
+_TAG_H = 0.011
+_TAG_TEXT = 0.0052
+
+
+def draw_tag(anchor, viewer, scale, text, color):
+    """A small name tag facing the viewer, its bottom center at anchor (the selected object's name)."""
+    from . import gfx, vr_ui
+    m = billboard(anchor, viewer, scale)
+    tw = text_width(text, _TAG_TEXT)
+    pad = 0.003
+    dot = 0.0016
+    x0 = -(tw + 2 * dot + 0.002) / 2 - pad
+    x1 = -x0
+    cv = gfx.Canvas()
+    cv.rect(x0 - 0.0005, -0.0005, x1 + 0.0005, _TAG_H + 0.0005, vr_ui.COL_EDGE, _TAG_H / 2 + 0.0005)
+    cv.rect(x0, 0.0, x1, _TAG_H, vr_ui.COL_CARD, _TAG_H / 2)
+    cv.disc(x0 + pad + dot, _TAG_H / 2, dot, (*color[:3], 1.0))
+    gpu.state.blend_set('ALPHA')
+    gpu.state.depth_test_set('NONE')
+    gpu.matrix.push()
+    gpu.matrix.multiply_matrix(m)
+    cv.draw()
+    gpu.matrix.pop()
+    draw_text(m, x0 + pad + 2 * dot + 0.002, (_TAG_H - _TAG_TEXT) / 2, text, _TAG_TEXT, vr_ui.COL_TEXT)
+    gpu.state.blend_set('NONE')
 
 
 _STATUS_H = 0.0155
