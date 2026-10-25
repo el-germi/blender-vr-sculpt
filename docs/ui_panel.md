@@ -61,7 +61,7 @@ staying the fastest way to reach *everything*?
 
 ![Two panels at headset pixel density](ui_panel_detail.png)
 
-- **Rail** (left column): Sculpt, Model, Draw, Paint, Rig, Pose, Tools. The current
+- **Rail** (left column): Sculpt, Model, Draw, Paint, Rig, Pose, Physics, Tools. The current
   mode has an accent pill and a bar on the edge. Hovering an icon shows its
   name to the left of the panel. Pressing the current mode's icon returns to
   its first level from any sheet or picker.
@@ -70,11 +70,12 @@ staying the fastest way to reach *everything*?
   and **Pin**.
 - **Primary controls**: 3-5 rows.
 - **More / Less**: the disclosure row, with a hint of what's inside. When the rail is taller than
-  the page (a short page, now that the rail holds seven modes), it sits at the bottom of the card,
+  the page (a short page, now that the rail holds eight modes), it sits at the bottom of the card,
   so it doesn't move when it opens.
 - **Second levels** replace the content (the rail stays): **object settings**
   (Model, from the selection chip), the **Kit** of parts (Model, from the icon
-  beside Add; it stays open while you place), **Settings** (gear, every mode), **pickers**
+  beside Add; it stays open while you place), **Simulation** (Physics, from its row under More),
+  **Settings** (gear, every mode), **pickers**
   (from any select, e.g. Add, Rig, Camera, Thickness, Ease).
 - **Timeline strip** (when on): beside the panel, bottom-aligned, same visual
   system, with its own More.
@@ -247,6 +248,28 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Reset bone, reset pose | *More* |
 | Bind L hand / R hand / Head, Unbind, Rec | *More*; they move up front while a binding or take exists |
 
+### Physics
+
+![Rigid, Rigid with More open, Cloth](physics_panels.png)
+
+![Soft, a spring bone with More open, the Simulation sheet with Hands on](physics_panels_more.png)
+
+| Feature | How |
+|---|---|
+| Pick what to set up | trigger on an object (selects it; hold to move it) or on a bone of the selected rig (or the selected mesh's rig) |
+| Play / stop the simulation, back to the start | **Simulate** / **Reset**; **B** plays and stops |
+| Off / Rigid / Static / Cloth / Soft (the selected mesh) | segmented control |
+| Rigid: mass, bounce; shape, friction, air drag | sliders; *More* |
+| Static: bounce; shape, friction | slider; *More* |
+| Cloth: preset (Cotton, Denim, Leather, Rubber, Silk), pin, stiffness; pressure, mass, self collision | **Cloth** / **Pin** selects > pickers (Pin: None, **Top edge**, the vertex groups), slider; *More* |
+| Soft (a cloth with internal springs): stiffness, pressure; mass, self collision | sliders; *More* |
+| Spring on the active bone, the same for the bones below it | **Spring** toggle, **Whole chain** |
+| Spring stiffness, damping; gravity | sliders; *More* |
+| Bake the springs to keys, springs back to rest | *More* > **Bake**, **Rest** |
+| Gravity, speed, length (the frame range), keep the run, clear it | *More* > **Simulation** sheet |
+| Hands take part (colliders at the tips) | **Hands** toggle; **right stick click** |
+| Grab and throw / Push and pull | segmented control (with Hands on); Push / Pull's force: *More* |
+
 ### Tools
 
 | Feature | How |
@@ -336,12 +359,19 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
     follow? Left trigger a bone: gone, its children kept? Turn on Mirror X and build an arm. Bind,
     switch to Weights: does the heat map sit on the mesh, readable? Paint, subtract with the left
     hand, smooth; touch a bone to switch to it. Is 0.3 s of Bind acceptable on your meshes?
-11. **Controllers.** Do the Quest controller models sit where your real ones are (the handle in your
+11. **Physics.** Select a floor, make it Static; drag out a few cubes in Model mode, make them Rigid.
+    Simulate (B): do they fall and stack? Hands on (right stick click), sweep a hand through them:
+    pushed? Grab one while it plays and throw it: does it fly on? Push / Pull: does the right
+    trigger draw things in, the left push them away? Make a grid Cloth, pin its Top edge: does it
+    hang and react to your hands? Keep the run, Reset, Simulate: the same run? On a rig, give a tail
+    or an ear a spring (Whole chain): move the rig in Pose mode, poke the bones with Hands on. Is
+    the spring's default stiffness a good start?
+12. **Controllers.** Do the Quest controller models sit where your real ones are (the handle in your
     hand, the face under your thumb)? Do the brush tip and the ray still come out where they did?
     Press each button: does the right part light up, and does the stick follow yours? Look at a
     hand: do the hints come up, readable, and go away once you start working? Are any of them
     wrong for the mode you're in?
-12. **Overall.** Compare with A and B on: time to reach a rare setting, time for
+13. **Overall.** Compare with A and B on: time to reach a rare setting, time for
     the top action, how calm the view is while sculpting.
 
 ## Implementation notes

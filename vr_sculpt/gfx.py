@@ -708,6 +708,65 @@ def _stamp(p):
         p.disc(x, -0.72, 0.13)
 
 
+def _physics(p):
+    # A ball and the arc of its bounce.
+    p.path(_arc_pts(-0.15, -0.55, 0.6, math.radians(180), math.radians(20), 10))
+    p.line(-0.85, -0.82, 0.85, -0.82)
+    p.disc(0.42, 0.25, 0.3)
+
+
+def _throw(p):
+    # A ball flying off, with speed lines behind it.
+    p.disc(0.42, 0.2, 0.36)
+    for y, x0 in ((0.45, -0.55), (0.2, -0.85), (-0.05, -0.55)):
+        p.line(x0, y, -0.05, y)
+
+
+def _force(p):
+    # A point with its field around it.
+    p.disc(0.0, 0.0, 0.16)
+    for r in (0.45, 0.78):
+        for a0 in (20, 110, 200, 290):
+            p.path(_arc_pts(0.0, 0.0, r, math.radians(a0), math.radians(a0 + 60), 5))
+
+
+def _hands(p):
+    # A controller's stick and the sphere at its tip that pushes things.
+    p.line(-0.85, -0.85, -0.05, -0.05)
+    p.circle(0.3, 0.3, 0.48)
+
+
+def _cloth(p):
+    # A sheet hanging from a rail.
+    p.line(-0.85, 0.75, 0.85, 0.75)
+    left = [(-0.7 + 0.12 * math.sin(t * 2.5), 0.75 - 1.5 * t) for t in (i / 10 for i in range(11))]
+    right = [(0.7 + 0.12 * math.sin(t * 2.5 + 1.0), 0.75 - 1.5 * t) for t in (i / 10 for i in range(11))]
+    p.path(left)
+    p.path(right)
+    p.path([(-0.7 + 1.4 * t + 0.0, -0.75 + 0.12 * math.sin(t * 9.0)) for t in (i / 12 for i in range(13))])
+
+
+def _soft(p):
+    # A blob squashed on the ground.
+    p.path([(0.78 * math.cos(a), -0.6 + 0.62 * max(math.sin(a), 0.0) + 0.06 * math.sin(a)) for a in
+            (math.pi * k / 16 for k in range(17))])
+    p.line(-0.9, -0.6, 0.9, -0.6)
+    p.disc(-0.2, -0.15, 0.09)
+
+
+def _spring(p):
+    pts = [(-0.85, 0.0)]
+    for k in range(7):
+        pts.append((-0.6 + 0.2 * k, 0.4 if k % 2 == 0 else -0.4))
+    pts.append((0.85, 0.0))
+    p.path(pts)
+
+
+def _gravity(p):
+    p.line(0.0, 0.8, 0.0, -0.75)
+    _arrow_head(p, 0.0, -0.8, -math.pi / 2, 0.4)
+
+
 ICONS = {
     "sculpt": _sculpt, "model": _model, "draw": _draw, "paint": _paint, "pose": _pose, "tools": _tools,
     "pin": _pin, "pinned": _pinned, "gear": _gear, "back": _chevron(math.pi), "chevron_right": _chevron(0.0),
@@ -723,7 +782,9 @@ ICONS = {
     "fk": _fk, "ik": _ik, "bones": _bones, "bind": _bind, "reset": _reset, "cursor": _cursor, "object": _object,
     "cut": _cut, "union": _union, "intersect": _intersect, "bevel": _bevel, "shell": _shell, "array": _array,
     "radial": _radial, "linear": _linear, "shading": _shading, "rig": _rig, "weights": _weights, "smooth": _smooth,
-    "kit": _kit, "kit_add": _kit_add, "stamp": _stamp,
+    "kit": _kit, "kit_add": _kit_add, "stamp": _stamp, "physics": _physics, "throw": _throw, "force": _force,
+    "hands": _hands, "cloth": _cloth, "soft": _soft, "spring": _spring,
+    "gravity": _gravity,
 }
 
 

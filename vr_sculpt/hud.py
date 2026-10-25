@@ -71,6 +71,24 @@ RIG_INFO = {
     'SMOOTH': ("Smooth Weights", "Even out the bone's weights. Touch a bone to pick it"),
 }
 
+PHYSICS_COLORS = {'SETUP': (0.45, 0.95, 0.75), 'GRAB': (1.0, 0.8, 0.35), 'PULL': (0.4, 0.75, 1.0),
+                  'PUSH': (1.0, 0.55, 0.3)}
+PHYSICS_INFO = {
+    'SETUP': ("Physics", "Touch an object or a bone to set it up. B plays the simulation"),
+    'GRAB': ("Grab & Throw", "Grab bodies and spring bones, let go to throw. Your hands push. B: play / stop"),
+    'FORCE': ("Push & Pull", "Right trigger pulls things in, left pushes them away. B: play / stop"),
+}
+
+
+def physics_color(settings, hand=1):
+    """The tip color in Physics mode, for the right (1) or left (0) hand."""
+    if not settings.physics_hands:
+        return PHYSICS_COLORS['SETUP']
+    if settings.physics_tool == 'FORCE':
+        return PHYSICS_COLORS['PULL' if hand == 1 else 'PUSH']
+    return PHYSICS_COLORS['GRAB']
+
+
 TOOLS_INFO = {
     'MEASURE': ("Tape Measure", "Drag to measure; ends snap to vertices. B removes the last one"),
     'CAMERA': ("Scene Camera", "Hold the trigger to aim the camera. B: next camera"),
@@ -137,6 +155,10 @@ def card_content(settings, sculpt_brush):
         else:
             title, desc = RIG_INFO[settings.weight_brush]
             content = (title, desc, rig.BRUSH_COLORS[settings.weight_brush], "weights")
+    elif settings.mode == 'PHYSICS':
+        tool = settings.physics_tool if settings.physics_hands else 'SETUP'
+        title, desc = PHYSICS_INFO[tool]
+        content = (title, desc, physics_color(settings), {'GRAB': "throw", 'FORCE': "force"}.get(tool, "physics"))
     elif settings.mode == 'TOOLS':
         title, desc = TOOLS_INFO[settings.tool]
         camera_tool = settings.tool == 'CAMERA'
@@ -192,6 +214,11 @@ def status_size(context, settings):
         return f"chain {settings.pose_chain}" if settings.pose_tool == 'IK' else ""
     if mode == 'RIG':
         return _cm(settings.weight_radius) if settings.rig_tool == 'WEIGHTS' else ""
+    if mode == 'PHYSICS':
+        from . import anim
+        if settings.physics_hands and settings.physics_tool == 'FORCE':
+            return f"force {settings.physics_force:.0f}"
+        return f"frame {context.scene.frame_current}" if anim.is_playing(context) else ""
     if mode == 'TOOLS':
         cam = context.scene.camera
         if settings.tool == 'CAMERA' and cam is not None and cam.data.type == 'PERSP':

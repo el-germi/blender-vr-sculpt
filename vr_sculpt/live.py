@@ -1,12 +1,13 @@
 """One app timer for the things that update while VR runs, outside of any operator:
 tracking objects, desktop window captures, camera preview redraws, puppet bindings and takes, the
-weight heat map's geometry, and kit listings coming in from their background worker."""
+weight heat map's geometry, kit listings coming in from their background worker, and physics (the
+hands' colliders and spring bones, which also run while the timeline plays outside VR)."""
 
 import time
 
 import bpy
 
-from . import camera, controllers, desktop, kit, onion, operators, paths, puppet, rig, tracking
+from . import camera, controllers, desktop, kit, onion, operators, paths, physics, puppet, rig, tracking
 
 FAST = 1.0 / 90.0
 IDLE = 0.25
@@ -29,7 +30,8 @@ def _tick():
                 puppet.end_session(context)
             controllers.tick(context, False)  # Blender's controllers back as they were.
             camera.release_base_pose(context)  # And the base pose, if aiming a camera pinned it.
-            return IDLE
+            physics.end_session(context)
+            return FAST if physics.tick(context, None) else IDLE  # Springs while the timeline plays.
         ss = context.window_manager.xr_session_state
         if settings.mode == 'MODEL':
             kit.prewarm(context)  # Listed in the background before the Kit is first opened.
@@ -40,6 +42,7 @@ def _tick():
         paths.ensure(context)
         onion.update(context)
         rig.tick(context)
+        physics_busy = physics.tick(context, ss)
         if camera.wanted(context):
             # The preview renders in the desktop 3D view's draw callback, so keep it drawing.
             now = time.monotonic()
@@ -49,7 +52,7 @@ def _tick():
                 if region is not None:
                     region.tag_redraw()
         busy = (settings.tracking or camera.wanted(context) or desktop.interactive(context)
-                or settings.onion or settings.show_paths or puppet.active())
+                or settings.onion or settings.show_paths or puppet.active() or physics_busy)
         return FAST if busy else IDLE
     except Exception:
         if not _errors:

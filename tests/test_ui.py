@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 import test_model as tm  # noqa: E402  (fakes and the press() helper)
 
 failures = []
-MODES = ('SCULPT', 'MODEL', 'DRAW', 'PAINT', 'RIG', 'POSE', 'TOOLS')
+MODES = ('SCULPT', 'MODEL', 'DRAW', 'PAINT', 'RIG', 'POSE', 'PHYSICS', 'TOOLS')
 
 
 def check(cond, msg):
@@ -508,8 +508,8 @@ def test_controller_hints():
     check(label('right', 'trigger', desk) == "Click" and label('left', 'trigger', desk) == "Middle click" and
           label('right', 'top', desk) == "Right click" and label('right', 'stick', desk) == "Scroll",
           "on the desktop screen: the mouse")
-    names = {'SCULPT': "Model", 'MODEL': "Draw", 'DRAW': "Paint", 'PAINT': "Rig", 'RIG': "Pose", 'POSE': "Tools",
-             'TOOLS': "Sculpt"}
+    names = {'SCULPT': "Model", 'MODEL': "Draw", 'DRAW': "Paint", 'PAINT': "Rig", 'RIG': "Pose", 'POSE': "Physics",
+             'PHYSICS': "Tools", 'TOOLS': "Sculpt"}
     icons = set()
     for mode, nxt in names.items():
         s.mode = mode

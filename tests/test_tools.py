@@ -572,7 +572,8 @@ def test_tools_page():
         ids = {w.id for w in widgets}
         need = {"mode_tools", "tool_measure", "tool_camera", "settings", "pin"} | tool_ids[tool]
         check(need <= ids, f"{tool}: page has its buttons (missing {sorted(need - ids)})")
-        check(height < 0.2, f"{tool}: panel height {height:.3f} m")
+        rail = vr_ui.rail_height(len(menus.MODES))  # The eight mode icons set the least height.
+        check(height <= max(0.2, rail) + 1e-9, f"{tool}: panel height {height:.3f} m (the rail: {rail:.3f} m)")
     settings.tool = 'CAMERA'
     check(vr_ui.find(menus.layout(ctx)[0], "camera_new") is not None, "New here shows by default")
     settings.show_new_camera = False

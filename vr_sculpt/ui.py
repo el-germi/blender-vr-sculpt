@@ -1,6 +1,6 @@
 import bpy
 
-from . import actions, catalog, measure, native, operators, paint, pose, primitives, puppet, rig
+from . import actions, catalog, measure, native, operators, paint, physics, pose, primitives, puppet, rig
 
 
 class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
@@ -22,7 +22,7 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
         row = layout.grid_flow(row_major=True, columns=3, even_columns=True, align=True)
         row.active = settings.enabled
         for mode, text in (('SCULPT', "Sculpt"), ('MODEL', "Model"), ('DRAW', "Draw"), ('PAINT', "Paint"),
-                           ('RIG', "Rig"), ('POSE', "Pose"), ('TOOLS', "Tools")):
+                           ('RIG', "Rig"), ('POSE', "Pose"), ('PHYSICS', "Physics"), ('TOOLS', "Tools")):
             row.operator("vrsculpt.set_mode", text=text, depress=settings.mode == mode).mode = mode
         row = layout.row(heading="Hand Panel")
         row.prop(settings, "show_panel", text="Show")
@@ -112,6 +112,36 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
                 col.prop(settings, "weight_strength")
                 col.prop(settings, "weight_mirror")
                 col.prop(settings, "weight_show")
+            col.prop(settings, "tip_offset")
+            box = layout.box()
+            box.scale_y = 0.8
+            box.label(text=actions.last_status)
+            return
+        if settings.mode == 'PHYSICS':
+            obj = physics.selected(context)
+            if obj is not None and obj.type == 'ARMATURE':
+                pb = physics.active_bone(obj)
+                if pb is None:
+                    col.label(text="Touch a bone to give it a spring", icon='INFO')
+                else:
+                    col.label(text=f"{obj.name}: {pb.name}", icon='BONE_DATA')
+                    sp = pb.vr_spring
+                    col.prop(sp, "enabled")
+                    sub = col.column()
+                    sub.active = sp.enabled
+                    sub.prop(sp, "stiffness")
+                    sub.prop(sp, "damping")
+                    sub.prop(sp, "gravity")
+            elif obj is not None and obj.type == 'MESH':
+                col.label(text=f"{obj.name}: {dict(physics.KINDS)[physics.kind(obj)]} "
+                               "(settings in Properties > Physics)", icon='PHYSICS')
+            else:
+                col.label(text="Select an object or touch one in VR", icon='INFO')
+            col.prop(settings, "physics_hands")
+            sub = col.column()
+            sub.active = settings.physics_hands
+            sub.prop(settings, "physics_tool", expand=True)
+            sub.prop(settings, "physics_force")
             col.prop(settings, "tip_offset")
             box = layout.box()
             box.scale_y = 0.8

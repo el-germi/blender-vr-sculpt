@@ -35,9 +35,29 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             # Last, so files saved before Rig mode keep their mode (enum values are stored by position).
             ('RIG', "Rig", "Build an armature with the controllers, bind a mesh to it with automatic weights and "
                            "paint its weights"),
+            ('PHYSICS', "Physics", "Set up rigid bodies, cloth, soft bodies and spring bones, run the simulation "
+                                   "and push, pull and throw things with your hands"),
         ),
         default='SCULPT',
     )
+    # Physics mode.
+    physics_hands: BoolProperty(
+        name="Hands",
+        description="Physics mode: the controllers take part in the simulation. They push bodies, cloth, soft "
+                    "bodies and spring bones, and the trigger grabs and throws, or pushes and pulls",
+    )
+    physics_tool: EnumProperty(
+        name="Hand Tool",
+        items=(
+            ('GRAB', "Grab", "The trigger grabs rigid bodies and spring bones; let go to throw"),
+            ('FORCE', "Push / Pull", "The trigger is a force at your hand: the right one pulls things in, the left "
+                                     "one pushes them away (squeeze harder for more)"),
+        ),
+        default='GRAB',
+    )
+    physics_force: FloatProperty(
+        name="Force", description="Strength of the hand's push or pull at full trigger (a force field's strength)",
+        default=300.0, min=0.0, soft_max=2000.0)
     # Rig mode.
     rig_tool: EnumProperty(
         name="Rig Tool",
