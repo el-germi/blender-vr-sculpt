@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 VR Sculpt is a pure-Python Blender extension (`vr_sculpt/`, no Blender fork) for sculpting, modeling,
-drawing, painting, posing, puppeteering and measuring with VR controllers inside Blender's own OpenXR
+drawing, painting, rigging, posing, puppeteering, simulating and measuring with VR controllers inside Blender's own OpenXR
 session. It targets **Blender 5.4.0 Alpha** with a Meta Quest. README.md is the real design doc: its
 "How it works" section explains each module, and "What we learned about `sculpt.brush_stroke` /
 `paint.image_paint`" records API behavior found by the `tests/probe_*` scripts. Read the relevant part
@@ -24,7 +24,7 @@ blender --background --command extension install-file -r user_default -e dist/vr
 
 Background tests, one file per area (`test_brushes`, `test_modal`, `test_model`, `test_generic`,
 `test_draw`, `test_tools`, `test_paint`, `test_anim`, `test_pose`, `test_ik_limits`,
-`test_hard_surface`, `test_ui`, `test_rig`, `test_kit`):
+`test_hard_surface`, `test_ui`, `test_rig`, `test_kit`, `test_physics`):
 
 ```bash
 blender --background --factory-startup --python tests/test_tools.py
@@ -78,8 +78,8 @@ add-on's, patches the stock `blender_default` action map: trigger bindings becom
 **The trigger operator** (`operators.py`, `VRSCULPT_OT_stroke`). One modal undo operator per hand
 press. `_pick_handler()` is the central dispatch: in priority order it picks hand panel press, desktop
 screen, motion path key, edge marking, then a per-mode handler (`interactions.MoveObject` /
-`CreatePrimitive`, `drawing.pick`, `paint.pick`, `rig.pick`, `pose.pick`, `measure.Measure`,
-`camera.AimCamera`). `None` means sculpt with the active engine (`brushes.py` numpy engine in Object
+`CreatePrimitive`, `drawing.pick`, `paint.pick`, `rig.pick`, `pose.pick`, `physics.pick`,
+`measure.Measure`, `camera.AimCamera`). `None` means sculpt with the active engine (`brushes.py` numpy engine in Object
 Mode, or `native.py` driving `sculpt.brush_stroke` in Sculpt Mode). A handler is a plain class with
 `update(context, pose, tip_pose, value)`, `finish(context)` and a `changed` flag; `changed` decides
 whether the operator returns FINISHED (one undo step) or CANCELLED. New trigger behavior = a new
@@ -94,8 +94,9 @@ handler class plus a branch in `_pick_handler`.
 
 **Per-frame work outside the operator.** `live.py` is the one persistent app timer (90 Hz while
 something needs it, 4 Hz idle) that drives tracking empties, desktop captures, camera preview
-redraws, puppet bindings and takes, motion paths and onion skin. Add continuous updates there rather
-than registering new timers. `draw.py` / `hud.py` register `SpaceView3D` draw handlers on region
+redraws, puppet bindings and takes, motion paths, onion skin, the physics hand colliders and spring
+bones (which also run outside VR while the timeline plays). Add continuous updates there rather than
+registering new timers. `draw.py` / `hud.py` register `SpaceView3D` draw handlers on region
 `'XR'` (headset) and `'WINDOW'` (desktop); everything in the headset (brush rings, controller models,
 panels, motion paths, ghosts, desktop screen) is drawn with `gpu`/`blf` from there (`actions.py`
 turns on the session's `show_custom_overlays` at start so the XR region runs them).
@@ -125,7 +126,9 @@ dab; `rig.py` for Rig (edit bones in Edit Mode, Bind via `parent_set` ARMATURE_A
 brush on vertex groups and a heat map drawn in VR); `pose.py` (FK/IK via CCD, limits) + `puppet.py` (bindings, recorded takes via
 `frame_change_post`); `anim.py`, `paths.py`, `onion.py` for the timeline strip, motion paths and
 mesh onion skin (5.x slotted actions: F-curves come from the slot's channelbag via
-`bpy_extras.anim_utils`); `desktop.py` + `winput.py` for the floating desktop window (GDI capture
+`bpy_extras.anim_utils`); `physics.py` for Physics (Blender's rigid body / cloth / collision data set from the panel (Soft is a
+cloth with internal springs: the Soft Body modifier is ~100x slower), kinematic hand colliders and force fields at the tips, and our own
+spring bones, stored as `PoseBone.vr_spring` and simulated in the live timer on top of the bone's pose); `desktop.py` + `winput.py` for the floating desktop window (GDI capture
 and `SendInput` on Windows, region read-back elsewhere).
 
 ## Branches

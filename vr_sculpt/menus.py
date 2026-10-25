@@ -1,6 +1,6 @@
 """What the hand panel shows, and the mode/engine switches behind it.
 
-The panel is an icon rail (the six modes) beside the content. The content is:
+The panel is an icon rail (the eight modes) beside the content. The content is:
   - a header: the mode's name, its context, and icon actions (undo where there is one, Settings, Pin);
   - the mode's 3-5 most used controls;
   - a More row that opens the rest (it opens upward, so the row stays under the pointer).
@@ -13,8 +13,8 @@ import math
 
 import bpy
 
-from . import (anim, camera, catalog, desktop, generic, hardsurface, hud, kit, measure, native, paint, pose,
-               presence, primitives, puppet, rig, shading, strokes, symmetry, vr_ui)
+from . import (anim, camera, catalog, desktop, generic, hardsurface, hud, kit, measure, native, paint, physics,
+               pose, presence, primitives, puppet, rig, shading, strokes, symmetry, vr_ui)
 from .props import BRUSH_ITEMS
 
 NATIVE_SHORT = {
@@ -23,7 +23,8 @@ NATIVE_SHORT = {
 }
 
 MODES = (('SCULPT', "Sculpt", "sculpt"), ('MODEL', "Model", "model"), ('DRAW', "Draw", "draw"),
-         ('PAINT', "Paint", "paint"), ('RIG', "Rig", "rig"), ('POSE', "Pose", "pose"), ('TOOLS', "Tools", "tools"))
+         ('PAINT', "Paint", "paint"), ('RIG', "Rig", "rig"), ('POSE', "Pose", "pose"),
+         ('PHYSICS', "Physics", "physics"), ('TOOLS', "Tools", "tools"))
 MODE_ICONS = {ident: icon for ident, _name, icon in MODES}
 
 LABEL_W = 0.034  # row-leading labels ("Symmetry", "Mirror"): one column, so the controls line up
@@ -65,7 +66,7 @@ def set_mode(context, mode):
     settings.mode = mode
     settings.model_mark = 'NONE'
     obj = context.view_layer.objects.active
-    if mode in {'MODEL', 'DRAW', 'TOOLS'}:
+    if mode in {'MODEL', 'DRAW', 'TOOLS', 'PHYSICS'}:
         set_object_mode(context, obj, 'OBJECT')
     elif mode == 'PAINT':
         paint.enter(context)
@@ -121,7 +122,7 @@ def _toggle(settings, prop):
 
 # --- panel state: sheets, disclosure, picker ------------------------------------
 
-_sheet = None  # None, 'OBJECT' (the selected object's settings), 'KIT' or 'SETTINGS'
+_sheet = None  # None, 'OBJECT' (the selected object's settings), 'KIT', 'SIMULATION' (Physics) or 'SETTINGS'
 _open = set()  # disclosure keys whose More is open
 
 
@@ -284,12 +285,16 @@ def panel(context):
         close_sheet(context)  # The object went away (deleted, deselected) or the mode changed.
     if _sheet == 'KIT' and settings.mode != 'MODEL':
         close_sheet(context)
+    if _sheet == 'SIMULATION' and settings.mode != 'PHYSICS':
+        close_sheet(context)
     if _picker is not None:
         content = _picker_rows()
     elif _sheet == 'SETTINGS':
         content = _settings_rows(context, settings)
     elif _sheet == 'KIT':
         content = _kit_rows(context, settings)
+    elif _sheet == 'SIMULATION':
+        content = _simulation_rows(context, settings)
     elif _sheet == 'OBJECT':
         content = _object_rows(context, settings, _selected(context))
     else:
@@ -1135,6 +1140,206 @@ def _pose_rows(context, settings):
     return _disclose('POSE', out, more, "Reset, puppeteering")
 
 
+# --- Physics --------------------------------------------------------------------
+
+HAND_TOOLS = (('grab', "Grab"), ('force', "Push / Pull"))
+
+
+def _named(name):
+    """Pickers answer after the panel that opened them is gone: they find the object again by name."""
+    return bpy.data.objects.get(name)
+
+
+def open_cloth_picker(context, obj):
+    open_picker("Cloth", [Option(n, n) for n in physics.CLOTH_PRESETS], physics.cloth_preset(obj),
+                lambda value, n=obj.name: physics.set_cloth_preset(_named(n), value))
+
+
+def open_pin_picker(context, obj):
+    open_picker("Pin", [Option(v, label) for v, label in physics.pin_options(obj)], physics.pin(obj),
+                lambda value, n=obj.name: physics.set_pin(_named(n), value))
+
+
+def _sim_row(context, settings):
+    playing = anim.is_playing(context)
+    return [
+        vr_ui.button("sim_play", "Stop" if playing else "Simulate", lambda: physics.simulate(context), active=playing,
+                     icon="stop" if playing else "play"),
+        vr_ui.button("sim_reset", "Reset", lambda: physics.reset(context), icon="reset", tip="Back to the start"),
+        vr_ui.toggle("physics_hands", "Hands", settings.physics_hands, _toggle(settings, "physics_hands"),
+                     icon="hands", tip="Hands take part"),
+    ]
+
+
+def _hand_rows(settings):
+    """(up front, More): the hand tool, and Push / Pull's strength."""
+    out = [_segments("ptool_", "physics_tool", HAND_TOOLS, settings.physics_tool.lower(),
+                     lambda v: setattr(settings, "physics_tool", v.upper()), icons={'grab': "throw", 'force': "force"})]
+    more = []
+    if settings.physics_tool == 'FORCE':
+        more.append([vr_ui.slider("physics_force", "Force", settings.physics_force, 0.0, 2000.0,
+                                  lambda v: setattr(settings, "physics_force", v), fmt=lambda v: f"{v:.0f}")])
+    return out, more
+
+
+def _rigid_rows(obj, static):
+    rb = obj.rigid_body
+    if rb is None:  # A Collision modifier alone: choosing Static again adds the rigid body.
+        return [], []
+    out = []
+    if not static:
+        out.append([vr_ui.slider("rb_mass", "Mass", rb.mass, 0.05, 20.0, lambda v: setattr(rb, "mass", v),
+                                 fmt=lambda v: f"{v:.2f} kg")])
+    out.append([vr_ui.slider("rb_bounce", "Bounce", rb.restitution, 0.0, 1.0,
+                             lambda v: setattr(rb, "restitution", v), fmt=_percent)])
+    more = [
+        [vr_ui.label("Shape", fixed=LABEL_W)] + _segments(
+            "rb_shape_", "rb_shape", [(i.lower(), n) for i, n in physics.SHAPES], rb.collision_shape.lower(),
+            lambda v: setattr(rb, "collision_shape", v.upper())),
+        [vr_ui.slider("rb_friction", "Friction", rb.friction, 0.0, 1.0, lambda v: setattr(rb, "friction", v),
+                      fmt=_percent)],
+    ]
+    if not static:
+        more.append([vr_ui.slider("rb_air", "Air drag", rb.linear_damping, 0.0, 1.0,
+                                  lambda v: setattr(rb, "linear_damping", v), fmt=_percent)])
+    return out, more
+
+
+def _cloth_rows(context, obj):
+    s = physics.cloth(obj)
+    collision = physics.cloth_collision(obj)
+    pin = physics.pin(obj)
+    out = [
+        [vr_ui.select("cloth_preset", "Cloth", physics.cloth_preset(obj), lambda: open_cloth_picker(context, obj),
+                      icon="cloth"),
+         vr_ui.select("cloth_pin", "Pin", pin or "none", lambda: open_pin_picker(context, obj), icon="pin")],
+        [vr_ui.slider("cloth_stiffness", "Stiffness", physics.cloth_stiffness(obj), 1.0, 100.0,
+                      lambda v: physics.set_cloth_stiffness(obj, v), fmt=lambda v: f"{v:.0f}")],
+    ]
+    more = [
+        [vr_ui.slider("cloth_pressure", "Pressure", physics.cloth_pressure(obj), 0.0, 20.0,
+                      lambda v: physics.set_cloth_pressure(obj, v), fmt=lambda v: f"{v:.1f}" if v > 1e-4 else "off")],
+        [vr_ui.slider("cloth_mass", "Mass", s.mass, 0.05, 5.0, lambda v: setattr(s, "mass", v),
+                      fmt=lambda v: f"{v:.2f} kg")],
+        [vr_ui.toggle("cloth_self", "Self collision", collision.use_self_collision,
+                      lambda: setattr(collision, "use_self_collision", not collision.use_self_collision),
+                      icon="cloth")],
+    ]
+    return out, more
+
+
+def _soft_rows(obj):
+    stiffness = [vr_ui.slider("soft_stiffness", "Stiffness", physics.soft_stiffness(obj), 0.0, 1.0,
+                              lambda v: physics.set_soft_stiffness(obj, v), fmt=_percent)]
+    s = physics.cloth(obj)
+    if s is None:  # A Soft Body modifier, made on the desktop.
+        return [stiffness, [vr_ui.label("A slow Soft Body: Soft remakes it", align='CENTER')]], []
+    collision = physics.cloth_collision(obj)
+    out = [
+        stiffness,
+        [vr_ui.slider("soft_pressure", "Pressure", physics.cloth_pressure(obj), 0.0, 10.0,
+                      lambda v: physics.set_cloth_pressure(obj, v), fmt=lambda v: f"{v:.1f}" if v > 1e-4 else "off")],
+    ]
+    more = [
+        [vr_ui.slider("soft_mass", "Mass", s.mass, 0.05, 5.0, lambda v: setattr(s, "mass", v),
+                      fmt=lambda v: f"{v:.2f} kg")],
+        [vr_ui.toggle("soft_self", "Self collision", collision.use_self_collision,
+                      lambda: setattr(collision, "use_self_collision", not collision.use_self_collision),
+                      icon="soft")],
+    ]
+    return out, more
+
+
+def _object_physics_rows(context, obj):
+    k = physics.kind(obj)
+    out = [_segments("kind_", "physics_kind", [(i.lower(), n) for i, n in physics.KINDS], k.lower(),
+                     lambda v: physics.set_kind(context, obj, v.upper()))]  # Words: five icons need learning.
+    if k in {'RIGID', 'STATIC'}:
+        rows, more = _rigid_rows(obj, k == 'STATIC')
+    elif k == 'CLOTH':
+        rows, more = _cloth_rows(context, obj)
+    elif k == 'SOFT':
+        rows, more = _soft_rows(obj)
+    else:
+        rows, more = [[vr_ui.label("Rigid falls, Static holds, Cloth drapes", align='CENTER')]], []
+    return out + rows, more
+
+
+def _spring_rows(context, arm):
+    pb = physics.active_bone(arm)
+    if pb is None:
+        return [[vr_ui.label("Touch a bone to give it a spring", align='CENTER')]], []
+    sp = pb.vr_spring
+    out = [[
+        vr_ui.toggle("spring_on", "Spring", sp.enabled, lambda: physics.set_spring(arm, pb, not sp.enabled),
+                     icon="spring"),
+        vr_ui.button("spring_chain", "Whole chain", lambda: physics.spring_chain(arm, pb), icon="bones",
+                     tip="This bone's spring for every bone below it"),
+    ]]
+    if sp.enabled:
+        out += [
+            [vr_ui.slider("spring_stiffness", "Stiffness", sp.stiffness, 0.0, 1.0,
+                          lambda v: setattr(sp, "stiffness", v), fmt=_percent)],
+            [vr_ui.slider("spring_damping", "Damping", sp.damping, 0.0, 1.0, lambda v: setattr(sp, "damping", v),
+                          fmt=_percent)],
+        ]
+    n = len(physics.springs(arm))
+    more = [[vr_ui.slider("spring_gravity", "Gravity", sp.gravity, 0.0, 2.0, lambda v: setattr(sp, "gravity", v),
+                          fmt=_percent)]] if sp.enabled else []
+    more += [[
+        vr_ui.button("spring_bake", f"Bake {n}" if n else "Bake", lambda: physics.bake(context, arm), icon="key",
+                     tip="Key the springs over the frame range"),
+        vr_ui.button("spring_rest", "Rest", lambda: physics.reset_springs(context), icon="reset",
+                     tip="Springs back to rest"),
+    ]]
+    return out, more
+
+
+def _simulation_rows(context, settings):
+    """The Simulation sheet: the scene's gravity, speed and length, and keeping a run."""
+    kept = physics.baked(context)
+    return [
+        [vr_ui.icon_button("back", "back", lambda: close_sheet(context), "Back"),
+         vr_ui.title("Simulation", "kept run" if kept else ""), _pin(context, settings)],
+        [vr_ui.slider("physics_gravity", "Gravity", physics.gravity(context), 0.0, 2.0,
+                      lambda v: physics.set_gravity(context, v), fmt=lambda v: f"{v:.2f} g")],
+        [vr_ui.slider("physics_speed", "Speed", physics.speed(context), 0.1, 2.0,
+                      lambda v: physics.set_speed(context, v), fmt=lambda v: f"{v:.2f}x")],
+        [vr_ui.slider("physics_length", "Length", physics.length(context), 1.0, 60.0,
+                      lambda v: physics.set_length(context, v), fmt=lambda v: f"{v:.1f} s")],
+        [vr_ui.button("physics_keep", "Kept" if kept else "Keep run", lambda: physics.keep(context), icon="check",
+                      active=kept, tip="Bake the run just played"),
+         vr_ui.button("physics_free", "Clear kept", lambda: physics.free(context), danger=True, icon="trash")
+         if kept else vr_ui.label("")],
+    ]
+
+
+def _physics_rows(context, settings):
+    obj = physics.selected(context)
+    arm = obj if obj is not None and obj.type == 'ARMATURE' else None
+    if arm is not None:
+        bone = physics.active_bone(arm)
+        subtitle = bone.name if bone is not None else arm.name
+    else:
+        subtitle = obj.name if obj is not None else "touch an object"
+    out = [_header(context, settings, "Physics", "kept run" if physics.baked(context) else subtitle),
+           _sim_row(context, settings)]
+    hand_more = []
+    if settings.physics_hands:
+        hand_rows, hand_more = _hand_rows(settings)
+        out += hand_rows
+    if arm is not None:
+        rows, more = _spring_rows(context, arm)
+    elif obj is not None and obj.type == 'MESH':
+        rows, more = _object_physics_rows(context, obj)
+    else:
+        rows, more = [[vr_ui.label("Touch an object or a bone", align='CENTER')]], []
+    sim = [vr_ui.select("physics_sim", "Simulation",
+                        f"{physics.gravity(context):.2f} g, {physics.length(context):.0f} s",
+                        lambda: open_sheet('SIMULATION'), icon="gravity")]
+    return _disclose('PHYSICS', out + rows, hand_more + more + [sim], "Simulation: gravity, speed, keep")
+
+
 # --- Tools ----------------------------------------------------------------------
 
 def open_camera_picker(context):
@@ -1261,7 +1466,7 @@ def _settings_rows(context, settings):
 
 
 _MODE_ROWS = {'SCULPT': _sculpt_rows, 'MODEL': _model_rows, 'DRAW': _draw_rows, 'PAINT': _paint_rows,
-              'RIG': _rig_rows, 'POSE': _pose_rows, 'TOOLS': _tools_rows}
+              'RIG': _rig_rows, 'POSE': _pose_rows, 'PHYSICS': _physics_rows, 'TOOLS': _tools_rows}
 
 
 # --- timeline strip --------------------------------------------------------------

@@ -9,8 +9,8 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
 from . import (camera, controllers, desktop, drawing, grid, hardsurface, hud, interactions, kit, measure, menus,
-               onion, operators, paint, paths, presence, primitives, puppet, rig, shading, snapping, strokes, symmetry,
-               vr_ui)
+               onion, operators, paint, paths, physics, presence, primitives, puppet, rig, shading, snapping, strokes,
+               symmetry, vr_ui)
 from . import pose as pose_mode  # "pose" is a controller pose below
 
 COLORS = hud.PYTHON_COLORS
@@ -77,6 +77,8 @@ def draw_overlay(context, ss, xr=True):
         pose_mode.draw(context, tips, scale)
     if settings.mode == 'RIG':
         rig.draw(context, tips, scale)
+    if settings.mode == 'PHYSICS':
+        physics.draw(context, tips, scale)
     puppet.draw(context, scale)
     if xr and settings.show_desktop:
         desktop.draw(context, ss, poses[1])
@@ -94,6 +96,7 @@ def _draw_cursors(context, ss, settings, xr):
     painting = settings.mode == 'PAINT'
     rigging = settings.mode == 'RIG'
     weights = rigging and settings.rig_tool == 'WEIGHTS'
+    simulating = settings.mode == 'PHYSICS'
     if painting:
         _draw_paint_cursors(context, ss, settings)
     if sketch:
@@ -104,6 +107,8 @@ def _draw_cursors(context, ss, settings, xr):
         # Stamping, the ring is half the spacing: stamps go where neighboring rings would touch.
         stamping = model and settings.kit_stamp and kit.is_key(settings.primitive)
         radius = (settings.weight_radius if weights else pose_mode.REACH if posing else rig.REACH if rigging else
+                  physics.HAND_RADIUS if simulating and settings.physics_hands else
+                  interactions.TOUCH_MARGIN if simulating else
                   shading.MARK_REACH if marking else settings.kit_spacing / 2 if stamping else
                   interactions.TOUCH_MARGIN if model or tools else
                   settings.paint_radius if painting else settings.radius) * scale
@@ -154,6 +159,12 @@ def _draw_cursors(context, ss, settings, xr):
             color = rig.BRUSH_COLORS[brush]
         elif rigging:
             color = rig.DELETE_COLOR if idx == 0 else rig.BONES_COLOR
+        elif simulating:
+            color = hud.physics_color(settings, idx)
+            if not settings.physics_hands or settings.physics_tool == 'GRAB':
+                touched = primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale)
+                if touched is not None:
+                    _draw_bounds(shader, touched, (1.0, 0.85, 0.3, 0.9))
         elif painting:
             color = paint.get_color(context, secondary=idx == 0)
         elif idx == 0 and settings.left_inverts and (native or settings.brush in {'DRAW', 'INFLATE'}):
@@ -168,6 +179,11 @@ def _draw_cursors(context, ss, settings, xr):
         shader.uniform_float("color", (*color, alpha))
         batch.draw(shader)
     selected = None
+    if simulating:
+        active = physics.selected(context)
+        if active is not None and active.visible_get():
+            selected = active
+            _draw_selected(shader, active)
     if model:
         active = context.view_layer.objects.active
         if active is not None and active.select_get() and active.visible_get():

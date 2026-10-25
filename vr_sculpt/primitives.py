@@ -198,11 +198,11 @@ def local_bounds(obj):
 
 
 def touching(context, point, margin):
-    """The visible mesh object (or collection instance) whose bounds contain point (+margin), smallest
-    first, or None."""
+    """The visible, selectable mesh object (or collection instance) whose bounds contain point (+margin),
+    smallest first, or None."""
     best, best_vol = None, None
     for obj in context.view_layer.objects:
-        if obj is None or not (obj.type == 'MESH' or is_instance(obj)) or not obj.visible_get():
+        if obj is None or not (obj.type == 'MESH' or is_instance(obj)) or not obj.visible_get() or obj.hide_select:
             continue
         inv = obj.matrix_world.inverted_safe()
         p = inv @ Vector(point)

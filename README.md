@@ -1,6 +1,6 @@
 # VR Sculpt for Blender (prototype)
 
-Sculpt, model, draw, paint, rig, pose, puppeteer and measure with VR controllers inside Blender's own VR session. Pure Python
+Sculpt, model, draw, paint, rig, pose, puppeteer, simulate and measure with VR controllers inside Blender's own VR session. Pure Python
 extension, no Blender fork. Built and tested on **Blender 5.4.0 Alpha** with a
 Meta Quest over OpenXR.
 
@@ -259,8 +259,43 @@ Meta Quest over OpenXR.
   whatever the triggers are posing, on each frame, until Stop or the end of
   the range. A take only replaces what it records, so takes layer: the head
   first, then each hand.
+- **Physics mode**: set up Blender's own simulations and spring bones, run
+  them, and play with them using your hands.
+  - **Objects**: touch a mesh to select it (hold to move it), then make it
+    **Off**, **Rigid** (an active rigid body: mass, bounce; More: shape,
+    friction, air drag), **Static** (a passive rigid body that things land
+    on), **Cloth** (Blender's Cotton / Denim / Leather / Rubber / Silk
+    presets, stiffness, pressure for balloons, mass, self collision, and
+    **Pin**: none, a vertex group, or **Top edge**, which pins the highest
+    row of the mesh as it stands, for curtains and flags) or **Soft** (a
+    closed cloth held out by internal springs, which squashes and wobbles:
+    stiffness, pressure, mass, self collision). Rigid and Static bodies get a
+    Collision modifier too, so cloth and soft things land on them. It's all
+    Blender's data (the Physics tab on the desktop shows the same).
+  - **Simulate** (or B) plays the timeline from the start, every frame (the
+    simulation only steps frame by frame); **Reset** goes back to the start.
+    The **Simulation** sheet (More) has gravity, speed, the length (the
+    scene's frame range, which the caches follow), and **Keep run**, which
+    bakes what was just played (hands and all) so it plays back the same;
+    **Clear kept** lets it run again.
+  - **Spring bones**: touch a bone of the selected rig (or of the selected
+    mesh's rig) and give it a **Spring**; **Whole chain** gives the bones
+    below it the same one. A spring bone lags, overshoots and settles when its
+    parent moves, with stiffness, damping and gravity. It's simulated live in
+    VR (and while the timeline plays) on top of the bone's own pose, so keys,
+    Pose mode and the desktop still pose it. **Bake** keys the frame range
+    and turns those springs off; **Rest** puts them back on their pose.
+  - **Hands** (a toggle, or right stick click): the controller tips push
+    rigid bodies, cloth, soft things and spring bones. The trigger then
+    **grabs**: a rigid body follows your hand while held and flies on with
+    its speed when you let go (it starts the next run where it was); a spring
+    bone's tail follows your hand and swings when let go; or, with **Push /
+    Pull**, it's a force at your hand: the right trigger pulls things in, the
+    left pushes them away, harder the more you squeeze.
+
+  ![Rigid, Rigid with More open, Cloth](docs/physics_panels.png)
 - **Passthrough** toggle (Blender's own; needs a runtime that supports it).
-- **Hand panel** above the left controller: an icon rail for the seven modes,
+- **Hand panel** above the left controller: an icon rail for the eight modes,
   each mode's 3-5 most used controls up front and a **More** row for the rest;
   the selected object's settings, Settings (grid, navigation, view, reveal,
   tracking) and pickers open as a second level with a Back button. It shows
@@ -273,19 +308,19 @@ Meta Quest over OpenXR.
 
 ## Controls
 
-| Input | Sculpt mode | Model mode | Draw mode | Paint mode | Rig mode | Pose mode | Tools mode |
-|---|---|---|---|---|---|---|---|
-| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Bones: place the next joint; on a joint, carry on from it (click) or move it (drag). Weights: paint, or pick the touched bone | Grab a bone (FK / IK), or an object without a rig | Measure / aim the camera |
-| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Bones: delete the touched bone; in empty space, end the chain. Weights: the opposite brush | Same as right | Same as right |
-| Right trigger, pointing at the hand panel | Press buttons, drag sliders, step steppers (hold to repeat) | Same | Same | Same | Same | Same | Same |
-| Y (left) | Next mode (Sculpt, Model, Draw, Paint, Rig, Pose, Tools) | Same | Same | Same | Same | Same | Same |
-| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Bones: end the chain. Weights: undo the last weight stroke | Switch FK / IK | Remove the last measurement / next camera |
-| Left stick | Walk / fly (move) | Same | Same | Same | Same | Same | Same |
-| Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same | Same | Same |
-| Left stick click | Pin / unpin the hand panel | Same | Same | Same | Same | Same | Same |
-| Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Weights: next brush radius | Next IK chain length (1-4) | Same |
-| Right trigger on a motion path key | Drag the key | Same | Same | Same | Same | Same | Same |
-| Grip, A / X | Blender's stock VR navigation (unchanged) | Same | Same | Same | Same | Same | Same |
+| Input | Sculpt mode | Model mode | Draw mode | Paint mode | Rig mode | Pose mode | Physics mode | Tools mode |
+|---|---|---|---|---|---|---|---|---|
+| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Bones: place the next joint; on a joint, carry on from it (click) or move it (drag). Weights: paint, or pick the touched bone | Grab a bone (FK / IK), or an object without a rig | Select an object (hold to move it) or a bone of the selected rig. Hands on: grab and throw a body or a spring bone, or Push / Pull: pull | Measure / aim the camera |
+| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Bones: delete the touched bone; in empty space, end the chain. Weights: the opposite brush | Same as right | Same as right; Push / Pull: push | Same as right |
+| Right trigger, pointing at the hand panel | Press buttons, drag sliders, step steppers (hold to repeat) | Same | Same | Same | Same | Same | Same | Same |
+| Y (left) | Next mode (Sculpt, Model, Draw, Paint, Rig, Pose, Physics, Tools) | Same | Same | Same | Same | Same | Same | Same |
+| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Bones: end the chain. Weights: undo the last weight stroke | Switch FK / IK | Simulate / stop | Remove the last measurement / next camera |
+| Left stick | Walk / fly (move) | Same | Same | Same | Same | Same | Same | Same |
+| Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same | Same | Same | Same |
+| Left stick click | Pin / unpin the hand panel | Same | Same | Same | Same | Same | Same | Same |
+| Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Weights: next brush radius | Next IK chain length (1-4) | Hands on / off | Same |
+| Right trigger on a motion path key | Drag the key | Same | Same | Same | Same | Same | Same | Same |
+| Grip, A / X | Blender's stock VR navigation (unchanged) | Same | Same | Same | Same | Same | Same | Same |
 
 Pointing at the desktop screen (in any mode, unless the tip is touching
 something you're working on): right trigger = left mouse button, left
@@ -476,6 +511,33 @@ window, passthrough and tracking settings (including hiding the hand panel's
   its distance (same pixel, a little nearer, whatever the clip range);
   without that it z-fought with the mesh's own faces. B's undo
   keeps each stroke's previous weights per vertex.
+- **Physics mode** ([physics.py](vr_sculpt/physics.py)): objects are made rigid
+  with `rigidbody.object_add` / `object_remove` (an override, no area) and
+  cloth (Soft too) and colliders with their modifiers, so it's Blender's
+  own simulation. The simulation steps as the timeline plays, so Simulate
+  plays every frame (Sync: Play Every Frame). A grabbed rigid body is made
+  kinematic (Animated) and its world matrix set from the hand; Bullet keeps
+  the velocity of a kinematic body when it turns dynamic again, which is the
+  throw, and its own transform is put back so the next run starts the same.
+  The hand colliders are passive animated rigid bodies with a Collision
+  modifier ("VR Hand Collider L / R" in a "VR Physics" collection), moved to
+  the tips by the app timer; their spheres are real-size meshes (a rigid
+  body's shape is made once, so it can't come from the object's scale), and
+  they stay shown as unselectable wire spheres: a hidden object isn't
+  evaluated, so its shape comes out empty when the run is rebuilt. Push /
+  Pull sets the strength of a hidden force field at each hand. Spring bones
+  are our own: each one's tail is a point mass on a damped spring (0.5-8 Hz
+  by stiffness, critical damping at 1) toward where its pose puts it, stepped
+  at 240 Hz in real time by the app timer, kept at the bone's length, pushed
+  out of the hand spheres, and turned into the bone's basis with
+  `Bone.convert_local_to_pose` (parents first, as in Pose mode). What the
+  bone was posed at (its base) is told apart from what we wrote last, so
+  keys, Pose mode and the desktop pose it underneath; a settled spring isn't
+  written, so it costs the rig no evaluation. Springs are found through the
+  bones' stored settings (`bl_system_properties_get`): reading
+  `PoseBone.vr_spring` would give every bone it's asked of saved settings.
+  Bake reads the pose on every frame first, then simulates, then keys, so
+  its own keys don't feed back into the pose it reads.
 - **Paint mode** ([paint.py](vr_sculpt/paint.py)): `paint.image_paint`
   projects each dab along the 3D view, so for every dab the largest desktop
   3D view is pointed at the dab (from along the surface normal for Contact,
@@ -539,6 +601,40 @@ window, passthrough and tracking settings (including hiding the hand panel's
   `show_custom_overlays` is turned on at session start. Text is drawn in 3D
   with `blf` under a `gpu.matrix` transform; brush icons come from the brush
   asset previews.
+
+### What we learned about physics from Python (5.4.0 Alpha)
+
+Found with [tests/probe_physics.py](tests/probe_physics.py):
+
+- `rigidbody.object_add` works from a timer with an override of the object
+  and scene (it makes the rigid body world if there's none). Removing an
+  object from the world's collection doesn't remove its rigid body; the
+  operator does.
+- The original object's `matrix_world` follows the simulation (its own
+  location doesn't), so touching and grabbing see bodies where they are.
+- A body made kinematic, moved frame by frame and made dynamic again keeps
+  the velocity it was moved at.
+- A kinematic body moved between frames pushes the others, and a played run
+  with different input is simulated again rather than read back from the
+  cache.
+- A force field made with `object.forcefield_toggle` acts on rigid bodies but
+  not on cloth until its object is linked into the scene after the field is
+  made (the link rebuilds the relations). A hidden field still acts.
+- Cloth and soft body output is in object space; a soft body needs the start
+  frame evaluated before it steps.
+- The Soft Body modifier is too slow for this, and leaks: a 642 vertex ball
+  resting on a 20 cm thick table took 260 ms a frame (140 with everything
+  else in the test scene running, which took 5 ms) and in most runs sank
+  through it; through a 4 cm one it always did. The same ball as a cloth
+  with internal springs takes 2 ms a frame, stays on the table, and dropped
+  25 cm squashes to 70% of its height and springs back, so Soft is that.
+  The internal springs set how soft it is; `pressure_factor` made no
+  measurable difference next to them.
+- Things resting on a Mesh collision shape jitter and slide; the default
+  convex hull is steady.
+- `ptcache.bake_from_cache` keeps a played run (an override with the
+  `point_cache`); `rigidbody.bake_to_keyframes` needs a window.
+- A new cloth has none of the presets' values (shear stiffness 5, Cotton has 15).
 
 ### What we learned about asset previews (5.4.0 Alpha)
 
@@ -663,6 +759,10 @@ blender --background --factory-startup --python tests/test_rig.py
 blender --background --factory-startup --python tests/test_kit.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_physics.py
+```
+
 `test_kit.py` registers a temporary asset library and points My Kit at a
 temporary folder, so neither your preferences nor your kit are touched.
 Rebuild the starter kit (`vr_sculpt/assets/kit`) with:
@@ -689,6 +789,9 @@ overlay, the Model panel's pages and the Mark tool's edge highlights
 boolean solvers and how the finish stack shades). `stack_preview.py` draws
 the Stack page: the list, and the settings of a bevel, a Subdivision and
 the shading's group inputs.
+`physics_preview.py` sets up a body, a pinned curtain, a soft blob and a
+spring bone, draws the Physics pages (`physics_panels*.png`) and the scene
+with Hands on and a pull held (`physics_scene.png`).
 `rig_preview.py` builds a spine and mirrored arms with simulated presses
 (from a timer, no area), draws the Rig pages (`rig_panels*.png`), the Bones
 tool's overlay with the rubber band (`rig_bones.png`) and the heat map after
@@ -764,6 +867,22 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   weights changed on the desktop show after the next press. Mirror X for
   weights mirrors across the mesh's own X; for bones, across the rig's.
   Weights paints only bound meshes (Bind first).
+- Physics mode: cloth and soft things don't push rigid bodies (Blender's
+  simulations are one way), and hands can push but not grab them. Rigid
+  body constraints, fluids, particles and force field objects aren't on
+  the panel (set them on the desktop; they run and react the same). The
+  simulation runs on Blender's main thread between headset frames, so a
+  heavy one (dense cloth, many bodies, a desktop Soft Body) lowers the
+  headset's frame rate, and as Simulate plays every frame it also plays in
+  slow motion rather than skipping. Simulate sets the scene's playback to Play Every Frame. A run
+  replays from the cache only until something changes; Keep run bakes it.
+  The hand colliders show on the desktop as small wire spheres while Hands
+  is on (they're removed when it's off, in another mode, or after VR).
+  Spring bones are simulated in real time, not per frame, so a played
+  animation's springs differ a little between runs; Bake (no hands) is the
+  repeatable version, and a puppet take doesn't key them. A bone with a
+  spring ignores its constraints while the spring moves it, and Pin's Top
+  edge is the top as the mesh stands when you choose it.
 - Paint mode needs a desktop 3D view (it paints through it) and briefly moves
   that view for each dab. In Blender's own undo history every dab is a step;
   B in VR undoes whole strokes. Clone, Fill and Mask brushes aren't on the

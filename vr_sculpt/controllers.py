@@ -36,13 +36,13 @@ KEY_NAMES = {
 
 # What hints() needs besides the settings. Gathered by context_info() in VR; tests build it by hand.
 Info = namedtuple("Info", "ray_on_panel ray_on_desktop picker_open cut_target has_rig paint_ready native_brush "
-                          "primitive rig_bound kit_part",
-                  defaults=(False, False, False, False, False, True, "", "Cube", True, False))
+                          "primitive rig_bound kit_part playing",
+                  defaults=(False, False, False, False, False, True, "", "Cube", True, False, False))
 
 NATIVE_LABELS = {"Draw": "Draw", "Clay Strips": "Clay", "Smooth": "Smooth", "Inflate/Deflate": "Inflate",
                  "Crease Sharp": "Crease", "Flatten/Contrast": "Flatten"}
-NEXT_MODE = {'SCULPT': "Model", 'MODEL': "Draw", 'DRAW': "Paint", 'PAINT': "Rig", 'RIG': "Pose", 'POSE': "Tools",
-             'TOOLS': "Sculpt"}
+NEXT_MODE = {'SCULPT': "Model", 'MODEL': "Draw", 'DRAW': "Paint", 'PAINT': "Rig", 'RIG': "Pose", 'POSE': "Physics",
+             'PHYSICS': "Tools", 'TOOLS': "Sculpt"}
 WEIGHT_LABELS = {'ADD': "Add weight", 'SUBTRACT': "Subtract", 'SMOOTH': "Smooth"}
 
 
@@ -79,6 +79,8 @@ def hints(s, info):
         right['top'] = ("check", "End chain")
     elif mode == 'POSE':
         right['top'] = ("swap", "IK" if s.pose_tool == 'FK' else "FK")
+    elif mode == 'PHYSICS':
+        right['top'] = ("stop", "Stop") if info.playing else ("play", "Simulate")
     elif mode == 'TOOLS':
         right['top'] = ("chevron_right", "Next camera") if s.tool == 'CAMERA' else ("undo", "Undo measure")
     left['bottom'] = right['bottom'] = ("reset", "Reset view")
@@ -97,6 +99,8 @@ def hints(s, info):
         right['stick_click'] = ("plus", "Brush size")
     elif mode == 'POSE':
         right['stick_click'] = ("plus", "IK chain")
+    elif mode == 'PHYSICS':
+        right['stick_click'] = ("hands", "Hands off" if s.physics_hands else "Hands on")
 
     # Grips: Blender's own navigation grab.
     left['grip'] = right['grip'] = ("here", "Move world")
@@ -137,6 +141,10 @@ def _trigger(s, info):
         if s.rig_tool == 'BONES':
             return ("bones", "Place joint")
         return ("weights", WEIGHT_LABELS[s.weight_brush]) if info.rig_bound else None
+    if mode == 'PHYSICS':
+        if not s.physics_hands:
+            return ("object", "Select, move")
+        return ("force", "Pull") if s.physics_tool == 'FORCE' else ("throw", "Grab, throw")
     if mode == 'TOOLS':
         return ("camera", "Aim camera") if s.tool == 'CAMERA' else ("ruler", "Measure")
     return None
@@ -158,6 +166,8 @@ def _left_trigger(s, info, right):
         return ("eyedropper", "Pick 2nd color")
     if mode == 'RIG' and s.rig_tool == 'BONES':
         return ("trash", "Delete bone")
+    if mode == 'PHYSICS' and s.physics_hands and s.physics_tool == 'FORCE':
+        return ("force", "Push")
     if mode == 'RIG' and right is not None:
         from .rig import flip
         return ("weights", WEIGHT_LABELS[flip(s.weight_brush)])
@@ -166,7 +176,7 @@ def _left_trigger(s, info, right):
 
 def context_info(context, ss):
     """Info for hints() from the scene and the session."""
-    from . import (desktop, hardsurface, interactions, kit, menus, native, operators, paint, pose, presence,
+    from . import (anim, desktop, hardsurface, interactions, kit, menus, native, operators, paint, pose, presence,
                    primitives, rig)
     settings = context.scene.vr_sculpt
     right = operators.controller_pose(ss.controller_aim_location_get(context, 1),
@@ -187,6 +197,7 @@ def context_info(context, ss):
         primitive=primitives.label(settings.primitive),
         rig_bound=settings.mode == 'RIG' and rig.bound(rig.mesh(context), rig.target(context)),
         kit_part=kit.is_key(settings.primitive),
+        playing=settings.mode == 'PHYSICS' and anim.is_playing(context),
     )
 
 
