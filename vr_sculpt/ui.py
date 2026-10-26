@@ -1,6 +1,6 @@
 import bpy
 
-from . import actions, catalog, measure, native, operators, paint, physics, pose, primitives, puppet, rig
+from . import actions, catalog, controllers, measure, native, operators, paint, physics, pose, primitives, puppet, rig
 
 
 class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
@@ -271,6 +271,19 @@ class VIEW3D_PT_vr_extras(bpy.types.Panel):
         sub = col.column()
         sub.active = settings.own_controllers
         sub.prop(settings, "controller_hints")
+        row = sub.row(align=True)
+        if controllers.fetching():
+            row.label(text="Getting models...", icon='TIME')
+        else:
+            row.operator("vrsculpt.fetch_controllers", icon='IMPORT',
+                         text="Update From Runtime" if controllers.fetched() else "Get From Runtime")
+            if controllers.fetched():
+                row.operator("vrsculpt.forget_controllers", text="", icon='X')
+        message = controllers.fetch_message()
+        if message:
+            sub.label(text=message, icon='INFO')
+        elif not controllers.fetched():
+            sub.label(text="Drawing Meta's Quest Pro controllers")
 
         col = layout.column(heading="Tracking")
         col.prop(settings, "tracking", text="Objects")
@@ -334,7 +347,40 @@ class VRSCULPT_OT_choose_primitive(bpy.types.Operator):
         return {'RUNNING_MODAL'}
 
 
-classes = (VIEW3D_PT_vr_sculpt, VIEW3D_PT_vr_extras, VIEW3D_PT_vr_primitive, VRSCULPT_OT_choose_primitive)
+class VRSCULPT_OT_fetch_controllers(bpy.types.Operator):
+    """Get your controllers' models from the OpenXR runtime (SteamVR) and draw them in VR instead of the \
+Quest Pro ones. Wear the headset and hold both controllers: for a few seconds this becomes the running \
+VR app, closing any other one (SteamVR Home). Not during a VR session"""
+    bl_idname = "vrsculpt.fetch_controllers"
+    bl_label = "Get Controller Models"
+
+    @classmethod
+    def poll(cls, context):
+        return not controllers.fetching() and not operators.session_running(context)
+
+    def execute(self, context):
+        if not controllers.start_fetch():
+            self.report({'ERROR'}, "Couldn't start the model fetch")
+            return {'CANCELLED'}
+        return {'FINISHED'}
+
+
+class VRSCULPT_OT_forget_controllers(bpy.types.Operator):
+    """Forget the runtime's controller models and draw the Quest Pro ones again"""
+    bl_idname = "vrsculpt.forget_controllers"
+    bl_label = "Forget Controller Models"
+
+    @classmethod
+    def poll(cls, context):
+        return not controllers.fetching()
+
+    def execute(self, context):
+        controllers.forget_fetched()
+        return {'FINISHED'}
+
+
+classes = (VIEW3D_PT_vr_sculpt, VIEW3D_PT_vr_extras, VIEW3D_PT_vr_primitive, VRSCULPT_OT_choose_primitive,
+           VRSCULPT_OT_fetch_controllers, VRSCULPT_OT_forget_controllers)
 
 
 def register():
