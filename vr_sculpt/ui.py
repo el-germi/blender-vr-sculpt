@@ -254,6 +254,7 @@ class VIEW3D_PT_vr_extras(bpy.types.Panel):
         sub = col.column()
         sub.active = settings.nav_mode == 'WALK'
         sub.prop(settings, "nav_turn")
+        col.prop(settings, "nav_grab_turn")
 
         col = layout.column(heading="Camera")
         col.prop(settings, "show_new_camera", text="New Camera Button")

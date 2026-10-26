@@ -580,7 +580,10 @@ def test_controller_hints():
     s.nav_mode = 'WALK'
     check(label('left', 'stick') == "Walk" and label('right', 'stick') == "Turn", "Walk sticks")
     check(label('left', 'grip') == "Move world" and label('right', 'bottom') == "Reset view",
-          "grips and A / X: Blender's navigation")
+          "grips (our grab, Move by default) and A / X (Blender's reset)")
+    s.nav_grab_turn = 'TURN'
+    check(label('right', 'grip') == "Move, turn world", "Grip: Turn")
+    s.nav_grab_turn = 'OFF'
 
 
 class InputSS(SS):

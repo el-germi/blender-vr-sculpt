@@ -203,6 +203,17 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     nav_turn: FloatProperty(
         name="Snap Turn", description="Angle of one snap turn in Walk mode",
         default=0.5235988, min=0.0872665, max=1.5707963, subtype='ANGLE')
+    nav_grab_turn: EnumProperty(
+        name="Grip",
+        description="What holding the world with the grips does besides moving it (both grips also zoom)",
+        items=(
+            ('OFF', "Move", "The world only moves with the hand, like Blender's own grab"),
+            ('TURN', "Turn", "The world also turns with the wrist (or the line between both hands) about "
+                             "the vertical axis; the horizon stays level"),
+            ('FREE', "Free", "One hand turns the world every way the wrist does, tilting it too"),
+        ),
+        default='OFF',
+    )
     # Tracking objects.
     tracking: BoolProperty(
         name="Tracking Objects",

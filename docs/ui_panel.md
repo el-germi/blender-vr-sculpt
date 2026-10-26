@@ -114,7 +114,7 @@ or VR Extras > Controller Models).
   "Cut", "Pose IK", "Pick color", "Press" on the panel, "Click" on the desktop screen), B / Y
   ("Next brush", "Undo stroke", "IK", "Next: Model"), the sticks ("Walk" / "Fly", "Turn",
   "Scroll"), the stick clicks ("Pin panel", "Brush size", "IK chain"), A / X and the grips
-  (Blender's "Reset view" and "Move world"). The legend shows when you look at that hand, or
+  ("Reset view", Blender's, and "Move, turn world" / "Move world" by the Grip setting). The legend shows when you look at that hand, or
   hold it still for 1.2 s, and fades as soon as you press anything or move. **gear** > Hands >
   Hints turns them off.
 - The model sits on the grip pose; the brush tips, rings and the panel ray still come from the aim
@@ -136,6 +136,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Reveal mode (Wrist / Look / Always) | **gear** > Panel |
 | Hide the panel entirely | VR Authoring > Hand Panel > Show (desktop) |
 | Walk / Fly, move speed | **gear** > Move, Speed |
+| What the grips do (Move / Turn / Free) | **gear** > Grip |
 | 3D grid, snap to grid, grid size | **gear** > Grid Show / Snap, Grid size |
 | Timeline strip on / off | **gear** > Timeline |
 | Passthrough | **gear** > Passthrough |

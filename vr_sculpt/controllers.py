@@ -109,8 +109,8 @@ def hints(s, info):
     elif mode == 'PHYSICS':
         right['stick_click'] = ("hands", "Hands off" if s.physics_hands else "Hands on")
 
-    # Grips: Blender's own navigation grab.
-    left['grip'] = right['grip'] = ("here", "Move world")
+    # Grips: our grab (navigation.py).
+    left['grip'] = right['grip'] = ("here", "Move world" if s.nav_grab_turn == 'OFF' else "Move, turn world")
     if getattr(s, "left_handed", False):
         # The roles above are the right-handed ones; the buttons and sticks swap with the hands.
         left, right = right, left

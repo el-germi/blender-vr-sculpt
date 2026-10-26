@@ -271,6 +271,11 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   Walk keeps you level, follows floors, slopes and stairs under you (but not
   tables or walls), and snap-turns. Fly goes where you look, with up/down and
   smooth turning. The speed is in hand space, so it scales with the world.
+- **Grip grab that can turn the world.** Hold a grip and the world follows
+  that hand. **Grip: Move** (the default) only moves it, and both grips zoom,
+  like Blender's own grab. **Turn** also turns it with your wrist about the
+  vertical axis, so the horizon stays level, and both grips turn it with the
+  line between your hands; **Free** lets one hand tilt it too.
 - **Tracking objects**: "VR Headset", "VR Hand Left" and "VR Hand Right"
   empties in a "VR Tracking" collection follow the headset and controllers,
   with the trigger, grip and stick values as custom properties, for parenting
@@ -395,7 +400,8 @@ offset and display options; **VR Extras** has the grid, navigation, hands
 | Left stick click | Pin / unpin the hand panel | Same | Same | Same | Same | Same | Same | Same |
 | Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Weights: next brush radius | Next IK chain length (1-4) | Hands on / off | Same |
 | Right trigger on a motion path key | Drag the key | Same | Same | Same | Same | Same | Same | Same |
-| Grip, A / X | Blender's stock VR navigation (unchanged) | Same | Same | Same | Same | Same | Same | Same |
+| Grip | Hold the world: move, turn (Grip setting); both grips also zoom | Same | Same | Same | Same | Same | Same | Same |
+| A / X | Blender's stock VR navigation reset (unchanged) | Same | Same | Same | Same | Same | Same | Same |
 
 Pointing at the desktop screen (in any mode, unless the tip is touching
 something you're working on): right trigger = left mouse button, left
@@ -696,7 +702,13 @@ With Triggers" is on. The setting applies when the VR session starts.
   Walk / Fly is read live instead of being baked into the action map. Walk
   casts a ray down from the headset and follows changes in the surface
   height (the VR tracking origin isn't the real floor, so it keeps your
-  height rather than putting you on the surface).
+  height rather than putting you on the surface). The stock `nav_grab` (the
+  grips) runs `vrsculpt.grab`: Blender's `wm.xr_navigation_grab` never
+  turns the view in practice, whatever its lock options say. One operator
+  polls both grips; it works in tracking space against the navigation and
+  hand poses from when the set of held grips last changed, and skips a step
+  when the poses haven't been re-read since its last move (they'd still
+  carry the old navigation).
 - **Tracking objects** ([tracking.py](vr_sculpt/tracking.py)): an app timer
   ([live.py](vr_sculpt/live.py)) sets the empties' matrices from the session
   state at 90 Hz and reads the input values with `action_state_get`; custom
