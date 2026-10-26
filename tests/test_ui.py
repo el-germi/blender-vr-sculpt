@@ -17,7 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import vr_sculpt  # noqa: E402
-from vr_sculpt import (actions, gfx, hud, interactions, menus, operators, presence, primitives,  # noqa: E402
+from vr_sculpt import (actions, draw, gfx, hud, interactions, menus, operators, presence, primitives,  # noqa: E402
                        vr_ui)
 
 sys.path.insert(0, os.path.join(ROOT, "tests"))
@@ -419,6 +419,55 @@ def test_presence():
     menus.set_mode(ctx, 'SCULPT')
 
 
+def test_held_dim():
+    print("== the panel dims while the off hand holds something")
+    ctx = bpy.context
+    s = ctx.scene.vr_sculpt
+    ss = SS()
+    s.show_panel, s.panel_pin = True, True
+    presence.reset()
+    settle(ctx, ss, 0.0, 1.0)
+    check(presence.dim() == 1.0, "nothing held: full opacity")
+    operators.active_hands.add(actions.off_index(ctx))
+    a = settle(ctx, ss, 1.0, 2.0)
+    check(abs(presence.dim() - presence.HELD_ALPHA) < 1e-6 and presence._state["shown"] and a > 0.99,
+          f"off-hand trigger held: dims to {presence.HELD_ALPHA}, still shown ({presence.dim():.3f})")
+    operators.active_hands.clear()
+    settle(ctx, ss, 2.0, 3.0)
+    check(presence.dim() == 1.0, "let go: back to full")
+
+    # Through draw.py (which asks presence several times a frame), whichever controller is the off hand.
+    seen = []
+    clock = [0.0]
+    saved = vr_ui.draw_panel, vr_ui.draw_ray, vr_ui.draw_ghost, presence.time
+    vr_ui.draw_panel = lambda *a, alpha=1.0, **k: seen.append(alpha)
+    vr_ui.draw_ray = vr_ui.draw_ghost = lambda *a, **k: None
+    presence.time = type("Clock", (), {"monotonic": staticmethod(lambda: clock[0])})
+    fctx = tm.FakeContext(tm.FakeWM(ss))
+    try:
+        for left_handed in (False, True):
+            s.left_handed = left_handed
+            off, main = actions.off_index(ctx), actions.main_index(ctx)
+            presence.reset()
+            for hands, dimmed, what in (({main}, False, "main hand held"), ({off}, True, "off hand held")):
+                operators.active_hands.clear()
+                operators.active_hands.update(hands)
+                for _i in range(50):
+                    clock[0] += 0.02
+                    seen.clear()
+                    draw._draw_panel(fctx, ss, s, False)
+                drawn = max(seen) if seen else None
+                want = presence.HELD_ALPHA if dimmed else 1.0
+                check(drawn is not None and abs(drawn - want) < 0.01,
+                      f"{'left' if left_handed else 'right'}-handed, {what}: panel drawn at {drawn}")
+    finally:
+        vr_ui.draw_panel, vr_ui.draw_ray, vr_ui.draw_ghost, presence.time = saved
+        operators.active_hands.clear()
+        s.left_handed = False
+        s.panel_pin = False
+        presence.reset()
+
+
 def test_ghost():
     print("== the hidden panel's ghost")
     m = vr_ui.panel_matrix(Vector((0, 0, 1)), Vector((0, -1, 1)), 1.0)
@@ -531,7 +580,10 @@ def test_controller_hints():
     s.nav_mode = 'WALK'
     check(label('left', 'stick') == "Walk" and label('right', 'stick') == "Turn", "Walk sticks")
     check(label('left', 'grip') == "Move world" and label('right', 'bottom') == "Reset view",
-          "grips and A / X: Blender's navigation")
+          "grips (our grab, Move by default) and A / X (Blender's reset)")
+    s.nav_grab_turn = 'TURN'
+    check(label('right', 'grip') == "Move, turn world", "Grip: Turn")
+    s.nav_grab_turn = 'OFF'
 
 
 class InputSS(SS):
@@ -1073,7 +1125,7 @@ def main():
     try:
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o)
-        for t in (test_disclosure, test_sheets, test_layout, test_stepper_and_detents, test_presence, test_ghost,
+        for t in (test_disclosure, test_sheets, test_layout, test_stepper_and_detents, test_presence, test_held_dim, test_ghost,
                   test_controller_hints, test_controller_inputs, test_controller_fetched, test_controller_visibility,
                   test_status,
                   test_dyntopo, test_left_handed):

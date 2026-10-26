@@ -54,7 +54,8 @@ staying the fastest way to reach *everything*?
 7. **Out of the way.** The panel shows when you check your left wrist like a
    watch and look at it, and fades when you turn it back. A small ghost
    (the current mode's icon) marks where it is; pointing at the ghost brings
-   it back. Pin keeps it. The big brush card is gone: a slim status line
+   it back. Pin keeps it. While the left trigger is held, it drops to 20%
+   opacity (still pressable), so it doesn't hide what that hand works on. The big brush card is gone: a slim status line
    above the right hand carries the mode, tool and size.
 
 ## Anatomy
@@ -113,7 +114,7 @@ or VR Extras > Controller Models).
   "Cut", "Pose IK", "Pick color", "Press" on the panel, "Click" on the desktop screen), B / Y
   ("Next brush", "Undo stroke", "IK", "Next: Model"), the sticks ("Walk" / "Fly", "Turn",
   "Scroll"), the stick clicks ("Pin panel", "Brush size", "IK chain"), A / X and the grips
-  (Blender's "Reset view" and "Move world"). The legend shows when you look at that hand, or
+  ("Reset view", Blender's, and "Move, turn world" / "Move world" by the Grip setting). The legend shows when you look at that hand, or
   hold it still for 1.2 s, and fades as soon as you press anything or move. **gear** > Hands >
   Hints turns them off.
 - The model sits on the grip pose; the brush tips, rings and the panel ray still come from the aim
@@ -135,6 +136,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Reveal mode (Wrist / Look / Always) | **gear** > Panel |
 | Hide the panel entirely | VR Authoring > Hand Panel > Show (desktop) |
 | Walk / Fly, move speed | **gear** > Move, Speed |
+| What the grips do (Move / Turn / Free) | **gear** > Grip |
 | 3D grid, snap to grid, grid size | **gear** > Grid Show / Snap, Grid size |
 | Timeline strip on / off | **gear** > Timeline |
 | Passthrough | **gear** > Passthrough |
@@ -394,7 +396,8 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 - [gfx.py](../vr_sculpt/gfx.py): the triangle batch and the 75 vector icons.
 - [menus.py](../vr_sculpt/menus.py): the information architecture.
 - [presence.py](../vr_sculpt/presence.py): the reveal rule. Thresholds: wrist
-  55 degrees on / 70 off, gaze 32 on / 48 off, linger 0.6 s, fade 70 / 140 ms.
+  55 degrees on / 70 off, gaze 32 on / 48 off, linger 0.6 s, fade 70 / 140 ms,
+  20% opacity while the off-hand trigger is held.
 - [hud.py](../vr_sculpt/hud.py): the tip status.
 - [controllers.py](../vr_sculpt/controllers.py): the controller models (one batch per moving part,
   a small textured shader), reading the buttons

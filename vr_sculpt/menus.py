@@ -1533,6 +1533,9 @@ def _settings_rows(context, settings):
             lambda v: setattr(settings, "nav_mode", v.upper()), icons={'walk': "walk", 'fly': "fly"}),
         [vr_ui.slider("nav_speed", "Speed", settings.nav_speed, 0.2, 6.0,
                       lambda v: setattr(settings, "nav_speed", v), fmt=lambda v: f"{v:.1f} m/s")],
+        [vr_ui.label("Grip", fixed=LABEL_W)] + _segments(
+            "grab_", "grab", (('off', "Move"), ('turn', "Turn"), ('free', "Free")), settings.nav_grab_turn.lower(),
+            lambda v: setattr(settings, "nav_grab_turn", v.upper())),
         [vr_ui.label("Grid", fixed=LABEL_W),
          vr_ui.toggle("grid_show", "Show", settings.grid_show, _toggle(settings, "grid_show"), icon="grid"),
          vr_ui.toggle("grid_snap", "Snap", settings.grid_snap, _toggle(settings, "grid_snap"), icon="magnet")],

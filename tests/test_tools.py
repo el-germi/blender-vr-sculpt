@@ -346,6 +346,104 @@ def test_navigation():
             bpy.data.objects.remove(o)
 
 
+def about(m, pivot, angle, axis='Z'):
+    """m turned by angle about an axis through pivot (tracking space)."""
+    return Matrix.Translation(pivot) @ Matrix.Rotation(angle, 4, axis) @ Matrix.Translation(-pivot) @ m
+
+
+def test_grab():
+    print("== grip grab (navigation.Grab)")
+    ctx = bpy.context
+    settings = ctx.scene.vr_sculpt
+
+    def read(ss, hands):
+        return {i: (ss.controller_grip_location_get(ctx, i).copy(), ss.controller_grip_rotation_get(ctx, i).copy())
+                for i in hands}
+
+    def up(ss):
+        return Quaternion(ss.navigation_rotation) @ Vector((0, 0, 1))
+
+    def yaw(ss):
+        return math.degrees(navigation.twist_z(Quaternion(ss.navigation_rotation)))
+
+    for how in ('OFF', 'TURN', 'FREE'):
+        settings.nav_grab_turn = how
+        ss = NavSession()
+        ss.navigation_location = Vector((2.0, -1.0, 0.5))
+        g = navigation.Grab()
+        g.step(ss, settings, read(ss, {1}))
+        held = ss.controller_grip_location_get(ctx, 1).copy()
+        p = ss.hands[1].translation.copy()
+        ss.hands[1] = Matrix.Translation((0.15, -0.1, 0.05)) @ ss.hands[1]
+        g.step(ss, settings, read(ss, {1}))
+        check(close(ss.controller_grip_location_get(ctx, 1), held), f"{how}: moving the hand carries the world")
+        p = ss.hands[1].translation.copy()
+        ss.hands[1] = about(ss.hands[1], p, math.radians(30))
+        g.step(ss, settings, read(ss, {1}))
+        want = 0.0 if how == 'OFF' else -30.0
+        check(close(ss.controller_grip_location_get(ctx, 1), held) and abs(yaw(ss) - want) < 1e-3,
+              f"{how}: turning the wrist 30 degrees about the vertical turns the world {abs(want):.0f} ({yaw(ss):.2f})")
+        ss.hands[1] = about(ss.hands[1], p, math.radians(40), 'X')
+        g.step(ss, settings, read(ss, {1}))
+        tilt = math.degrees(up(ss).angle(Vector((0, 0, 1))))
+        want = 40.0 if how == 'FREE' else 0.0
+        check(close(ss.controller_grip_location_get(ctx, 1), held) and abs(tilt - want) < 1e-3,
+              f"{how}: tipping the wrist 40 degrees tilts the world {want:.0f} ({tilt:.2f})")
+
+    # Both hands: zoom with their distance, turn with the line between them.
+    for how in ('OFF', 'TURN'):
+        settings.nav_grab_turn = how
+        ss = NavSession()
+        g = navigation.Grab()
+        g.step(ss, settings, read(ss, {0, 1}))
+        mid = (ss.controller_grip_location_get(ctx, 0) + ss.controller_grip_location_get(ctx, 1)) / 2
+        a, b = ss.hands[0].translation, ss.hands[1].translation
+        c = (a + b) / 2
+        ss.hands[0] = Matrix.Translation(a - c) @ ss.hands[0]
+        ss.hands[1] = Matrix.Translation(b - c) @ ss.hands[1]
+        g.step(ss, settings, read(ss, {0, 1}))
+        now = (ss.controller_grip_location_get(ctx, 0) + ss.controller_grip_location_get(ctx, 1)) / 2
+        check(abs(ss.navigation_scale - 0.5) < 1e-6 and close(now, mid),
+              f"{how}: hands twice as far apart: the world twice as big, around them ({ss.navigation_scale:.3f})")
+        for i in (0, 1):
+            ss.hands[i] = about(ss.hands[i], c, math.radians(90))
+        g.step(ss, settings, read(ss, {0, 1}))
+        want = 0.0 if how == 'OFF' else -90.0
+        check(abs(yaw(ss) - want) < 1e-3 and abs(ss.navigation_scale - 0.5) < 1e-6,
+              f"{how}: turning both hands 90 degrees turns the world {abs(want):.0f} ({yaw(ss):.2f})")
+        # Letting go of one: no jump, and the other carries on alone.
+        before = navigation.navigation_matrix(ss).copy()
+        g.step(ss, settings, read(ss, {1}))
+        check(all(close(r0, r1) for r0, r1 in zip(before, navigation.navigation_matrix(ss))),
+              f"{how}: letting go of one grip doesn't move the world")
+        held = ss.controller_grip_location_get(ctx, 1).copy()
+        ss.hands[1] = Matrix.Translation((0.0, 0.2, 0.0)) @ ss.hands[1]
+        g.step(ss, settings, read(ss, {1}))
+        check(close(ss.controller_grip_location_get(ctx, 1), held) and abs(ss.navigation_scale - 0.5) < 1e-6,
+              f"{how}: the other hand goes on moving it, at the same scale")
+
+    # Poses read before the last move (no new tracking yet) don't move it again.
+    settings.nav_grab_turn = 'TURN'
+    ss = NavSession()
+    g = navigation.Grab()
+    g.step(ss, settings, read(ss, {0}))
+    ss.hands[0] = Matrix.Translation((0.1, 0.0, 0.0)) @ ss.hands[0]
+    stale = read(ss, {0})
+    check(g.step(ss, settings, stale), "a fresh pose moves the world")
+    moved = ss.navigation_location.copy()
+    check(not g.step(ss, settings, stale) and close(ss.navigation_location, moved), "the same pose again: no move")
+
+    # The operator follows both grips' states, plus the press that started it.
+    ss = NavSession()
+    op = type("G", (), {"held": navigation.VRSCULPT_OT_grab.held, "threshold": 0.3, "first": 1})()
+    ss.values[(navigation.GRAB_ACTION, actions.HANDS[0])] = 0.8
+    check(op.held(ctx, ss) == {0, 1}, "held: the other grip, and the one that started it")
+    check(op.held(ctx, ss) == {0}, "then only what reads as held")
+    ss.values.clear()
+    check(op.held(ctx, ss) == set(), "none held: done")
+    settings.nav_grab_turn = 'OFF'
+
+
 def test_tracking():
     print("== tracking objects")
     ctx = bpy.context
@@ -588,11 +686,15 @@ def test_tools_page():
     widgets, height = menus.layout(ctx)
     ids = {w.id for w in widgets}
     need = {"back", "grid_show", "grid_snap", "show_desktop", "passthrough", "show_timeline", "tracking",
-            "tracking_record", "nav_walk", "nav_fly", "nav_speed", "reveal_wrist", "reveal_look", "reveal_always"}
+            "tracking_record", "nav_walk", "nav_fly", "nav_speed", "grab_off", "grab_turn", "grab_free",
+            "reveal_wrist", "reveal_look", "reveal_always"}
     check(need <= ids, f"Settings has the rest (missing {sorted(need - ids)})")
     check(height < 0.3, f"Settings: panel height {height:.3f} m")
     vr_ui.find(widgets, "nav_fly").on_press()
     check(settings.nav_mode == 'FLY', "Fly button")
+    vr_ui.find(widgets, "grab_free").on_press()
+    check(settings.nav_grab_turn == 'FREE', "Grip: Free button")
+    settings.nav_grab_turn = 'OFF'
     vr_ui.find(widgets, "grid_show").on_press()
     check(settings.grid_show, "Grid button")
     xs = ctx.window_manager.xr_session_settings
@@ -646,7 +748,7 @@ def test_tools_page():
 def main():
     vr_sculpt.register()
     try:
-        for t in (test_grid, test_symmetry, test_measure, test_camera, test_navigation, test_tracking,
+        for t in (test_grid, test_symmetry, test_measure, test_camera, test_navigation, test_grab, test_tracking,
                   test_desktop_screen, test_desktop_input, test_tools_page):
             try:
                 t()

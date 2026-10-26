@@ -272,14 +272,15 @@ def _draw_panel(context, ss, settings, xr):
     hover = vr_ui.hit_test(widgets, *hit) if hit is not None and shown else None
     if xr:
         interactions.note_hover(context, ss, hover.id if hover else None)
+    faded = alpha * presence.dim()  # see-through while the off hand holds something
     for matrix, panel_widgets, height, width in frames:
         pointer = hit if hit is not None and shown and matrix is hit_matrix else None
         vr_ui.draw_panel(vr_ui.lift(matrix, alpha), panel_widgets, height, hover.id if hover else None,
-                         interactions.pressed_id, width=width, alpha=alpha, pointer=pointer)
+                         interactions.pressed_id, width=width, alpha=faded, pointer=pointer)
     if hit is not None and shown:
         vr_ui.draw_ray(aim.translation, hit_matrix @ Vector((hit[0], hit[1], 0.0)), True)
     camera_tool = settings.mode == 'TOOLS' and settings.tool == 'CAMERA'
-    if xr and settings.camera_preview and context.scene.camera is not None and alpha > 0.5 and not camera_tool:
+    if xr and settings.camera_preview and context.scene.camera is not None and faded > 0.5 and not camera_tool:
         # Pinned to the left of the hand panel.
         width = camera.PREVIEW_WIDTH
         camera.draw_preview(frames[0][0], context.scene, width, x=-vr_ui.WIDTH / 2 - 0.006 - width)
