@@ -375,6 +375,8 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   when you turn your left wrist toward your face, like checking a watch, and
   fades when you turn it back; **Pin** (the pin icon, or a left stick click)
   keeps it shown. Point at it with the right controller and pull the trigger.
+  While the left trigger holds something (a grab, an inverted stroke), the
+  panel drops to 20% opacity so you can see what that hand is doing.
   The full map of where everything is: [docs/ui_panel.md](docs/ui_panel.md).
 
 ![The hand panel in every mode, with More closed and open](docs/ui_panel_modes.png)

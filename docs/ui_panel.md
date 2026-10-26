@@ -54,7 +54,8 @@ staying the fastest way to reach *everything*?
 7. **Out of the way.** The panel shows when you check your left wrist like a
    watch and look at it, and fades when you turn it back. A small ghost
    (the current mode's icon) marks where it is; pointing at the ghost brings
-   it back. Pin keeps it. The big brush card is gone: a slim status line
+   it back. Pin keeps it. While the left trigger is held, it drops to 20%
+   opacity (still pressable), so it doesn't hide what that hand works on. The big brush card is gone: a slim status line
    above the right hand carries the mode, tool and size.
 
 ## Anatomy
@@ -394,7 +395,8 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 - [gfx.py](../vr_sculpt/gfx.py): the triangle batch and the 75 vector icons.
 - [menus.py](../vr_sculpt/menus.py): the information architecture.
 - [presence.py](../vr_sculpt/presence.py): the reveal rule. Thresholds: wrist
-  55 degrees on / 70 off, gaze 32 on / 48 off, linger 0.6 s, fade 70 / 140 ms.
+  55 degrees on / 70 off, gaze 32 on / 48 off, linger 0.6 s, fade 70 / 140 ms,
+  20% opacity while the off-hand trigger is held.
 - [hud.py](../vr_sculpt/hud.py): the tip status.
 - [controllers.py](../vr_sculpt/controllers.py): the controller models (one batch per moving part,
   a small textured shader), reading the buttons

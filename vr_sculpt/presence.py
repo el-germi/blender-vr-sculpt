@@ -9,6 +9,9 @@ is the left one, or the right one with Left Handed on (actions.main_index).
 
 Reveal modes (Settings > Reveal): WRIST (the watch check), LOOK (just look at the off hand) and
 ALWAYS (always shown, like before).
+
+While the off-hand trigger holds something (a grab, an inverted stroke, a selection...), the panel
+dims to HELD_ALPHA so you can see what that hand is doing behind it; it stays shown and pressable.
 """
 
 import math
@@ -25,8 +28,9 @@ GAZE_OFF = math.cos(math.radians(48))
 LINGER = 0.6  # seconds the panel stays after the reveal ends
 FADE_IN = 0.07  # time constants, seconds
 FADE_OUT = 0.14
+HELD_ALPHA = 0.2  # the panel's opacity while the off hand holds something
 
-_state = {"shown": False, "wrist": False, "gaze": False, "alpha": 0.0, "until": 0.0, "time": None}
+_state = {"shown": False, "wrist": False, "gaze": False, "alpha": 0.0, "dim": 1.0, "until": 0.0, "time": None}
 
 
 def wrist_turned(rot, hand, head, was=False, side=-1.0):
@@ -64,11 +68,14 @@ def rule(settings, wrist, gaze):
 
 def update(context, ss, using=False, now=None):
     """Advance the show / hide state and the fade; returns the panel's alpha. using: the main
-    controller points at the panel or its ghost, or holds one of its widgets."""
+    controller points at the panel or its ghost, or holds one of its widgets. A held off-hand
+    trigger dims the panel too (dim(); the returned alpha doesn't include it)."""
+    from . import operators  # operators imports this module
     settings = context.scene.vr_sculpt
     now = time.monotonic() if now is None else now
     s = _state
     off = actions.off_index(context)
+    held = off in operators.active_hands
     hand = Vector(ss.controller_grip_location_get(context, off))
     head = Vector(ss.viewer_pose_location)
     head_rot = getattr(ss, "viewer_pose_rotation", None)
@@ -90,6 +97,10 @@ def update(context, ss, using=False, now=None):
     s["alpha"] = target + (s["alpha"] - target) * math.exp(-dt / (FADE_IN if shown else FADE_OUT))
     if abs(s["alpha"] - target) < 0.004:
         s["alpha"] = target
+    target = HELD_ALPHA if held else 1.0
+    s["dim"] = target + (s["dim"] - target) * math.exp(-dt / (FADE_OUT if held else FADE_IN))
+    if abs(s["dim"] - target) < 0.004:
+        s["dim"] = target
     s["time"] = now
     return s["alpha"]
 
@@ -104,8 +115,13 @@ def alpha():
     return _state["alpha"]
 
 
+def dim():
+    """The opacity on top of alpha(): HELD_ALPHA while the off hand holds something, else 1."""
+    return _state["dim"]
+
+
 def reset():
-    _state.update(shown=False, wrist=False, gaze=False, alpha=0.0, until=0.0, time=None)
+    _state.update(shown=False, wrist=False, gaze=False, alpha=0.0, dim=1.0, until=0.0, time=None)
 
 
 def toggle_pin(context):
