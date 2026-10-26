@@ -10,7 +10,7 @@ import time
 import bpy
 import gpu
 from gpu_extras.batch import batch_for_shader
-from mathutils import Matrix, Vector
+from mathutils import Matrix
 
 from . import hud, native
 

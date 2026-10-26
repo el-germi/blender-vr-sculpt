@@ -63,12 +63,14 @@ def rebuild(obj):
     prim = obj.vr_prim
     if prim.kind not in {'CUBE', 'CYLINDER'} or obj.type != 'MESH':
         return
-    from . import shading
+    from . import shading, uv
     marks = shading.save_marks(obj.data)  # Hard / soft edges survive a resize (same edges).
+    uvs = uv.save(obj.data)  # So do seams and unwrapped UVs.
     bm = build_bmesh(prim)
     bm.to_mesh(obj.data)
     bm.free()
     shading.restore_marks(obj.data, marks)
+    uv.restore(obj.data, uvs)
     obj.data.update()
 
 

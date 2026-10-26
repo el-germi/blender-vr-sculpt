@@ -477,7 +477,7 @@ def test_desktop_input():
             return target
 
         aim_at(-w / 2 + 0.25 * w, 0.75 * h)  # a quarter in, three quarters up
-        kind, uv, _p = desktop.hit(ctx, ss, *desktop._right_ray(ctx, ss))
+        kind, uv, _p = desktop.hit(ctx, ss, *desktop._main_ray(ctx, ss))
         check(kind == 'content' and close(uv, (0.25, 0.75)), f"ray hits the content at window fractions ({uv})")
         desktop.hover(ctx, ss)
         check(fake.cursor == (100 + 400, 50 + 225), f"hover moves the cursor to that pixel ({fake.cursor})")
@@ -505,7 +505,7 @@ def test_desktop_input():
         handler.finish(ctx)
 
         fake.log.clear()
-        op = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_brush.execute, "left_hand": False,
+        op = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_brush.execute, "off_hand": False,
                             "report": lambda *a: None})()
         op.execute(c)
         check(("button", "RIGHT", True) in fake.log and ("button", "RIGHT", False) in fake.log,
@@ -616,7 +616,7 @@ def test_tools_page():
     # B in Tools mode: removes the last measurement / switches camera.
     measure.add(ctx.scene, (0, 0, 0), (1, 0, 0))
     measure.add(ctx.scene, (0, 0, 0), (2, 0, 0))
-    op = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_brush.execute, "left_hand": False,
+    op = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_brush.execute, "off_hand": False,
                         "report": lambda *a: None})()
     op.execute(ctx)
     check(len(measure.stored(ctx.scene)) == 1, "B removes the last measurement")
@@ -624,7 +624,7 @@ def test_tools_page():
     cam = ctx.scene.camera
     op.execute(ctx)
     check(ctx.scene.camera != cam, "B switches to the next camera")
-    op.left_hand = True
+    op.off_hand = True
     op.execute(ctx)
     check(settings.mode == 'SCULPT', "Y after Tools goes back to Sculpt")
     measure.clear(ctx.scene)

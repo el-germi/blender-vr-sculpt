@@ -12,7 +12,7 @@ bring flat faces into a cut), and its Ignore Sharpness, which fixes that, also d
 sharp.
 
 Marks are edge attributes on the mesh: Blender's own "sharp_edge" (Mark Sharp) for hard, and
-"vrs_soft" for soft. The Mark tool paints them with the tip: right hand marks, left hand clears.
+"vrs_soft" for soft. The Mark tool paints them with the tip: the main hand marks, the off hand clears.
 They're kept when a primitive is rebuilt with the same topology (resizing it); changing its
 segments or subdivisions drops them.
 """

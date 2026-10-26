@@ -161,7 +161,7 @@ def test_draw_and_undo():
     hold(ctx, ss, 0, path((0, 0.5, 1), (0.2, 0.6, 1.2)))
     check(len([o for o in bpy.data.objects if strokes.is_stroke(o)]) == 2, "left hand draws too")
     b = tm.harness()  # not needed; B is the cycle_brush operator:
-    operators.VRSCULPT_OT_cycle_brush.execute(type("Op", (), {"left_hand": False, "report": lambda *a: None})(),
+    operators.VRSCULPT_OT_cycle_brush.execute(type("Op", (), {"off_hand": False, "report": lambda *a: None})(),
                                               bpy.context)
     left = [o for o in bpy.data.objects if strokes.is_stroke(o)]
     check(len(left) == 1 and left[0] == obj, "B (right) deletes the most recent stroke")

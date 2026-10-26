@@ -29,9 +29,9 @@ BRUSHES = ("Paint Hard", "Paint Soft", "Airbrush", "Blur", "Smear", "Erase Soft"
 SHORT = {"Paint Hard": "Hard", "Paint Soft": "Soft", "Airbrush": "Airbrush", "Blur": "Blur", "Smear": "Smear",
          "Erase Soft": "Erase"}
 INFO = {
-    "Paint Hard": "Solid color with a crisp edge. Left hand: second color",
-    "Paint Soft": "Solid color with a soft edge. Left hand: second color",
-    "Airbrush": "Builds up while you hold still. Left hand: second color",
+    "Paint Hard": "Solid color with a crisp edge. Other hand: second color",
+    "Paint Soft": "Solid color with a soft edge. Other hand: second color",
+    "Airbrush": "Builds up while you hold still. Other hand: second color",
     "Blur": "Softens the texture under the brush",
     "Smear": "Drags the texture's colors along your stroke",
     "Erase Soft": "Erases to transparent (needs an image with alpha)",

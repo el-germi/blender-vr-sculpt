@@ -2,7 +2,7 @@
 
 The stock fly actions (left stick: forward/back/left/right, right stick: up/down/turn) are
 rebound to vrsculpt.navigate when the session starts (actions.py), so the mode is read live
-instead of being baked into the action map.
+instead of being baked into the action map. Left Handed swaps the sticks' jobs (SWAPPED).
 
 Walk: the left stick moves on the horizontal plane and the floor follows the scene's surfaces
 under you (stairs, slopes), the right stick snap-turns. Fly: the left stick flies where you
@@ -30,6 +30,10 @@ ACTIONS = {
 }
 
 SCROLL_ACTIONS = ("fly_up", "fly_down", "fly_turnleft", "fly_turnright")  # the right stick
+# Left Handed: each stick does the other's job (the bindings stay; the actions read swapped).
+SWAPPED = {"fly_forward": "fly_up", "fly_back": "fly_down", "fly_left": "fly_turnleft",
+           "fly_right": "fly_turnright"}
+SWAPPED.update({v: k for k, v in SWAPPED.items()})
 SCROLL_RATE = 12.0  # wheel notches per second at full tilt, over the desktop screen
 TURN_SPEED = math.radians(90.0)  # Fly: radians per second at full tilt
 DEAD_ZONE = 0.3  # stick values below this count as zero (the bindings' threshold)
@@ -146,16 +150,17 @@ class VRSCULPT_OT_navigate(bpy.types.Operator):
         if xr is None or xr.action not in ACTIONS:
             return {'CANCELLED'}
         self.action, self.hand = xr.action, xr.user_path
-        self.kind, self.x, self.y = ACTIONS[xr.action]
+        settings = context.scene.vr_sculpt
+        role = SWAPPED[xr.action] if settings.left_handed else xr.action
+        self.kind, self.x, self.y = ACTIONS[role]
         self.value = xr.state[0]
         self.last = time.perf_counter()
-        settings = context.scene.vr_sculpt
         ss = context.window_manager.xr_session_state
         self.floor = FloorFollower(context, ss) if self.kind == 'MOVE' and settings.nav_mode == 'WALK' else None
         from . import desktop
-        if xr.action in SCROLL_ACTIONS and ss is not None and desktop.pointing_at_content(context, ss):
-            # Right stick while pointing at the desktop screen: the mouse wheel.
-            self.kind = 'SCROLL' if xr.action in ("fly_up", "fly_down") else 'HOLD'
+        if role in SCROLL_ACTIONS and ss is not None and desktop.pointing_at_content(context, ss):
+            # Main stick while pointing at the desktop screen: the mouse wheel.
+            self.kind = 'SCROLL' if role in ("fly_up", "fly_down") else 'HOLD'
             self.notches = 0.0
             if self.kind == 'SCROLL':
                 desktop.scroll(context, ss, self.x)

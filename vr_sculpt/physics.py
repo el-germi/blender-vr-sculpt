@@ -23,7 +23,7 @@ a passive animated rigid body plus a Collision modifier, unselectable wire spher
 isn't evaluated, so its shape would come out empty) that push bodies, cloth and soft bodies,
 and they push spring bones too. The trigger then grabs (a rigid body turns kinematic while held and
 keeps the hand's velocity when let go; a spring bone's tail follows the hand) or, with Push / Pull,
-drives a force field at the hand ("VR Hand Force L / R"): the right trigger pulls, the left pushes.
+drives a force field at the hand ("VR Hand Force L / R"): the main trigger pulls, the off hand's pushes.
 
 Probed in tests/probe_physics.py: a body turned kinematic, carried and released mid-run keeps
 flying (Bullet keeps the kinematic velocity), and putting its own transform back afterwards keeps
@@ -985,12 +985,13 @@ class GrabSpring:
 
 
 class HandForce:
-    """Push / Pull: while the trigger is held, the hand's force field pulls (right hand) or pushes (left)
-    with the trigger's pressure."""
+    """Push / Pull: while the trigger is held, the hand's force field pulls (main hand) or pushes (off hand)
+    with the trigger's pressure. hand: the controller index (0 left, 1 right)."""
 
     def __init__(self, context, hand, value):
+        from . import actions
         self.hand = hand
-        self.sign = -1.0 if hand == 1 else 1.0  # A negative force attracts.
+        self.sign = -1.0 if hand == actions.main_index(context) else 1.0  # A negative force attracts.
         self.changed = False
         self._set(context, value)
 

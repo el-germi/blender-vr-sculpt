@@ -4,10 +4,10 @@ from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, Po
 from .strokes import PALETTE
 
 BRUSH_ITEMS = (
-    ('DRAW', "Draw", "Push the surface out along its normal (left hand pushes in)"),
+    ('DRAW', "Draw", "Push the surface out along its normal (other hand pushes in)"),
     ('SMOOTH', "Smooth", "Relax the surface"),
     ('GRAB', "Grab", "Grab vertices and move/rotate them with the controller"),
-    ('INFLATE', "Inflate", "Push each vertex along its own normal (left hand deflates)"),
+    ('INFLATE', "Inflate", "Push each vertex along its own normal (other hand deflates)"),
 )
 
 RADIUS_STEPS = (0.01, 0.02, 0.04, 0.08, 0.16)
@@ -63,7 +63,7 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         name="Rig Tool",
         items=(
             ('BONES', "Bones", "Each trigger press places the next joint of a bone chain. Press a joint to carry "
-                               "on (branch) from it, drag it to move it. Left trigger deletes a bone"),
+                               "on (branch) from it, drag it to move it. The other trigger deletes a bone"),
             ('WEIGHTS', "Weights", "Paint the active bone's weights on the bound mesh. Touch a bone to pick it"),
         ),
         default='BONES',
@@ -76,8 +76,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     weight_brush: EnumProperty(
         name="Weight Brush",
         items=(
-            ('ADD', "Add", "Add weight (left hand subtracts)"),
-            ('SUBTRACT', "Subtract", "Take weight away (left hand adds)"),
+            ('ADD', "Add", "Add weight (other hand subtracts)"),
+            ('SUBTRACT', "Subtract", "Take weight away (other hand adds)"),
             ('SMOOTH', "Smooth", "Even out the weights with their neighbors"),
         ),
         default='ADD',
@@ -150,7 +150,7 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     show_measures: BoolProperty(name="Show Measurements", description="Show tape measurements in VR", default=True)
     show_new_camera: BoolProperty(
         name="New Camera Button",
-        description="Show the \"New here\" button on the hand panel's Camera tool, which adds a camera at your right hand",
+        description="Show the \"New here\" button on the hand panel's Camera tool, which adds a camera at your main hand",
         default=True,
     )
     camera_preview: BoolProperty(
@@ -223,8 +223,9 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     desktop_interactive: BoolProperty(
         name="Use From VR",
         description=(
-            "Windows: the right controller drives the real mouse while it points at the desktop screen "
-            "(trigger = left button, left trigger = middle button, B = right click, right stick = wheel)"
+            "Windows: the main controller drives the real mouse while it points at the desktop screen "
+            "(trigger = left button, other trigger = middle button, B = right click, main stick = wheel; "
+            "Y and the left stick when left-handed)"
         ),
         default=True,
     )
@@ -302,13 +303,53 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('FINISH', "Finish", "Bevel and smooth shading"),
             ('ARRAY', "Array", "Linear and radial arrays"),
             ('STACK', "Stack", "Every modifier: show, apply, remove, settings"),
+            ('UV', "UV", "Seams, unwrapping and the checker / stretch view"),
         ),
         default='SHAPE',
     )
+    uv_tool: EnumProperty(
+        name="UV Tool",
+        description="While on, the trigger works on the selected object's UVs instead of grabbing or creating",
+        items=(
+            ('NONE', "Off", "The trigger grabs and creates"),
+            ('SEAM', "Seams", "Touched edges become UV seams (other hand clears them)"),
+            ('FIX', "Fix", "Brushed faces unwrap again, stitched to the rest of the layout"),
+        ),
+        default='NONE',
+    )
+    uv_view: EnumProperty(
+        name="UV View",
+        description="What the UV page draws on the selected object in VR",
+        items=(
+            ('NONE', "Off", "Nothing"),
+            ('CHECKER', "Checker", "A checker on the UVs: squares should stay square and even"),
+            ('STRETCH', "Stretch", "Faces colored by UV stretch: blue is true to the surface, red twice off"),
+        ),
+        default='CHECKER',
+    )
+    uv_method: EnumProperty(
+        name="Unwrap Method",
+        description="How Unwrap, Live and Fix flatten the mesh",
+        items=(
+            ('ANGLE_BASED', "Angle", "Angle based: keeps angles, the usual choice"),
+            ('CONFORMAL', "Conformal", "Least squares conformal: faster, a bit more stretch"),
+            ('MINIMUM_STRETCH', "Min Stretch", "Spreads stretch as evenly as it can"),
+        ),
+        default='ANGLE_BASED',
+    )
+    uv_live: BoolProperty(
+        name="Live Unwrap", default=True,
+        description="Unwrap the mesh again each time a Seams stroke ends")
+    uv_checker: IntProperty(
+        name="Checker Squares", default=16, min=2, max=64,
+        description="Squares per side of the UV square in the checker view")
+    uv_fix_radius: FloatProperty(
+        name="Fix Radius", default=0.03, min=0.005, max=0.2, unit='LENGTH', subtype='DISTANCE',
+        description="Reach of the Fix brush (hand-space meters)")
     model_mark: EnumProperty(
         name="Mark Edges",
         description="While on, the trigger marks the edges it touches on the selected object instead of grabbing "
-                    "or creating (left hand clears)",
+                    "or creating (other hand clears)",
         items=(
             ('NONE', "Off", "The trigger grabs and creates"),
             ('HARD', "Hard", "Touched edges shade sharp, even below the Auto angle"),
@@ -340,7 +381,7 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     kit_spacing: FloatProperty(
         name="Spacing", description="Distance between stamped kit parts (hand-space meters)",
         default=0.03, min=0.002, soft_max=0.3, subtype='DISTANCE', unit='LENGTH')
-    show_panel: BoolProperty(name="Show Hand Panel", description="Menu panel above the left controller", default=True)
+    show_panel: BoolProperty(name="Show Hand Panel", description="Menu panel above the other hand's controller", default=True)
     panel_pin: BoolProperty(
         name="Pin Hand Panel",
         description="Keep the hand panel shown, whatever the left wrist does (left stick click)",
@@ -350,9 +391,9 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         name="Reveal",
         description="When the hand panel shows, unless it's pinned",
         items=(
-            ('WRIST', "Wrist", "Turn the back of your left hand toward your face, like checking a watch, "
+            ('WRIST', "Wrist", "Turn the back of the panel's hand toward your face, like checking a watch, "
                                "and look at it"),
-            ('LOOK', "Look", "Look at your left hand"),
+            ('LOOK', "Look", "Look at the panel's hand"),
             ('ALWAYS', "Always", "Always shown"),
         ),
         default='WRIST',
@@ -393,7 +434,15 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             "0 = only the threshold"
         ),
         default=0.35, min=0.0, soft_max=2.0, subtype='TIME_ABSOLUTE', unit='TIME_ABSOLUTE')
-    left_inverts: BoolProperty(name="Left Hand Inverts", description="Left trigger subtracts with Draw and Inflate", default=True)
+    left_inverts: BoolProperty(
+        name="Other Hand Inverts",
+        description="The other hand's trigger (left, or right when left-handed) subtracts with Draw and Inflate",
+        default=True)
+    left_handed: BoolProperty(
+        name="Left Handed",
+        description="Swap the hands: the left controller sculpts, points and presses the panel, the panel sits over "
+                    "the right one, and the face buttons, stick clicks and sticks swap jobs too",
+        default=False)
     dyntopo_auto_texture: BoolProperty(
         name="Auto Texture",
         description="With dyntopo, show the texture again 2 s after the last stroke (a short freeze while it's restored)",
@@ -419,7 +468,7 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     )
     show_brush_card: BoolProperty(
         name="Show Tip Status",
-        description="Show the mode, tool and size in a slim line above the right controller, plus a short "
+        description="Show the mode, tool and size in a slim line above the main controller, plus a short "
                     "description after switching",
         default=True,
     )

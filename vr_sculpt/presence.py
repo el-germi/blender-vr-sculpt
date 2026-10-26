@@ -1,12 +1,13 @@
 """When the hand panel shows.
 
-The panel stays out of the way: it fades in when you check your left wrist like a watch (the back of
-the left hand turned toward your face, while you look at it) and fades out when you turn it back.
-Pinned, it stays. While the right controller points at it, or holds one of its sliders, it stays
-too, and it lingers a moment after, so a glance away doesn't drop it mid-reach. Hidden, it leaves a
-small ghost with the mode icon; pointing at the ghost brings the panel back.
+The panel stays out of the way: it fades in when you check your off-hand wrist like a watch (the
+back of the off hand turned toward your face, while you look at it) and fades out when you turn it
+back. Pinned, it stays. While the main controller points at it, or holds one of its sliders, it
+stays too, and it lingers a moment after, so a glance away doesn't drop it mid-reach. Hidden, it
+leaves a small ghost with the mode icon; pointing at the ghost brings the panel back. The off hand
+is the left one, or the right one with Left Handed on (actions.main_index).
 
-Reveal modes (Settings > Reveal): WRIST (the watch check), LOOK (just look at the left hand) and
+Reveal modes (Settings > Reveal): WRIST (the watch check), LOOK (just look at the off hand) and
 ALWAYS (always shown, like before).
 """
 
@@ -28,10 +29,11 @@ FADE_OUT = 0.14
 _state = {"shown": False, "wrist": False, "gaze": False, "alpha": 0.0, "until": 0.0, "time": None}
 
 
-def wrist_turned(left_rot, hand, head, was=False):
-    """Whether the back of the left hand (the controller's -X: it's on the outside of a left hand
-    holding it) faces the head. was: the last answer, for hysteresis."""
-    back = left_rot.to_matrix() @ Vector((-1.0, 0.0, 0.0))
+def wrist_turned(rot, hand, head, was=False, side=-1.0):
+    """Whether the back of the hand (the controller's -X on a left hand, side -1, or +X on a right
+    one, side 1: the outside of the hand holding it) faces the head. was: the last answer, for
+    hysteresis."""
+    back = rot.to_matrix() @ Vector((side, 0.0, 0.0))
     to_head = Vector(head) - Vector(hand)
     if to_head.length < 1e-6:
         return was
@@ -61,16 +63,17 @@ def rule(settings, wrist, gaze):
 
 
 def update(context, ss, using=False, now=None):
-    """Advance the show / hide state and the fade; returns the panel's alpha. using: the right
+    """Advance the show / hide state and the fade; returns the panel's alpha. using: the main
     controller points at the panel or its ghost, or holds one of its widgets."""
     settings = context.scene.vr_sculpt
     now = time.monotonic() if now is None else now
     s = _state
-    hand = Vector(ss.controller_grip_location_get(context, 0))
+    off = actions.off_index(context)
+    hand = Vector(ss.controller_grip_location_get(context, off))
     head = Vector(ss.viewer_pose_location)
     head_rot = getattr(ss, "viewer_pose_rotation", None)
-    left_rot = Quaternion(ss.controller_aim_rotation_get(context, 0))
-    s["wrist"] = wrist_turned(left_rot, hand, head, s["wrist"])
+    rot = Quaternion(ss.controller_aim_rotation_get(context, off))
+    s["wrist"] = wrist_turned(rot, hand, head, s["wrist"], -1.0 if off == 0 else 1.0)
     s["gaze"] = looking_at(head, Quaternion(head_rot) if head_rot is not None else None,
                            hand + Vector((0.0, 0.0, 0.12 * ss.viewer_scale)), s["gaze"])
     pinned = settings.panel_pin
@@ -79,7 +82,7 @@ def update(context, ss, using=False, now=None):
         s["until"] = now + (0.0 if pinned else LINGER)
     shown = settings.show_panel and (wants or now < s["until"])
     if shown and not s["shown"] and not pinned and settings.panel_reveal != 'ALWAYS':
-        tick(context, ss, 0, 0.12, 0.02)  # A tap on the left hand: the panel is there.
+        tick(context, ss, off, 0.12, 0.02)  # A tap on the off hand: the panel is there.
     s["shown"] = shown
     last = s["time"]
     dt = 0.0 if last is None else max(now - last, 0.0)

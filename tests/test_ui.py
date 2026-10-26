@@ -161,7 +161,7 @@ def test_sheets():
     vr_ui.find(menus.layout(ctx)[0], "edit_object").on_press()
     vr_ui.find(menus.layout(ctx)[0], "delete").on_press()
     check("add" in ids() and menus.sheet() is None, "Delete in the sheet goes back to Model")
-    op = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_brush.execute, "left_hand": True,
+    op = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_brush.execute, "off_hand": True,
                         "report": lambda *a: None})()
     vr_ui.find(menus.layout(ctx)[0], "settings").on_press()
     op.execute(ctx)
@@ -378,7 +378,7 @@ def test_presence():
     presence.update(ctx, ss, now=9.0)
     check(not presence._state["shown"], "back to Wrist, looking away: hidden")
     radius = operators.VRSCULPT_OT_cycle_radius
-    op = type("H", (), {"execute": radius.execute, "left_hand": True})()
+    op = type("H", (), {"execute": radius.execute, "off_hand": True})()
     op.execute(ctx)
     presence.update(ctx, ss, now=9.1)
     check(s.panel_pin and presence._state["shown"], "left stick click pins it: shown")
@@ -754,6 +754,92 @@ def test_dyntopo():
     s.mode = 'SCULPT'
 
 
+def test_left_handed():
+    print("== left handed: the hands swap")
+    from vr_sculpt import controllers, navigation
+    ctx = bpy.context
+    s = ctx.scene.vr_sculpt
+    s.mode, s.engine, s.brush, s.left_inverts = 'SCULPT', 'PYTHON', 'DRAW', True
+    right_handed = controllers.hints(s, controllers.Info())
+    s.left_handed = True
+    try:
+        check(actions.main_index() == 0 and actions.off_index() == 1, "the left controller is the main hand")
+        check(actions.is_off_hand(actions.HANDS[1]) and not actions.is_off_hand(actions.HANDS[0]),
+              "the right one is the off hand")
+        check(actions.by_role(("L", "R")) == ("R", "L"), "by_role: (off hand's, main hand's)")
+
+        lefty = controllers.hints(s, controllers.Info())
+        check(lefty['left'] == right_handed['right'] and lefty['right'] == right_handed['left'],
+              "the button hints swap controllers")
+        check(lefty['left']['trigger'][1] == "Draw" and lefty['right']['trigger'][1] == "Draw, inverted",
+              "Sculpt: the left trigger draws, the right one inverts")
+        check(controllers.legend_alpha(1, 1.0, 1.0, actions.off_index()) == 0.0 and
+              controllers.legend_alpha(0, 1.0, 1.0, actions.off_index()) == 1.0,
+              "the right legend gives way to the panel")
+
+        check(set(navigation.SWAPPED) == set(navigation.ACTIONS) and
+              all(navigation.SWAPPED[b] == a for a, b in navigation.SWAPPED.items()) and
+              all((navigation.ACTIONS[a][0] == 'MOVE') != (navigation.ACTIONS[b][0] == 'MOVE')
+                  for a, b in navigation.SWAPPED.items()),
+              "sticks: every fly action reads as the other stick's (move <-> lift / turn)")
+        check(navigation.ACTIONS[navigation.SWAPPED["fly_forward"]][0] == 'LIFT',
+              "the left stick goes up / down and turns, the right one moves")
+
+        # The panel sits over the right hand, the right wrist reveals it, the left controller presses it.
+        ss = SS()
+        head = Vector(ss.viewer_pose_location)
+        hand = Vector(ss.controller_grip_location_get(ctx, 1))
+        to_head = (head - hand).normalized()
+        back = Vector((1.0, 0.0, 0.0)).rotation_difference(to_head)
+        check(presence.wrist_turned(back, hand, head, side=1.0) and not presence.wrist_turned(back, hand, head),
+              "the back of a right hand is its controller's +X")
+        operators.session_running = lambda context: True
+        fctx = tm.FakeContext(tm.FakeWM(ss))
+        matrix, widgets, _h = interactions.panel_frame(fctx, ss)
+        check(matrix.translation.x > 0.2, "the panel is above the right controller")
+        s.show_panel, s.panel_pin, s.panel_reveal, s.tip_offset = True, False, 'WRIST', 0.0
+        presence.reset()
+        target = hand + Vector((0, 0, 0.12))
+        ss.viewer_pose_rotation = (target - head).to_track_quat('-Z', 'Y')
+        ss.aim_rot[1] = back
+        presence.update(fctx, ss, now=0.0)
+        check(presence._state["shown"] and any(p[0] == actions.HANDS[1] for p in ss.pulses),
+              "turning the right wrist shows it, with a tap on the right hand")
+
+        menus.reset()
+        menus.set_mode(ctx, 'MODEL')
+        s.panel_pin = True
+        matrix, widgets, _h = interactions.panel_frame(fctx, ss)
+        tab = vr_ui.find(widgets, "mode_draw")
+        target = matrix @ Vector(((tab.rect[0] + tab.rect[2]) / 2, (tab.rect[1] + tab.rect[3]) / 2, 0.0))
+        normal = (matrix.to_3x3() @ Vector((0, 0, 1))).normalized()
+        origin, rot = tm.aim_at(target, normal)
+        n = len(bpy.data.objects)
+        op, r = tm.press(fctx, ss, 1, [origin], rot)
+        check(type(op.handler).__name__ != "UIPress" and s.mode == 'MODEL', "the right trigger doesn't press the panel")
+        for o in list(bpy.data.objects)[n:]:
+            bpy.data.objects.remove(o)
+        op, r = tm.press(fctx, ss, 0, [origin], rot)
+        check(type(op.handler).__name__ == "UIPress" and s.mode == 'DRAW', "the left one does")
+
+        # Face buttons and stick clicks follow the hands too.
+        brush = operators.VRSCULPT_OT_cycle_brush
+        op = type("H", (), {"execute": brush.execute, "invoke": brush.invoke, "off_hand": False,
+                            "report": lambda *a: None})()
+        op.invoke(fctx, tm.FakeEvent('XR_ACTION', 'PRESS', tm.FakeXR((0, 0, 0), hand=actions.HANDS[1])))
+        check(op.off_hand and s.mode == 'PAINT', "the right top button (B) switches mode")
+        radius = operators.VRSCULPT_OT_cycle_radius
+        op = type("H", (), {"execute": radius.execute, "invoke": radius.invoke, "off_hand": False})()
+        op.invoke(fctx, tm.FakeEvent('XR_ACTION', 'PRESS', tm.FakeXR((0, 0, 0), hand=actions.HANDS[1])))
+        check(op.off_hand and not s.panel_pin, "the right stick click unpins the panel")
+    finally:
+        s.left_handed = False
+        s.panel_pin = False
+        presence.reset()
+        menus.set_mode(ctx, 'SCULPT')
+    check(actions.main_index() == 1, "off again: the right hand is the main one")
+
+
 def main():
     vr_sculpt.register()
     try:
@@ -761,7 +847,7 @@ def main():
             bpy.data.objects.remove(o)
         for t in (test_disclosure, test_sheets, test_layout, test_stepper_and_detents, test_presence, test_ghost,
                   test_controller_hints, test_controller_inputs, test_controller_visibility, test_status,
-                  test_dyntopo):
+                  test_dyntopo, test_left_handed):
             try:
                 t()
             except Exception:

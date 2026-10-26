@@ -1,4 +1,4 @@
-"""Tip status: a slim line above the right controller with the mode, the tool and its size.
+"""Tip status: a slim line above the main controller with the mode, the tool and its size.
 
 After the tool changes, a one-line description shows under it for a few seconds, then fades. Also
 the text and billboard helpers every VR label uses.
@@ -23,12 +23,12 @@ PYTHON_COLORS = {
 }
 
 NATIVE_INFO = {
-    "Draw": "Pushes the surface out. Left hand: pushes in",
+    "Draw": "Pushes the surface out. Other hand: pushes in",
     "Clay Strips": "Builds up flat strips, like layering clay",
     "Smooth": "Relaxes bumps and evens out the surface",
-    "Inflate/Deflate": "Swells the surface outward. Left hand: shrinks",
-    "Crease Sharp": "Cuts a sharp groove. Left hand: pinches a ridge",
-    "Flatten/Contrast": "Flattens toward an average plane. Left hand: adds contrast",
+    "Inflate/Deflate": "Swells the surface outward. Other hand: shrinks",
+    "Crease Sharp": "Cuts a sharp groove. Other hand: pinches a ridge",
+    "Flatten/Contrast": "Flattens toward an average plane. Other hand: adds contrast",
 }
 
 # Ring and card accent colors per native brush, so they're distinguishable at a glance.
@@ -44,13 +44,17 @@ NATIVE_COLORS = {
 MODEL_COLOR = (0.55, 0.9, 0.85)
 CUT_COLORS = {'DIFFERENCE': (1.0, 0.4, 0.35), 'UNION': (0.45, 0.9, 0.45), 'INTERSECT': (0.95, 0.75, 0.3)}
 MARK_INFO = {
-    'HARD': ("Mark Hard Edges", "Touch edges to make them sharp. Left hand clears"),
-    'SOFT': ("Mark Soft Edges", "Touch edges to make them smooth. Left hand clears"),
+    'HARD': ("Mark Hard Edges", "Touch edges to make them sharp. Other hand clears"),
+    'SOFT': ("Mark Soft Edges", "Touch edges to make them smooth. Other hand clears"),
     'CLEAR': ("Clear Edge Marks", "Touch edges to clear their hard or soft mark"),
 }
+UV_INFO = {
+    'SEAM': ("Mark Seams", "Trace edges to cut the UV map along them. Other hand clears"),
+    'FIX': ("Fix UVs", "Brush over stretched faces: they unwrap again, stitched to the rest"),
+}
 CUT_INFO = {
-    'DIFFERENCE': ("Cut with", "Drag on the selected object to cut into it. Left hand selects a cutter"),
-    'UNION': ("Union with", "Drag on the selected object to add to it. Left hand selects a cutter"),
+    'DIFFERENCE': ("Cut with", "Drag on the selected object to cut into it. Other hand selects a cutter"),
+    'UNION': ("Union with", "Drag on the selected object to add to it. Other hand selects a cutter"),
     'INTERSECT': ("Intersect with", "Drag on the selected object: only the overlap stays"),
 }
 KIT_DROP_INFO = "Pull a part out and hold it to a surface: it sits on it"
@@ -66,8 +70,8 @@ POSE_INFO = {
 
 RIG_INFO = {
     'BONES': ("Bones", "Press to place joints. Press a joint to branch, drag it to move. B ends the chain"),
-    'ADD': ("Add Weight", "Paint the bone's weights. Left hand subtracts. Touch a bone to pick it"),
-    'SUBTRACT': ("Subtract Weight", "Take the bone's weights away. Left hand adds. Touch a bone to pick it"),
+    'ADD': ("Add Weight", "Paint the bone's weights. Other hand subtracts. Touch a bone to pick it"),
+    'SUBTRACT': ("Subtract Weight", "Take the bone's weights away. Other hand adds. Touch a bone to pick it"),
     'SMOOTH': ("Smooth Weights", "Even out the bone's weights. Touch a bone to pick it"),
 }
 
@@ -76,16 +80,16 @@ PHYSICS_COLORS = {'SETUP': (0.45, 0.95, 0.75), 'GRAB': (1.0, 0.8, 0.35), 'PULL':
 PHYSICS_INFO = {
     'SETUP': ("Physics", "Touch an object or a bone to set it up. B plays the simulation"),
     'GRAB': ("Grab & Throw", "Grab bodies and spring bones, let go to throw. Your hands push. B: play / stop"),
-    'FORCE': ("Push & Pull", "Right trigger pulls things in, left pushes them away. B: play / stop"),
+    'FORCE': ("Push & Pull", "Main trigger pulls things in, the other pushes them away. B: play / stop"),
 }
 
 
-def physics_color(settings, hand=1):
-    """The tip color in Physics mode, for the right (1) or left (0) hand."""
+def physics_color(settings, main=True):
+    """The tip color in Physics mode, for the main or the off hand."""
     if not settings.physics_hands:
         return PHYSICS_COLORS['SETUP']
     if settings.physics_tool == 'FORCE':
-        return PHYSICS_COLORS['PULL' if hand == 1 else 'PUSH']
+        return PHYSICS_COLORS['PULL' if main else 'PUSH']
     return PHYSICS_COLORS['GRAB']
 
 
@@ -103,10 +107,10 @@ DRAW_INFO = {
 }
 
 PYTHON_INFO = {
-    'DRAW': ("Draw", "Pushes the surface out. Left hand: pushes in"),
+    'DRAW': ("Draw", "Pushes the surface out. Other hand: pushes in"),
     'SMOOTH': ("Smooth", "Relaxes bumps and evens out the surface"),
     'GRAB': ("Grab", "Grab the surface and move or twist it"),
-    'INFLATE': ("Inflate", "Swells the surface outward. Left hand: shrinks"),
+    'INFLATE': ("Inflate", "Swells the surface outward. Other hand: shrinks"),
 }
 
 _FONT_PX = 64
@@ -132,7 +136,7 @@ def card_content(settings, sculpt_brush):
         b = paint.brush(bpy_context())
         name = b.name if b else "No brush"
         if settings.paint_tool == 'PICK':
-            content = ("Pick Color", "Touch the surface to take its color (left hand: 2nd color)",
+            content = ("Pick Color", "Touch the surface to take its color (other hand: 2nd color)",
                        paint.get_color(bpy_context()), "eyedropper")
         else:
             content = (name, paint.INFO.get(name, ""), paint.get_color(bpy_context()), "paint")
@@ -166,7 +170,12 @@ def card_content(settings, sculpt_brush):
     elif settings.mode == 'MODEL':
         from . import hardsurface, kit, primitives, shading
         op = settings.model_add_as
-        if settings.model_mark != 'NONE':
+        if settings.uv_tool != 'NONE':
+            from . import uv
+            title, desc = UV_INFO[settings.uv_tool]
+            content = (title, desc, uv.SEAM_COLOR if settings.uv_tool == 'SEAM' else uv.FIX_COLOR,
+                       settings.uv_tool.lower())
+        elif settings.model_mark != 'NONE':
             title, desc = MARK_INFO[settings.model_mark]
             color = {'HARD': shading.HARD_COLOR, 'SOFT': shading.SOFT_COLOR}.get(settings.model_mark, (1.0, 1.0, 1.0))
             content = (title, desc, color, "edit")
@@ -179,11 +188,11 @@ def card_content(settings, sculpt_brush):
         elif kit.is_key(settings.primitive):
             verb = "Stamp" if settings.kit_stamp else "Place"
             content = (f"{verb} {primitives.label(settings.primitive)}",
-                       KIT_STAMP_INFO if settings.kit_stamp else KIT_DROP_INFO + ". Left hand selects",
+                       KIT_STAMP_INFO if settings.kit_stamp else KIT_DROP_INFO + ". Other hand selects",
                        MODEL_COLOR, "stamp" if settings.kit_stamp else "kit")
         else:
             title = "Add " + primitives.label(settings.primitive)
-            content = (title, "Drag to create. Left hand: touch to select and move", MODEL_COLOR, "model")
+            content = (title, "Drag to create. Other hand: touch to select and move", MODEL_COLOR, "model")
     elif settings.engine == 'NATIVE':
         name = sculpt_brush.name if sculpt_brush else "No brush"
         content = (name, NATIVE_INFO.get(name, ""), NATIVE_COLORS.get(name, (0.9, 0.9, 0.9)), "sculpt")

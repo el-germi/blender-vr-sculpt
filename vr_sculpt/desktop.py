@@ -9,9 +9,9 @@ Two ways to get the picture:
   only redraw when something changes, so captures stay valid between redraws; a throttled
   region is tagged again later (tick()) so its last change isn't missed. Menus aren't captured.
 
-On Windows the right controller drives the real mouse while it points at the screen: hover,
-trigger = left button (drag works), left trigger = middle button (pan / orbit), B = right
-click, right stick = scroll wheel. A virtual keyboard can be shown under the screen. Clicks
+On Windows the main controller (actions.main_index) drives the real mouse while it points at the
+screen: hover, trigger = left button (drag works), the other trigger = middle button (pan / orbit),
+B = right click, the main stick = scroll wheel. A virtual keyboard can be shown under the screen. Clicks
 are only sent when Blender's window is the one under that point on the monitor.
 
 The screen's pose is kept relative to the VR navigation, so it travels with you when you fly,
@@ -143,7 +143,7 @@ def _callback():
 
 def tick(context):
     """Start/stop the OS capture; for region capture, drop gone regions and re-tag throttled ones.
-    With the mouse driven from VR, the cursor follows the right controller's ray (hover)."""
+    With the mouse driven from VR, the cursor follows the main controller's ray (hover)."""
     if not active(context):
         clear()
         return
@@ -393,16 +393,17 @@ def content_uv(context, ss, origin, direction):
     return (min(max((p[0] + w / 2) / w, 0.0), 1.0), min(max(p[1] / h, 0.0), 1.0))
 
 
-def _right_ray(context, ss):
-    from . import interactions, operators
-    pose = operators.controller_pose(ss.controller_aim_location_get(context, 1),
-                                     ss.controller_aim_rotation_get(context, 1))
+def _main_ray(context, ss):
+    from . import actions, interactions, operators
+    main = actions.main_index(context)
+    pose = operators.controller_pose(ss.controller_aim_location_get(context, main),
+                                     ss.controller_aim_rotation_get(context, main))
     return pose.translation, interactions.aim_direction(pose)
 
 
 def hover(context, ss):
-    """Move the real cursor to where the right controller points at the screen."""
-    h = hit(context, ss, *_right_ray(context, ss))
+    """Move the real cursor to where the main controller points at the screen."""
+    h = hit(context, ss, *_main_ray(context, ss))
     if h is None or h[0] != 'content':
         return
     hwnd = winput.find_window()
@@ -415,7 +416,7 @@ def hover(context, ss):
 def pointing_at_content(context, ss):
     if not interactive(context):
         return False
-    h = hit(context, ss, *_right_ray(context, ss))
+    h = hit(context, ss, *_main_ray(context, ss))
     return h is not None and h[0] == 'content'
 
 
@@ -428,10 +429,10 @@ def release_drag():
 
 
 class MouseDrag:
-    """Trigger handler: a mouse button held while the right controller's ray moves the cursor.
+    """Trigger handler: a mouse button held while the main controller's ray moves the cursor.
 
-    The right trigger is the left button, the left trigger the middle one; both follow the
-    right ray, so the left hand can pan while the right one points.
+    The main trigger is the left button, the other trigger the middle one; both follow the
+    main ray, so the other hand can pan while the main one points.
     """
 
     def __init__(self, context, ss, button):
@@ -441,7 +442,7 @@ class MouseDrag:
         self.pressed = False
         release_drag()
         hwnd = winput.find_window()
-        uv = content_uv(context, ss, *_right_ray(context, ss))
+        uv = content_uv(context, ss, *_main_ray(context, ss))
         if hwnd is None or uv is None:
             return
         x, y = winput.to_screen(hwnd, *uv)
@@ -459,7 +460,7 @@ class MouseDrag:
     def update(self, context, pose, tip_pose, value):
         if not self.pressed:
             return
-        uv = content_uv(context, self.ss, *_right_ray(context, self.ss))
+        uv = content_uv(context, self.ss, *_main_ray(context, self.ss))
         if uv is None:
             return
         x, y = winput.to_screen(winput.find_window(), *uv)
@@ -478,7 +479,7 @@ class MouseDrag:
 def right_click(context, ss):
     """B while pointing at the screen."""
     hwnd = winput.find_window()
-    uv = content_uv(context, ss, *_right_ray(context, ss))
+    uv = content_uv(context, ss, *_main_ray(context, ss))
     if hwnd is None or uv is None:
         return False
     x, y = winput.to_screen(hwnd, *uv)
@@ -539,8 +540,8 @@ def pick(context, ss, hand, pose):
     settings = context.scene.vr_sculpt
     if not settings.show_desktop:
         return None
-    if hand == actions.HANDS[0]:
-        # Left trigger: middle button, while the right hand points at the screen.
+    if actions.is_off_hand(hand, context):
+        # Off-hand trigger: middle button, while the main hand points at the screen.
         if pointing_at_content(context, ss):
             return MouseDrag(context, ss, 'MIDDLE')
         return None
@@ -567,7 +568,7 @@ def _textured(image, pts, tex):
 
 
 def draw(context, ss, right_pose=None):
-    """The screen, its title bar and keyboard, and the right controller's ray when it points at them."""
+    """The screen, its title bar and keyboard, and the main controller's ray when it points at them."""
     matrix = world_matrix(context, ss)
     w, h = screen_size(context, context.scene.vr_sculpt.desktop_size)
     os_mode = use_os(context)

@@ -767,6 +767,33 @@ def _gravity(p):
     _arrow_head(p, 0.0, -0.8, -math.pi / 2, 0.4)
 
 
+def _seam(p):
+    # A square cut open along a dashed line.
+    p.path([(-0.15, 0.8), (-0.8, 0.8), (-0.8, -0.8), (-0.15, -0.8)])
+    p.path([(0.15, 0.8), (0.8, 0.8), (0.8, -0.8), (0.15, -0.8)])
+    for y in (0.55, 0.0, -0.55):
+        p.line(0.0, y + 0.2, 0.0, y - 0.2)
+
+
+def _fix(p):
+    # A bandage, tilted.
+    c, s = math.cos(math.radians(40)), math.sin(math.radians(40))
+
+    def rot(x, y):
+        return (x * c - y * s, x * s + y * c)
+    p.path([rot(-0.95, -0.3), rot(0.95, -0.3), rot(0.95, 0.3), rot(-0.95, 0.3)], closed=True)
+    p.path([rot(-0.3, -0.3), rot(0.3, -0.3), rot(0.3, 0.3), rot(-0.3, 0.3)], closed=True)
+    p.disc(*rot(0.0, 0.0), 0.08)
+
+
+def _islands(p):
+    # Separate islands, as an unwrap lays them out.
+    p.box(-0.8, 0.1, -0.1, 0.8, 0.06, fill=True)
+    p.box(0.15, 0.3, 0.8, 0.8, 0.06)
+    p.fill([(-0.8, -0.8), (0.0, -0.8), (-0.8, -0.1)])
+    p.box(0.15, -0.8, 0.8, 0.05, 0.06, fill=True)
+
+
 ICONS = {
     "sculpt": _sculpt, "model": _model, "draw": _draw, "paint": _paint, "pose": _pose, "tools": _tools,
     "pin": _pin, "pinned": _pinned, "gear": _gear, "back": _chevron(math.pi), "chevron_right": _chevron(0.0),
@@ -784,7 +811,7 @@ ICONS = {
     "radial": _radial, "linear": _linear, "shading": _shading, "rig": _rig, "weights": _weights, "smooth": _smooth,
     "kit": _kit, "kit_add": _kit_add, "stamp": _stamp, "physics": _physics, "throw": _throw, "force": _force,
     "hands": _hands, "cloth": _cloth, "soft": _soft, "spring": _spring,
-    "gravity": _gravity,
+    "gravity": _gravity, "seam": _seam, "fix": _fix, "islands": _islands,
 }
 
 

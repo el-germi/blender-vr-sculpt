@@ -8,7 +8,7 @@ import math
 import time
 
 import numpy as np
-from mathutils import Matrix, Vector
+from mathutils import Vector
 
 from . import brushes, strokes
 

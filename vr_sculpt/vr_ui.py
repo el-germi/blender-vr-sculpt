@@ -1,7 +1,7 @@
 """The in-VR panel toolkit: widgets, layout, hit testing and drawing, in one visual language.
 
 A panel is rows of widgets on a card. The hand panel also has an icon rail for the modes down its
-left side. The right controller points at a panel (its aim ray) and the trigger presses or drags.
+left side. The main controller points at a panel (its aim ray) and the trigger presses or drags.
 Layout and hit testing are plain math so they can be tested without a headset; drawing is in
 draw_panel().
 
