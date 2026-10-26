@@ -10,6 +10,7 @@ import sys
 import traceback
 
 import bpy
+import numpy as np
 from mathutils import Matrix, Quaternion, Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -630,6 +631,190 @@ def test_controller_inputs():
           "the model sits on the aim pose (the tip ring and the ray are untouched)")
 
 
+def _box(center, size, open_bottom=False):
+    """(pos, nor, uv, tris) of a box with a vertex per face corner, outward-facing (CCW)."""
+    cx, cy, cz = center
+    hx, hy, hz = (s / 2 for s in size)
+    pos, nor, uv, tris = [], [], [], []
+    for axis in range(3):
+        for sign in (1.0, -1.0):
+            if open_bottom and axis == 1 and sign < 0:
+                continue
+            n = [0.0, 0.0, 0.0]
+            n[axis] = sign
+            u_axis, v_axis = (axis + 1) % 3, (axis + 2) % 3  # u x v = +axis
+            if sign < 0:
+                u_axis, v_axis = v_axis, u_axis  # keep the winding outward
+            base = len(pos)
+            for du, dv in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+                p = [0.0, 0.0, 0.0]
+                p[axis] = sign
+                p[u_axis], p[v_axis] = du, dv
+                pos.append((cx + p[0] * hx, cy + p[1] * hy, cz + p[2] * hz))
+                nor.append(n)
+                uv.append(((du + 1) / 2, (dv + 1) / 2))
+            tris += [(base, base + 1, base + 2), (base, base + 2, base + 3)]
+    return (np.array(pos, np.float32), np.array(nor, np.float32), np.array(uv, np.float32),
+            np.array(tris, np.uint16))
+
+
+def _glb(parts, png):
+    """A .glb of named meshes [(name, (pos, nor, uv, tris), color or None for the png)]."""
+    import json
+    import struct
+    binary, views, accessors, meshes, nodes, materials = b"", [], [], [], [], []
+
+    def add(arr, ctype, kind):
+        nonlocal binary
+        views.append({"buffer": 0, "byteOffset": len(binary), "byteLength": arr.nbytes})
+        binary += arr.tobytes() + b"\0" * (-arr.nbytes % 4)
+        accessors.append({"bufferView": len(views) - 1, "componentType": ctype, "count": len(arr), "type": kind})
+        return len(accessors) - 1
+
+    views.append({"buffer": 0, "byteOffset": 0, "byteLength": len(png)})
+    binary = png + b"\0" * (-len(png) % 4)
+    for name, (pos, nor, uv, tris), color in parts:
+        mat = {"pbrMetallicRoughness": ({"baseColorTexture": {"index": 0}} if color is None else
+                                        {"baseColorFactor": [*color, 1.0]})}
+        materials.append(mat)
+        prim = {"attributes": {"POSITION": add(pos, 5126, "VEC3"), "NORMAL": add(nor, 5126, "VEC3"),
+                               "TEXCOORD_0": add(uv, 5126, "VEC2")},
+                "indices": add(tris.ravel(), 5123, "SCALAR"), "material": len(materials) - 1}
+        meshes.append({"name": name, "primitives": [prim]})
+        nodes.append({"name": name, "mesh": len(meshes) - 1})
+    gltf = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": list(range(len(nodes)))}],
+            "nodes": nodes, "meshes": meshes, "materials": materials, "accessors": accessors,
+            "bufferViews": views, "buffers": [{"byteLength": len(binary)}],
+            "images": [{"bufferView": 0, "mimeType": "image/png"}], "textures": [{"source": 0}]}
+    js = json.dumps(gltf).encode()
+    js += b" " * (-len(js) % 4)
+    body = struct.pack("<I4s", len(js), b"JSON") + js + struct.pack("<I4s", len(binary), b"BIN\0") + binary
+    return struct.pack("<4sII", b"glTF", 2, 12 + len(body)) + body
+
+
+def _png(folder):
+    img = bpy.data.images.new("vrs_test_tex", 2, 2)
+    img.pixels.foreach_set(np.array([1, 0, 0, 1] * 4, np.float32))  # all red
+    path = os.path.join(folder, "tex.png")
+    img.filepath_raw, img.file_format = path, 'PNG'
+    img.save()
+    bpy.data.images.remove(img)
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def test_controller_fetched():
+    print("== controller models from the runtime")
+    import importlib.util
+    import json
+    import shutil
+    import tempfile
+    from vr_sculpt import controllers, ui
+    spec = importlib.util.spec_from_file_location("controller_worker", controllers.WORKER)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+
+    names = {"body": 'body', "button_y": 'top', "button_b": 'top', "button_x": 'bottom', "button_a": 'bottom',
+             "button_enter": 'system', "button_grip": 'grip', "thumbstick": 'stick', "trigger": 'trigger',
+             "trackpad": 'body'}
+    check(all(worker.part_of(n) == p for n, p in names.items()), "SteamVR's node names map to our parts")
+    check(not worker.is_controller(["body"]) and worker.is_controller(["body", "trigger"]),
+          "a lone body is the hand tracking placeholder, not a controller")
+
+    tmp = tempfile.mkdtemp(prefix="vrs_ctrl_")
+    saved = controllers._cache_dir[0]
+    try:
+        # A right controller in the model's own frame (y up, the handle toward +z): body, open-bottomed
+        # face buttons and stick on top, trigger below the front, grip on the inner (-x) side.
+        parts = [("body", _box((0.0, 0.0, 0.05), (0.04, 0.03, 0.1)), None),
+                 ("button_b", _box((-0.008, 0.017, 0.03), (0.008, 0.004, 0.008), True), (0.0, 0.0, 1.0)),
+                 ("button_a", _box((-0.008, 0.017, 0.045), (0.008, 0.004, 0.008), True), (0.0, 0.0, 1.0)),
+                 ("thumbstick", _box((0.01, 0.022, 0.04), (0.01, 0.014, 0.01), True), (0.0, 1.0, 0.0)),
+                 ("trigger", _box((0.0, -0.025, 0.02), (0.01, 0.02, 0.006)), (0.0, 1.0, 0.0)),
+                 ("button_grip", _box((-0.022, -0.01, 0.07), (0.004, 0.02, 0.02)), (0.0, 1.0, 0.0))]
+        glb = _glb(parts, _png(tmp))
+        # The model in the aim pose's frame: turned 30 degrees about X and moved, as a runtime might.
+        turn = Matrix.Rotation(math.radians(30), 4, 'X')
+        model_in_aim = Matrix.Translation((0.0, -0.01, 0.02)) @ turn
+        arrays = worker.convert(glb, np.array(model_in_aim), tmp)
+        pos, part = arrays["pos"], arrays["part"]
+        body_idx = list(worker.PARTS).index('body')
+        want = model_in_aim @ Vector((0.0, 0.0, 0.05))
+        check((Vector(pos[part == body_idx].mean(axis=0)) - want).length < 1e-5,
+              "the mesh lands in the aim frame (moved by where the model sits on the aim pose)")
+        check(not arrays["offset"].any() and arrays["tex"].shape == (1024, 1024, 3),
+              "offset 0 (already on the aim pose), a 1024 px texture")
+
+        def texel(part_name):
+            uv = arrays["uv"][part == list(worker.PARTS).index(part_name)].mean(axis=0)
+            h, w = arrays["tex"].shape[:2]
+            return arrays["tex"][min(int(uv[1] * h), h - 1), min(int(uv[0] * w), w - 1)]
+        check(tuple(texel('body')) == (255, 0, 0) and tuple(texel('top')) == (0, 0, 255) and
+              tuple(texel('trigger')) == (0, 255, 0),
+              "each part samples its own texture or color in the shared texture (V flipped from glTF)")
+
+        np.savez_compressed(os.path.join(tmp, "right.npz"), **arrays)
+        shutil.copy(os.path.join(tmp, "right.npz"), os.path.join(tmp, "left.npz"))
+        controllers._cache_dir[0] = tmp
+        controllers.clear()
+        check(controllers.fetched() and controllers.model_path('right').startswith(tmp),
+              "fetched models in the cache are drawn instead of the bundled ones")
+        mdl = controllers.model('right')
+        check(mdl.offset.length == 0.0 and set(mdl.centers) >= {'body', 'top', 'bottom', 'stick', 'trigger', 'grip'},
+              "it loads with every part and no offset")
+        rest = controllers.Inputs(0.0, 0.0, False, False, False, 0.0, 0.0)
+        up = turn.to_3x3() @ Vector((0, 1, 0))
+
+        def moved(name, inputs, point):
+            return mdl.part_matrix(name, inputs) @ point - point
+        press = moved('top', rest._replace(top=True), mdl.centers['top'])
+        check(abs(press.dot(up) + worker.BUTTON_TRAVEL) < 2e-4 and (press - up * press.dot(up)).length < 2e-4,
+              f"a pressed button sinks into the face ({press.dot(up) * 1000:.2f} mm)")
+        cap = mdl.tops['stick']
+        fwd = moved('stick', rest._replace(stick_y=1.0), cap)
+        right = moved('stick', rest._replace(stick_x=1.0), cap)
+        check(fwd.z < -0.002 and right.x > 0.002, f"the stick tilts the way it's pushed (forward "
+              f"{fwd.z * 1000:.1f} mm, right {right.x * 1000:.1f} mm)")
+        click = moved('stick', rest._replace(stick_click=True), cap)
+        check(click.dot(up) < -0.001, "a clicked stick sinks along its axis")
+        trig = moved('trigger', rest._replace(trigger=1.0), mdl.centers['trigger'])
+        check(trig.z > 0.001, f"a pulled trigger swings back ({trig.z * 1000:.1f} mm)")
+        grip = moved('grip', rest._replace(grip=1.0), mdl.centers['grip'])
+        check(grip.x > 0.001 and abs(grip.y) + abs(grip.z) < 1e-6, "a squeezed grip moves in, toward the body")
+        check(moved('trigger', rest, mdl.centers['trigger']).length < 1e-9, "at rest nothing moves")
+        ss = SS()
+        m = controllers.controller_matrix(ss, bpy.context, 1)
+        check((m.translation - Vector(ss.controller_aim_location_get(bpy.context, 1))).length < 1e-9,
+              "the fetched model's origin is the aim pose itself")
+
+        # The worker's answer, taken in from the app timer.
+        class Done:
+            def poll(self):
+                return 0
+        with open(os.path.join(tmp, "status.json"), "w") as f:
+            json.dump({"ok": False, "message": "no controllers seen", "hands": {}}, f)
+        controllers._fetch.update(proc=Done(), started=0.0)
+        check(controllers.fetching(), "while the worker runs, a fetch is pending")
+        controllers.tick(bpy.context, False)
+        check(not controllers.fetching() and controllers.fetch_message() == "no controllers seen",
+              "its message is shown once it's done")
+        real = operators.session_running
+        operators.session_running = lambda context: True
+        try:
+            check(not ui.VRSCULPT_OT_fetch_controllers.poll(bpy.context), "no fetch during a VR session")
+            operators.session_running = lambda context: False
+            check(ui.VRSCULPT_OT_fetch_controllers.poll(bpy.context), "outside one, it can run")
+        finally:
+            operators.session_running = real
+        controllers.forget_fetched()
+        check(not controllers.fetched() and controllers.model('right').offset == controllers.MODEL_OFFSET,
+              "forgetting them brings the bundled models back")
+    finally:
+        controllers._cache_dir[0] = saved
+        controllers.clear()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_controller_visibility():
     print("== Blender's controllers hidden and restored")
     from vr_sculpt import controllers
@@ -846,7 +1031,8 @@ def main():
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o)
         for t in (test_disclosure, test_sheets, test_layout, test_stepper_and_detents, test_presence, test_ghost,
-                  test_controller_hints, test_controller_inputs, test_controller_visibility, test_status,
+                  test_controller_hints, test_controller_inputs, test_controller_fetched, test_controller_visibility,
+                  test_status,
                   test_dyntopo, test_left_handed):
             try:
                 t()

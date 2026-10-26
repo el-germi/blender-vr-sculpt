@@ -64,8 +64,12 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     (Blender's dynamic topology) on, strokes add and remove detail as they go.
 - **Brush cursor in the headset**: rings at each controller tip, colored per
   brush (blue when that hand inverts).
-- **Quest controller models** (Meta's, converted by `tools/convert_controllers.py`)
-  instead of Blender's gray spheres (SteamVR gives no controller model): pressed
+- **Controller models** instead of Blender's gray spheres (Blender asks
+  SteamVR for a model the way SteamVR doesn't serve them): your own
+  controllers' models, got from the runtime with **Get From Runtime** (VR
+  Extras > View; before a session, wearing the headset with both controllers
+  in hand), else Meta's Quest Pro controllers (converted by
+  `tools/convert_controllers.py`). Pressed
   buttons move and light up, the stick tilts with yours, and a
   small legend beside each hand says what its buttons do right now (it shows
   when you look at that hand or hold it still; the left one fades out while
@@ -505,6 +509,25 @@ With Triggers" is on. The setting applies when the VR session starts.
   the direction to the head, and the head's view direction with the hand, with
   hysteresis. A select opens a picker page (categories first, then a paged
   grid).
+- **Controller models** ([controllers.py](vr_sculpt/controllers.py)): drawn
+  with `gpu` from a compact .npz per hand (mesh split into parts, texture,
+  how each part moves). The bundled ones are Meta's Quest Pro controllers.
+  Get From Runtime starts a background Blender
+  ([controller_worker.py](vr_sculpt/controller_worker.py)) that loads the
+  OpenXR runtime's DLL over ctypes, negotiates with it as the loader does,
+  and makes an OpenXR instance of its own with a headless session and the
+  Khronos render model extensions: it asks for the interaction render
+  models, keeps the two with a hand's subaction path and moving parts,
+  measures each model's space in that hand's aim pose space
+  (`xrLocateSpace`), and converts its glTF (parts by node name, one shared
+  texture, V flipped) into the same .npz format in the extension's user
+  folder, where it's drawn instead of the bundled one. The glTF has no
+  press animation, so the motions are guessed from the shapes: face
+  buttons sink 1.5 mm along their mean face normal, the stick tilts 20
+  degrees about its base (the face plate's normal is its axis), the
+  trigger swings 15 degrees back about the lateral axis from its top edge,
+  the grip squeezes 2 mm in. See "What we learned about controller models"
+  for why it can't run during a session.
 - **Primitive catalog** ([catalog.py](vr_sculpt/catalog.py)): runs the Add >
   Mesh menu's draw functions (including ones extensions appended) against a
   recording layout, collecting each `layout.operator(...)` with its preset
@@ -834,6 +857,33 @@ Found with [tests/probe_uv.py](tests/probe_uv.py):
 - `uv.minimize_stretch` with pins still moved UVs outside the selection a
   little, so Fix doesn't use it.
 
+### What we learned about controller models over OpenXR (5.4.0 Alpha, SteamVR 2.18)
+
+Found with [tests/probe_xr_models.py](tests/probe_xr_models.py) and
+[tests/probe_xr_inblender.py](tests/probe_xr_inblender.py), Quest over Steam Link:
+
+- Blender asks for `XR_MSFT_controller_model` and nothing else for models,
+  and Python gets no OpenXR handles. Neither SteamVR nor Meta's PC runtime
+  has `XR_MSFT_controller_model` or `XR_FB_render_model`. SteamVR has the
+  Khronos pair, `XR_EXT_render_model` + `XR_EXT_interaction_render_model`
+  (with `XR_EXT_uuid`), and `XR_MND_headless`; Meta's runtime has none.
+- Python can make its own instance: load the runtime DLL named by the active
+  runtime's manifest and call `xrNegotiateLoaderRuntimeInterface` (Blender
+  links the loader statically, so there's no loader DLL to use). SteamVR
+  refuses API 1.1 from it (`XR_ERROR_API_VERSION_UNSUPPORTED`) and accepts 1.0.
+- A headless session with an aim pose action bound for Touch reaches
+  FOCUSED and lists the interaction render models. SteamVR's glTF is a node
+  per part (body, button_x / y / a / b, button_enter, button_grip,
+  thumbstick, trigger), all sharing one 2048 px PNG, no animation, no glTF
+  extensions; Steam Link reports the controllers as Quest 2's.
+- With the controllers down, Steam Link tracks hands and serves its
+  "shuttlecock" placeholder (one body node) instead.
+- **It can't run beside Blender's VR session.** A second process becomes
+  the scene app: SteamVR sends Blender a quit and its session ends. A
+  second instance in Blender's own process fails with
+  `XR_ERROR_LIMIT_REACHED` (Blender's session carries on). So the models
+  are fetched before a session and cached.
+
 ## Performance
 
 Measured on the test machine.
@@ -1058,6 +1108,9 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   that view for each dab. In Blender's own undo history every dab is a step;
   B in VR undoes whole strokes. Clone, Fill and Mask brushes aren't on the
   hand panel (pick them on the desktop; they need extra setup).
+- Controller models come from the runtime only on SteamVR (Meta's runtime
+  has no model extension), only before a session, and their press motions
+  are guesses from the shapes.
 - Hand tracking isn't possible from an add-on: Blender's VR layer doesn't
   enable OpenXR's hand tracking or hand interaction extensions, so drawing
   uses controllers.

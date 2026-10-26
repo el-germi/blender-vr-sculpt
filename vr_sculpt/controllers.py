@@ -2,17 +2,24 @@
 
 Blender draws the runtime's controller model when it gets one (XR_MSFT_controller_model); SteamVR
 gives none, so it falls back to gray spheres. With Controller Models on, Blender's are hidden while
-the session runs and Meta's Quest Pro controllers are drawn instead (assets/controllers, made by
-tools/convert_controllers.py): the buttons, trigger, grip and stick move as yours do, the way Meta's
-own press animation moves them, and pressed parts light up in the accent color (the trigger by how
-far it's pulled).
+the session runs and ours are drawn instead: the buttons, trigger, grip and stick move as yours do,
+and pressed parts light up in the accent color (the trigger by how far it's pulled).
+
+The models are the runtime's own when they've been fetched (Get From Runtime: controller_worker.py,
+in a background Blender before a session, since SteamVR serves them over XR_EXT_render_model to an
+OpenXR instance of their own; they're cached in the extension's user folder), else Meta's Quest Pro
+controllers (assets/controllers, made by tools/convert_controllers.py, moving the way Meta's own
+press animation moves them).
 
 Beside each controller, a short legend says what the buttons do now (hints()): it fades in while
 you look at that hand or hold it still, and out while you work, like the hand panel's reveal.
 """
 
+import json
 import math
 import os
+import shutil
+import subprocess
 import time
 from collections import namedtuple
 
@@ -343,9 +350,112 @@ def on_option(settings, context):
 
 
 def tick(context, running):
-    """From the app timer: restore Blender's controllers once the session is over."""
+    """From the app timer: restore Blender's controllers once the session is over, and take in models
+    the worker has fetched."""
     if not running:
         restore(context)
+    poll_fetch()
+
+
+# --- the runtime's models ----------------------------------------------------------------------
+
+WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "controller_worker.py")
+WORKER_TIMEOUT = 120.0  # seconds: Blender's start, the runtime's (30 s), the fetch (12 s) and the conversion
+
+_cache_dir = [None]  # tests point the cache at a folder of their own
+_fetch = {"proc": None, "started": 0.0, "message": ""}
+
+
+def cache_dir():
+    if _cache_dir[0]:
+        return _cache_dir[0]
+    try:
+        return bpy.utils.extension_path_user(__package__, path="controllers")
+    except ValueError:
+        return os.path.join(bpy.utils.user_resource('CONFIG'), "vr_sculpt", "controllers")
+
+
+def fetched():
+    """True when the runtime's models are in the cache (they're drawn instead of the bundled ones)."""
+    return all(os.path.exists(os.path.join(cache_dir(), h + ".npz")) for h in ('left', 'right'))
+
+
+def fetching():
+    return _fetch["proc"] is not None
+
+
+def fetch_message():
+    """What the last fetch said (for the desktop panel); empty before one."""
+    return _fetch["message"]
+
+
+def start_fetch():
+    """Get the runtime's models in a background Blender. Only outside a VR session: SteamVR makes the
+    worker the running VR app, which would end Blender's session. False if it couldn't start."""
+    binary = bpy.app.binary_path
+    if fetching() or not binary or not os.path.isfile(WORKER):
+        return False
+    folder = cache_dir()
+    os.makedirs(folder, exist_ok=True)
+    try:
+        os.remove(os.path.join(folder, "status.json"))
+    except OSError:
+        pass
+    flags = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW: no console flashing up
+    _fetch["proc"] = subprocess.Popen(
+        [binary, "--background", "--factory-startup", "--python", WORKER, "--", folder],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+    _fetch["started"] = time.monotonic()
+    _fetch["message"] = "Getting the models: wear the headset, hold both controllers"
+    return True
+
+
+def poll_fetch(wait=False):
+    """Take the worker's result once it's done (wait: block until then, for tests)."""
+    proc = _fetch["proc"]
+    if proc is None:
+        return
+    if wait:
+        try:
+            proc.wait(WORKER_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            pass
+    if proc.poll() is None:
+        if time.monotonic() - _fetch["started"] < WORKER_TIMEOUT:
+            return
+        proc.kill()
+    _fetch["proc"] = None
+    try:
+        with open(os.path.join(cache_dir(), "status.json"), encoding="utf-8") as f:
+            status = json.load(f)
+    except (OSError, ValueError):
+        status = {"ok": False, "message": "The model fetch stopped without an answer"}
+    _fetch["message"] = status.get("message", "")
+    if status.get("ok"):
+        _models.clear()  # Drawn from the new files from now on.
+    print(f"VR Sculpt: {_fetch['message']}", flush=True)
+    _redraw()
+
+
+def forget_fetched():
+    """Back to the bundled models."""
+    shutil.rmtree(cache_dir(), ignore_errors=True)
+    _models.clear()
+    _fetch["message"] = ""
+
+
+def _redraw():
+    for win in getattr(bpy.context.window_manager, "windows", ()):
+        for area in win.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+
+
+def stop_fetch():
+    proc = _fetch["proc"]
+    if proc is not None and proc.poll() is None:
+        proc.kill()
+    _fetch.update(proc=None, message="")
 
 
 # --- the model -----------------------------------------------------------------------------
@@ -354,7 +464,8 @@ def tick(context, running):
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "controllers")
 
 # The model's origin from the aim pose, in the aim frame (hand-space meters). Meta's models line up with
-# the aim pose's orientation, about 3 cm from it along Z.
+# the aim pose's orientation, about 3 cm from it along Z. A fetched model is already in the aim frame
+# (its .npz says offset 0).
 MODEL_OFFSET = Vector((0.0, 0.0, 0.03))
 
 LIGHT_UP = 0.8  # the key light: from above, and from the head by this much
@@ -384,9 +495,10 @@ class Model:
     """One hand's controller: a batch per part, how the moving parts move, and the texture (made on
     first draw: it needs the GPU)."""
 
-    def __init__(self, hand):
-        data = np.load(os.path.join(ASSETS, hand + ".npz"))
+    def __init__(self, path):
+        data = np.load(path)
         pos, part, tris = data["pos"], data["part"], data["tris"]
+        self.offset = Vector(data["offset"]) if "offset" in data.files else MODEL_OFFSET.copy()
         self.names = [str(n) for n in data["parts"]]
         self.arrays = {"pos": pos, "nor": data["nor"], "uv": data["uv"]}
         tri_part = part[tris[:, 0]]
@@ -422,10 +534,16 @@ class Model:
             pivot, axis, angle, _mv = self.moves[key]
             return Matrix.Translation(pivot) @ Matrix.Rotation(angle * amount, 4, axis) @ Matrix.Translation(-pivot)
         if name == 'stick' and 'stick_forward' in self.moves:
-            sink = Matrix.Translation((0.0, -STICK_SINK if inputs.stick_click else 0.0, 0.0))
+            sink = Vector((0.0, -STICK_SINK, 0.0))
+            if 'stick_click' in self.moves:
+                sink = self.moves['stick_click'][3]
+            sink = Matrix.Translation(sink if inputs.stick_click else Vector())
             return sink @ turn('stick_forward', inputs.stick_y) @ turn('stick_right', inputs.stick_x)
         if name in {'trigger', 'grip'} and name in self.moves:
-            return turn(name, min(max(getattr(inputs, name), 0.0), 1.0))
+            amount = min(max(getattr(inputs, name), 0.0), 1.0)
+            if self.moves[name][2] == 0.0:  # a fetched model's grip squeezes in instead of turning
+                return Matrix.Translation(self.moves[name][3] * amount)
+            return turn(name, amount)
         if name in {'top', 'bottom'} and name in self.moves and getattr(inputs, name):
             return Matrix.Translation(self.moves[name][3])
         return Matrix.Identity(4)
@@ -435,13 +553,26 @@ _models = {}
 _gpu = {"shader": None}
 
 
+def model_path(hand):
+    """The runtime's model if it's been fetched, else the bundled one."""
+    folder = cache_dir() if fetched() else ASSETS
+    return os.path.join(folder, hand + ".npz")
+
+
 def available():
-    return all(os.path.exists(os.path.join(ASSETS, h + ".npz")) for h in ('left', 'right'))
+    return all(os.path.exists(model_path(h)) for h in ('left', 'right'))
 
 
 def model(hand):
     if hand not in _models:
-        _models[hand] = Model(hand)
+        try:
+            _models[hand] = Model(model_path(hand))
+        except Exception:  # A broken cache file: draw the bundled one rather than nothing.
+            if model_path(hand).startswith(ASSETS):
+                raise
+            import traceback
+            traceback.print_exc()
+            _models[hand] = Model(os.path.join(ASSETS, hand + ".npz"))
     return _models[hand]
 
 
@@ -472,8 +603,10 @@ def _shader():
 def layout(hand):
     """Where the parts are, in the controller frame: the legend's leaders point here."""
     m = model(hand)
-    return {'top': m.tops['top'], 'bottom': m.tops['bottom'], 'stick': m.tops['stick'],
-            'stick_click': m.tops['stick'], 'trigger': m.centers['trigger'], 'grip': m.centers['grip']}
+    body = m.centers.get('body', Vector())  # a runtime's model may lack a part
+    return {'top': m.tops.get('top', body), 'bottom': m.tops.get('bottom', body), 'stick': m.tops.get('stick', body),
+            'stick_click': m.tops.get('stick', body), 'trigger': m.centers.get('trigger', body),
+            'grip': m.centers.get('grip', body)}
 
 
 def controller_matrix(ss, context, hand_idx):
@@ -481,7 +614,8 @@ def controller_matrix(ss, context, hand_idx):
     rot = Quaternion(ss.controller_aim_rotation_get(context, hand_idx)).to_matrix().to_4x4()
     scale = ss.viewer_scale
     m = rot @ Matrix.Scale(scale, 4)
-    m.translation = Vector(ss.controller_aim_location_get(context, hand_idx)) + rot.to_3x3() @ (MODEL_OFFSET * scale)
+    offset = model(('left', 'right')[hand_idx]).offset
+    m.translation = Vector(ss.controller_aim_location_get(context, hand_idx)) + rot.to_3x3() @ (offset * scale)
     return m
 
 
@@ -647,4 +781,5 @@ def register():
 
 def unregister():
     restore(bpy.context)
+    stop_fetch()
     clear()

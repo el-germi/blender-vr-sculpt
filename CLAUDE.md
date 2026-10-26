@@ -137,7 +137,10 @@ with the tip, Fix brush, checker / stretch view); Blender's UV operators need Ed
 object in and out alone (`uv._editing`), and Fix unwraps a temporary copy of the brushed faces with their
 border pinned (a partial unwrap without pins repacks the patch). Libraries are listed by
 `kit_worker.py` in a background Blender into an on-disk cache (`kit.tick()` from `live.py` picks results
-up); it's a script, not a module, so it's not in `__init__`'s lists. In Model mode the off-hand trigger
+up); it's a script, not a module, so it's not in `__init__`'s lists. `controller_worker.py` is the same kind
+of script: it gets the runtime's controller models over OpenXR (its own instance via ctypes, SteamVR's
+`XR_EXT_render_model`) before a session, into a cache `controllers.py` draws instead of the bundled Quest
+Pro models; it can't run during a VR session (SteamVR would end Blender's). In Model mode the off-hand trigger
 selects / moves (`MoveObject`, `Deselect`) and the main one only creates.
 
 **Other modes**: `strokes.py` (mesh from stored samples, rotation-minimizing frames) +
