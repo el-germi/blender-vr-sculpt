@@ -1,6 +1,6 @@
 """One app timer for the things that update while VR runs, outside of any operator:
 tracking objects, desktop window captures, camera preview redraws, puppet bindings and takes, the
-weight heat map's geometry, kit listings coming in from their background worker, and physics (the
+weight heat map's geometry, the UV checker / stretch view, kit listings coming in from their background worker, and physics (the
 hands' colliders and spring bones, which also run while the timeline plays outside VR). Dyntopo
 sessions (rest.py) are closed from here too, VR or not, however Sculpt Mode was left."""
 
@@ -8,7 +8,8 @@ import time
 
 import bpy
 
-from . import camera, controllers, desktop, kit, native, onion, operators, paths, physics, puppet, rest, rig, tracking
+from . import (camera, controllers, desktop, kit, native, onion, operators, paths, physics, puppet, rest, rig, tracking,
+               uv)
 
 FAST = 1.0 / 90.0
 IDLE = 0.25
@@ -46,6 +47,7 @@ def _tick():
         paths.ensure(context)
         onion.update(context)
         rig.tick(context)
+        uv.tick(context)
         physics_busy = physics.tick(context, ss)
         if camera.wanted(context):
             # The preview renders in the desktop 3D view's draw callback, so keep it drawing.

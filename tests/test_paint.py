@@ -226,12 +226,12 @@ def test_panel(obj):
     ctx.view_layer.objects.active = obj
 
     # Right stick click cycles the paint radius in Paint mode; Y goes on to Rig.
-    op = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_radius.execute, "left_hand": False})()
+    op = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_radius.execute, "off_hand": False})()
     settings.paint_radius, settings.radius = 0.02, 0.04
     op.execute(ctx)
     check(abs(settings.paint_radius - 0.04) < 1e-6 and abs(settings.radius - 0.04) < 1e-6,
           "stick click: next paint radius, sculpt radius untouched")
-    ob = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_brush.execute, "left_hand": True,
+    ob = type("H", (), {"execute": operators.VRSCULPT_OT_cycle_brush.execute, "off_hand": True,
                         "report": lambda *a: None})()
     ob.execute(ctx)
     check(settings.mode == 'RIG', "Y after Paint goes to Rig")

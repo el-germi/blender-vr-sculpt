@@ -13,8 +13,8 @@ import math
 
 import bpy
 
-from . import (anim, camera, catalog, desktop, generic, hardsurface, hud, kit, measure, native, paint, physics,
-               pose, presence, primitives, puppet, rest, rig, shading, strokes, symmetry, vr_ui)
+from . import (actions, anim, camera, catalog, desktop, generic, hardsurface, hud, kit, measure, native, paint,
+               physics, pose, presence, primitives, puppet, rest, rig, shading, strokes, symmetry, uv, vr_ui)
 from .props import BRUSH_ITEMS
 
 NATIVE_SHORT = {
@@ -69,6 +69,7 @@ def set_mode(context, mode):
     close_sheet(context)
     settings.mode = mode
     settings.model_mark = 'NONE'
+    settings.uv_tool = 'NONE'
     obj = context.view_layer.objects.active
     if mode in {'MODEL', 'DRAW', 'TOOLS', 'PHYSICS'}:
         set_object_mode(context, obj, 'OBJECT')
@@ -139,7 +140,9 @@ def open_sheet(name):
 def close_sheet(context=None):
     global _sheet
     if _sheet == 'OBJECT' and context is not None:
-        context.scene.vr_sculpt.model_mark = 'NONE'  # Its buttons are in the sheet; don't leave it on unseen.
+        # Their buttons are in the sheet; don't leave them on unseen.
+        context.scene.vr_sculpt.model_mark = 'NONE'
+        context.scene.vr_sculpt.uv_tool = 'NONE'
     _sheet = None
 
 
@@ -352,7 +355,7 @@ def _axes_row(text, prefix, states, toggle, here=None):
     row = [vr_ui.label(text, fixed=LABEL_W)] + [
         vr_ui.toggle(prefix + a, a, states[i], (lambda i=i: toggle(i))) for i, a in enumerate(symmetry.AXES)]
     if here is not None:
-        row.append(vr_ui.icon_button("mirror_here", "here", here, "Center at left hand"))
+        row.append(vr_ui.icon_button("mirror_here", "here", here, "Center at other hand"))
     return row
 
 
@@ -390,10 +393,10 @@ def _sculpt_rows(context, settings):
         [vr_ui.label("Engine", fixed=LABEL_W)] + _segments(
             "engine_", "engine", (('python', "Python"), ('native', "Native")), settings.engine.lower(),
             lambda v: set_engine(context, v.upper())),
-        [vr_ui.toggle("left_inverts", "Left hand inverts", settings.left_inverts, _toggle(settings, "left_inverts"),
+        [vr_ui.toggle("left_inverts", "Other hand inverts", settings.left_inverts, _toggle(settings, "left_inverts"),
                       icon="swap")],
     ]
-    return _disclose('SCULPT', out, more, "Dyntopo, engine, left hand" if is_native else "Engine, left hand")
+    return _disclose('SCULPT', out, more, "Dyntopo, engine, other hand" if is_native else "Engine, other hand")
 
 
 def _dyntopo_rows(context):
@@ -439,7 +442,7 @@ def _dyntopo_rows(context):
 
 ADD_AS = (('OBJECT', "Object"), ('DIFFERENCE', "Cut"), ('UNION', "Union"), ('INTERSECT', "Intersect"))
 MODEL_PAGES = (('SHAPE', "Shape"), ('BOOLEAN', "Cuts"), ('FINISH', "Finish"), ('ARRAY', "Array"),
-               ('STACK', "Stack"))
+               ('STACK', "Stack"), ('UV', "UV"))
 
 
 def _selected(context):
@@ -630,6 +633,8 @@ def _object_rows(context, settings, obj):
         rows, more, hint = _array_rows(context, obj)
     elif page == 'STACK':
         rows, more, hint = _stack_rows(context, obj)
+    elif page == 'UV':
+        rows, more, hint = _uv_rows(context, settings, obj)
     else:
         rows, more, hint = _shape_rows(context, obj)
     return _disclose('OBJECT_' + page, out + rows, more, hint)
@@ -640,6 +645,8 @@ def _set_model_page(settings, page):
     _stack_open.clear()  # The Stack page opens on its list.
     if page != 'FINISH':
         settings.model_mark = 'NONE'  # Its buttons are on the Finish page; don't leave it on unseen.
+    if page != 'UV':
+        settings.uv_tool = 'NONE'  # Same for the UV page's tools.
 
 
 # Settings page per object, for operators with many settings.
@@ -707,7 +714,7 @@ def _shape_rows(context, obj):
     elif prim.kind == 'OPERATOR':
         out += _operator_rows(context, obj)
     extra = [_axes_row("Mirror", "mirror_", symmetry.model_axes(obj), lambda i: symmetry.model_toggle(context, obj, i),
-                       here=lambda: _cursor_to_left_hand(context))]
+                       here=lambda: _cursor_to_off_hand(context))]
     solid = hardsurface.solidify(obj) is not None
     row = [vr_ui.toggle("solidify", "Solidify", solid, lambda: hardsurface.set_solidify(obj, not solid), icon="shell")]
     if solid:
@@ -795,6 +802,54 @@ def _finish_rows(context, settings, obj):
     return rows, more, "Edge marks" + (", segments" if on else "")
 
 
+UV_TOOLS = (('SEAM', "Seams", "seam"), ('FIX', "Fix", "fix"))
+UV_VIEWS = (('NONE', "Off"), ('CHECKER', "Checker"), ('STRETCH', "Stretch"))
+
+
+def _uv_rows(context, settings, obj):
+    rows = [
+        [vr_ui.label("Tool", fixed=LABEL_W)] + [
+            vr_ui.segment("uv_tool_" + ident.lower(), name,
+                          (lambda i=ident: setattr(settings, "uv_tool", 'NONE' if settings.uv_tool == i else i)),
+                          settings.uv_tool == ident, "uv_tool", icon=icon)
+            for ident, name, icon in UV_TOOLS],
+        [vr_ui.label("View", fixed=LABEL_W)] + _segments(
+            "uv_view_", "uv_view", [(i.lower(), n) for i, n in UV_VIEWS], settings.uv_view.lower(),
+            lambda v: setattr(settings, "uv_view", v.upper())),
+        [vr_ui.button("uv_unwrap", "Unwrap", lambda: _unwrap_all(context, settings),
+                      tip="Unwrap from the seams (with the visible cutters)"),
+         vr_ui.button("uv_smart", "Smart UV", lambda: uv.smart_project(context, obj),
+                      tip="Cut and unwrap by angle, with seams along the islands"),
+         vr_ui.button("uv_pack", "Pack", lambda: uv.pack(context, obj), tip="Pack the islands into the UV square")],
+    ]
+    note = uv.message() or ("" if uv.has_uvs(obj) else "No UVs yet: Unwrap, Smart UV or trace seams")
+    if note:
+        rows.append([vr_ui.label(note, align='CENTER')])
+    more = [
+        [vr_ui.label("Method", fixed=LABEL_W)] + _segments(
+            "uv_method_", "uv_method", [(i.lower(), n) for i, n in uv.METHODS], settings.uv_method.lower(),
+            lambda v: setattr(settings, "uv_method", v.upper())),
+        [vr_ui.toggle("uv_live", "Live", settings.uv_live, _toggle(settings, "uv_live"), icon="seam",
+                      tip="Unwrap again after each seam stroke"),
+         vr_ui.stepper("uv_checker", "Checker", settings.uv_checker, 2, 64,
+                       lambda v: setattr(settings, "uv_checker", int(v)), weight=1.6)],
+        [vr_ui.slider("uv_fix_radius", "Fix radius", settings.uv_fix_radius, 0.005, 0.2,
+                      lambda v: setattr(settings, "uv_fix_radius", v), fmt=_meters)],
+        [vr_ui.button("uv_from_sharp", "From sharp", lambda: uv.seams_from_sharp(obj), icon="seam",
+                      tip="Seams on the edges that shade sharp"),
+         vr_ui.button("uv_average", "Even out", lambda: uv.average_scale(context, obj), icon="islands",
+                      tip="Scale islands to their share of the surface, then pack"),
+         vr_ui.icon_button("uv_clear_seams", "trash", lambda: uv.clear_seams(obj), "Clear seams", danger=True)],
+    ]
+    return rows, more, "Method, checker, seams"
+
+
+def _unwrap_all(context, settings):
+    """The object and its visible cutters (their UVs carry into the cut)."""
+    for o in shading.mark_targets(context):
+        uv.unwrap(context, o, settings.uv_method)
+
+
 def _array_rows(context, obj):
     count = hardsurface.array_count(obj)
     out = [[vr_ui.stepper("array_count", "Count", count, 1, 24,
@@ -812,7 +867,7 @@ def _array_rows(context, obj):
                       "array_axis")
         for i, a in enumerate(symmetry.AXES)])
     if mode == 'RADIAL':
-        out.append([vr_ui.button("array_center", "Center at left hand", lambda: _array_center_here(context, obj),
+        out.append([vr_ui.button("array_center", "Center at other hand", lambda: _array_center_here(context, obj),
                                  icon="here")])
     else:
         out.append([vr_ui.slider("array_gap", "Gap", hardsurface.array_gap(obj), -0.5, 2.0,
@@ -903,26 +958,27 @@ def _modifier_rows(context, obj, mod):
     return out, [], ""
 
 
-def _left_tip(context):
-    """Where the left controller's tip is, or None outside VR."""
+def _off_tip(context):
+    """Where the off-hand controller's tip is, or None outside VR."""
     ss = context.window_manager.xr_session_state
     if ss is None:
         return None
     from . import operators
-    pose = operators.controller_pose(ss.controller_aim_location_get(context, 0),
-                                     ss.controller_aim_rotation_get(context, 0))
+    off = actions.off_index(context)
+    pose = operators.controller_pose(ss.controller_aim_location_get(context, off),
+                                     ss.controller_aim_rotation_get(context, off))
     return operators.brush_tip(pose, context.scene.vr_sculpt.tip_offset * ss.viewer_scale)
 
 
-def _cursor_to_left_hand(context):
-    """Put the 3D cursor (the mirror center) at the left controller's tip."""
-    tip = _left_tip(context)
+def _cursor_to_off_hand(context):
+    """Put the 3D cursor (the mirror center) at the off-hand controller's tip."""
+    tip = _off_tip(context)
     if tip is not None:
         symmetry.move_center(context, tip)
 
 
 def _array_center_here(context, obj):
-    tip = _left_tip(context)
+    tip = _off_tip(context)
     if tip is not None:
         hardsurface.set_array_center(context, obj, tip)
 
@@ -961,8 +1017,8 @@ def _draw_rows(context, settings):
                               lambda v: setattr(settings, "draw_smoothing", v), fmt=_percent)])
     more.append([vr_ui.label("Mirror", fixed=LABEL_W)] + [
         vr_ui.toggle("mirror_" + a, a.upper(), getattr(settings, "mirror_" + a), _toggle(settings, "mirror_" + a))
-        for a in "xyz"] + [vr_ui.icon_button("mirror_here", "here", lambda: _cursor_to_left_hand(context),
-                                            "Center at left hand")])
+        for a in "xyz"] + [vr_ui.icon_button("mirror_here", "here", lambda: _cursor_to_off_hand(context),
+                                            "Center at other hand")])
     return _disclose('DRAW', out, more, "Thickness, smoothing, mirror")
 
 
@@ -1406,8 +1462,9 @@ def _new_camera_here(context):
     pose_ = None
     if ss is not None:
         from . import operators
-        pose_ = operators.controller_pose(ss.controller_aim_location_get(context, 1),
-                                          ss.controller_aim_rotation_get(context, 1))
+        main = actions.main_index(context)
+        pose_ = operators.controller_pose(ss.controller_aim_location_get(context, main),
+                                          ss.controller_aim_rotation_get(context, main))
     camera.new_camera(context, pose_)
 
 
@@ -1499,6 +1556,10 @@ def _settings_rows(context, settings):
             lambda v: setattr(settings, "own_controllers", v == 'ours')) + [
             vr_ui.toggle("controller_hints", "Hints", settings.controller_hints, _toggle(settings, "controller_hints"),
                          icon="eye", tip="Button hints")],
+        [vr_ui.label("Handed", fixed=LABEL_W)] + _segments(
+            "handed_", "handed", (('right', "Right"), ('left', "Left")),
+            'left' if settings.left_handed else 'right',
+            lambda v: setattr(settings, "left_handed", v == 'left')),
         [vr_ui.label("Panel", fixed=LABEL_W)] + _segments(
             "reveal_", "reveal", REVEALS, settings.panel_reveal.lower(),
             lambda v: setattr(settings, "panel_reveal", v.upper())),

@@ -11,9 +11,9 @@ import bmesh
 import bpy
 from mathutils import Matrix, Vector
 
-from . import generic, grid, hardsurface, kit, menus, presence, primitives, snapping, vr_ui
+from . import actions, generic, grid, hardsurface, kit, menus, presence, primitives, snapping, vr_ui
 
-# Widget the right trigger is holding down, for drawing.
+# Widget the main trigger is holding down, for drawing.
 pressed_id = None
 
 TOUCH_MARGIN = 0.01  # hand-space meters around an object that still count as touching it
@@ -30,10 +30,10 @@ TIMELINE_GAP = 0.006
 
 
 def panel_frame(context, ss):
-    """(matrix, widgets, height) of the hand panel above the left controller."""
+    """(matrix, widgets, height) of the hand panel above the off-hand controller."""
     scale = ss.viewer_scale
     widgets, height = menus.layout(context)
-    anchor = Vector(ss.controller_grip_location_get(context, 0)) + Vector((0.0, 0.0, 0.07 * scale))
+    anchor = Vector(ss.controller_grip_location_get(context, actions.off_index(context))) + Vector((0.0, 0.0, 0.07 * scale))
     matrix = vr_ui.panel_matrix(anchor, Vector(ss.viewer_pose_location), scale)
     return matrix, widgets, height
 
@@ -66,11 +66,11 @@ _hover = {"id": None}
 
 
 def note_hover(context, ss, widget_id):
-    """A light tick on the right hand when the ray moves onto a new widget."""
+    """A light tick on the main hand when the ray moves onto a new widget."""
     if widget_id != _hover["id"]:
         _hover["id"] = widget_id
         if widget_id is not None:
-            presence.tick(context, ss, 1, 0.08, 0.006)
+            presence.tick(context, ss, actions.main_index(context), 0.08, 0.006)
 
 
 DETENTS = 10  # slider ticks along the track (integer sliders with few values tick on each)
@@ -122,7 +122,7 @@ class UIPress:
             detent = _detent(widget, value)
             if detent != self.detent:
                 self.detent = detent
-                presence.tick(context, self.ss, 1, 0.22, 0.005)
+                presence.tick(context, self.ss, actions.main_index(context), 0.22, 0.005)
 
     def _step(self, widget):
         value = widget.stepped(self.step) if self.step else None
@@ -131,7 +131,7 @@ class UIPress:
             self.changed = True
 
     def _find(self, context):
-        # Rebuild the panels: they follow the left hand, and values may have changed.
+        # Rebuild the panels: they follow the off hand, and values may have changed.
         for m, widgets, _height, _width in panel_frames(context, self.ss):
             widget = vr_ui.find(widgets, self.widget_id)
             if widget is not None:
@@ -148,7 +148,7 @@ class UIPress:
                 if widget is not None:
                     self._step(widget)
                     vr_ui.pulse(widget.id)
-                    presence.tick(context, self.ss, 1, 0.18, 0.005)
+                    presence.tick(context, self.ss, actions.main_index(context), 0.18, 0.005)
             return
         if self.kind != 'slider':
             return
@@ -262,7 +262,7 @@ class MoveObject:
 
 
 class Deselect:
-    """Left trigger in empty space (Model mode): nothing is selected any more, so what the right trigger
+    """Off-hand trigger in empty space (Model mode): nothing is selected any more, so what the main trigger
     makes next is an object of its own, not a cutter on the old selection."""
 
     def __init__(self, context):
@@ -460,7 +460,7 @@ class StampAssets:
             stamped = True
         ss = context.window_manager.xr_session_state
         if stamped and ss is not None:
-            presence.tick(context, ss, 1, 0.3, 0.01)
+            presence.tick(context, ss, actions.main_index(context), 0.3, 0.01)
 
     def _free(self):
         if self.bm is not None:

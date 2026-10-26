@@ -22,9 +22,11 @@ blender --background --factory-startup --command extension build --source-dir vr
 blender --background --command extension install-file -r user_default -e dist/vr_sculpt-0.1.0.zip
 ```
 
+The zip is named after `version` in `vr_sculpt/blender_manifest.toml`; use the current one.
+
 Background tests, one file per area (`test_brushes`, `test_modal`, `test_model`, `test_generic`,
 `test_draw`, `test_tools`, `test_paint`, `test_anim`, `test_pose`, `test_ik_limits`,
-`test_hard_surface`, `test_ui`, `test_rig`, `test_kit`, `test_physics`, `test_rest`):
+`test_hard_surface`, `test_ui`, `test_rig`, `test_kit`, `test_physics`, `test_rest`, `test_uv`):
 
 ```bash
 blender --background --factory-startup --python tests/test_tools.py
@@ -92,6 +94,13 @@ handler class plus a branch in `_pick_handler`.
   `.vrs_rest` point attribute and a fake-user source mesh. Mode switches from VR go through
   `menus.set_object_mode`, which calls `rest.prepare` / `rest.sync`.
 
+- Hands have roles: the **main** hand sculpts, points at and presses the panel; the **off** hand holds the
+  panel, inverts, selects in Model mode and clears marks. Right-handed (default) they are the right and
+  left controllers; `settings.left_handed` swaps them. Never hard-code controller index 0 / 1 or
+  `actions.HANDS[0]` for a role: use `actions.main_index()` / `off_index()` / `is_off_hand(user_path)`
+  (`by_role()` reorders a (left, right) pair). Physical things stay physical: controller models,
+  `KEY_NAMES`, tracking empties, puppet sources, the stock action bindings. `controllers.hints()` swaps
+  its table and `navigation.SWAPPED` swaps the sticks' jobs.
 - XR action operators get a temporary context: don't keep `context` across modal events; use
   `bpy.context` each time.
 - Undo guard: undo/redo/load replace Blender's data, so `undo_*` / `redo_*` / `load_post` handlers
@@ -123,10 +132,13 @@ a cutter is identified by the Boolean modifiers pointing at it. `shading.py` own
 "VR Shading" Geometry Nodes group and the `sharp_edge` / `vrs_soft` edge marks. Kit parts (`kit.py`)
 are mesh / collection assets from the asset libraries plus the starter kit in `vr_sculpt/assets/kit`
 (rebuilt by `tests/make_starter_kit.py`); `settings.primitive` holds `kit:<blend>|<type>|<name>` for
-one, and `interactions.PlaceAsset` (drop) / `StampAssets` (stamp) place them. Libraries are listed by
+one, and `interactions.PlaceAsset` (drop) / `StampAssets` (stamp) place them. `uv.py` is the UV page (seams traced
+with the tip, Fix brush, checker / stretch view); Blender's UV operators need Edit Mode, so it takes the
+object in and out alone (`uv._editing`), and Fix unwraps a temporary copy of the brushed faces with their
+border pinned (a partial unwrap without pins repacks the patch). Libraries are listed by
 `kit_worker.py` in a background Blender into an on-disk cache (`kit.tick()` from `live.py` picks results
-up); it's a script, not a module, so it's not in `__init__`'s lists. In Model mode the left trigger
-selects / moves (`MoveObject`, `Deselect`) and the right one only creates.
+up); it's a script, not a module, so it's not in `__init__`'s lists. In Model mode the off-hand trigger
+selects / moves (`MoveObject`, `Deselect`) and the main one only creates.
 
 **Other modes**: `strokes.py` (mesh from stored samples, rotation-minimizing frames) +
 `drawing.py` for Draw; `paint.py` paints by temporarily aiming the largest desktop 3D view at each
@@ -145,3 +157,16 @@ Features are developed on `feature/*` branches and merged to `main` by PR on
 github.com/el-germi/blender-vr-sculpt. The `feature/ui-panel`, `feature/ui-radial` and
 `feature/ui-spatial` branches are the three UI reworks compared in the headset; `ui-panel` is the
 one merged.
+
+## Releases
+
+Every PR merged to `main` gets a GitHub release, with the **minor** version bumped (0.1.0 -> 0.2.0;
+patch back to 0):
+
+1. Before merging, the PR's last commit bumps `version` in `vr_sculpt/blender_manifest.toml`, so
+   `main` always carries the version of its latest release.
+2. After the merge, on an up-to-date `main`: build the zip (command above) and run the tests.
+3. Tag and publish, with the zip attached:
+   `gh release create v0.2.0 dist/vr_sculpt-0.2.0.zip --target main --title "VR Sculpt 0.2.0" --notes-file <notes>`.
+   Notes follow the earlier releases (`gh release view v0.1.0`): a "What's new" section for the
+   PR, "Also in this build", and the Install steps with the new zip name.

@@ -422,7 +422,7 @@ def set_solidify_thickness(obj, thickness):
 # --- arrays --------------------------------------------------------------------
 #
 # Linear: copies side by side along a local axis, a Gap apart (relative to the object's size).
-# Radial: copies around a center point (set with Here, at the left hand), turning about a local
+# Radial: copies around a center point (set with Here, at the off hand), turning about a local
 # axis. That's the Array modifier's object offset: an empty parented to the object, whose transform
 # relative to it is one step of the turn about the center.
 
@@ -551,7 +551,7 @@ def set_array_gap(context, obj, gap):
 
 
 def set_array_center(context, obj, point):
-    """Radial center at a world point (the left hand's tip)."""
+    """Radial center at a world point (the off hand's tip)."""
     obj["vrs_array_center"] = (obj.matrix_world.inverted_safe() @ Vector(point))[:]
     _update_array(context, obj)
 

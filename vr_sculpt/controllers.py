@@ -104,6 +104,9 @@ def hints(s, info):
 
     # Grips: Blender's own navigation grab.
     left['grip'] = right['grip'] = ("here", "Move world")
+    if getattr(s, "left_handed", False):
+        # The roles above are the right-handed ones; the buttons and sticks swap with the hands.
+        left, right = right, left
     return {'left': left, 'right': right}
 
 
@@ -114,6 +117,10 @@ def _trigger(s, info):
             return ("sculpt", NATIVE_LABELS.get(info.native_brush, info.native_brush or "Sculpt"))
         return ("sculpt", s.brush.title())
     if mode == 'MODEL':
+        if s.uv_tool == 'SEAM':
+            return ("seam", "Mark seams")
+        if s.uv_tool == 'FIX':
+            return ("fix", "Fix UVs")
         if s.model_mark != 'NONE':
             return ("edit", {'HARD': "Mark hard", 'SOFT': "Mark soft"}.get(s.model_mark, "Clear marks"))
         if s.model_add_as != 'OBJECT' and info.cut_target:
@@ -156,6 +163,10 @@ def _left_trigger(s, info, right):
         inverts = s.left_inverts and (s.engine == 'NATIVE' or s.brush in {'DRAW', 'INFLATE'})
         if inverts and right is not None:
             return ("sculpt", right[1] + ", inverted")
+    if mode == 'MODEL' and s.uv_tool == 'SEAM':
+        return ("seam", "Clear seams")
+    if mode == 'MODEL' and s.uv_tool == 'FIX':
+        return right
     if mode == 'MODEL' and s.model_mark != 'NONE':
         return ("edit", "Clear marks")
     if mode == 'MODEL':
@@ -179,11 +190,12 @@ def context_info(context, ss):
     from . import (anim, desktop, hardsurface, interactions, kit, menus, native, operators, paint, pose, presence,
                    primitives, rig)
     settings = context.scene.vr_sculpt
-    right = operators.controller_pose(ss.controller_aim_location_get(context, 1),
-                                      ss.controller_aim_rotation_get(context, 1))
+    main = actions.main_index(context)
+    pointer = operators.controller_pose(ss.controller_aim_location_get(context, main),
+                                        ss.controller_aim_rotation_get(context, main))
     on_panel = False
     if settings.show_panel and presence.alpha() > 0.5:
-        on_panel = interactions.panel_pointer(context, ss, right)[1] is not None
+        on_panel = interactions.panel_pointer(context, ss, pointer)[1] is not None
     brush = native.sculpt_brush(context) if settings.engine == 'NATIVE' else None
     obj = paint.target(context) if settings.mode == 'PAINT' else None
     return Info(
@@ -546,10 +558,10 @@ LEGEND_ROW = 0.0105
 LEGEND_SIDE = 0.034  # hand-space meters from the controller to the legend
 
 
-def legend_alpha(hand_idx, alpha, panel_alpha):
-    """A hand's legend alpha with the hand panel showing at panel_alpha: the left one gives way to it
-    (the panel sits right over the left hand, where its legend is)."""
-    return alpha * (1.0 - panel_alpha) if hand_idx == 0 else alpha
+def legend_alpha(hand_idx, alpha, panel_alpha, off_idx=0):
+    """A hand's legend alpha with the hand panel showing at panel_alpha: the off hand's (off_idx) gives
+    way to it (the panel sits right over that hand, where its legend is)."""
+    return alpha * (1.0 - panel_alpha) if hand_idx == off_idx else alpha
 
 
 def draw_hints(context, ss, now=None, info=None, panel_alpha=0.0):
@@ -566,7 +578,7 @@ def draw_hints(context, ss, now=None, info=None, panel_alpha=0.0):
         grip = Vector(ss.controller_grip_location_get(context, idx))
         looking = forward is None or (grip - head).normalized().dot(forward) > LOOK
         alpha = update_hints(idx, grip, ss.viewer_scale, looking, working(read_inputs(context, ss, idx)), now)
-        alphas.append(legend_alpha(idx, alpha, panel_alpha))
+        alphas.append(legend_alpha(idx, alpha, panel_alpha, actions.off_index(context)))
     if max(alphas) <= 0.01:
         return
     table = hints(settings, info or context_info(context, ss))

@@ -25,11 +25,11 @@ staying the fastest way to reach *everything*?
 ## Design principles
 
 1. **One paradigm, done well.** The left hand holds the panel, the right
-   hand's ray points, the trigger presses. Nothing new to learn; no pie menus,
+   hand's ray points, the trigger presses (left-handed, the other way round). Nothing new to learn; no pie menus,
    no gizmos in the scene.
 2. **Few things up front.** Each mode shows its 3-5 most used controls. The
    rest is one press away under **More**, which names what it holds
-   ("More · Engine, left hand"). Rare or deep settings are a second level
+   ("More · Engine, other hand"). Rare or deep settings are a second level
    (object settings, Settings, pickers) with a Back button.
 3. **Stable geography.** The mode rail is anchored to the bottom of the panel,
    so the six mode icons stay at the same spot above your hand whatever the
@@ -143,6 +143,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Tip status on / off | VR Authoring > Show Tip Status (desktop) |
 | Quest controller models or Blender's | **gear** > Hands Quest / Blender; VR Extras > Controller Models |
 | Button hints on / off | **gear** > Hands > Hints; VR Extras > Button Hints |
+| Left-handed (swap the hands: panel, pointer, buttons, sticks) | **gear** > Handed Right / Left; VR Extras > Left Handed |
 | What a button does now | look at that controller (or hold it still): its legend |
 | Undo / redo in Blender | as before (every panel press is one undo step) |
 
@@ -159,7 +160,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Dyntopo refine Split / Collapse / Both | *More* > Refine |
 | Show the texture mid-session (strokes leave their patches untextured), or automatically 2 s after a stroke | *More*: texture icon and **Auto** beside Edge (meshes with UVs or colors) |
 | Engine Python / Native | *More* > Engine |
-| Left hand inverts | *More* |
+| Other hand inverts | *More* |
 
 ### Model
 
@@ -173,7 +174,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Create, cut, drop or stamp kit parts | right trigger in the scene (never grabs) |
 | Select, and move what's selected | left trigger: touch an object (hold to move it); in empty space, select nothing |
 | Duplicate, Delete | icons beside the chip (and in the object's header) |
-| Object settings | **chip** > pages Shape / Cuts / Finish / Array / Stack |
+| Object settings | **chip** > pages Shape / Cuts / Finish / Array / Stack / UV |
 | Size X/Y/Z, subdivisions; cylinder radius, height, segments; operator settings (paged) | **chip** > Shape |
 | Mirror X / Y / Z, center at left hand | **chip** > Shape > *More* > Mirror |
 | Solidify, thickness | **chip** > Shape > *More* |
@@ -187,6 +188,12 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Array count, linear / radial, axis, gap, center at left hand | **chip** > Array |
 | Every modifier (ours and others): show / hide, apply (with those above it), Apply all | **chip** > Stack |
 | A modifier's settings (paged), move up / down, remove | **chip** > Stack > the modifier's row |
+| Mark / clear UV seams (trace edges; left hand clears) | **chip** > UV > Tool: Seams (leaving the page or sheet turns it off) |
+| Fix stretched UVs (brush faces: they unwrap again, stitched in) | **chip** > UV > Tool: Fix; *More* > Fix radius |
+| Checker / stretch view on the object | **chip** > UV > View |
+| Unwrap, Smart UV, Pack | **chip** > UV |
+| Unwrap method, Live unwrap, checker size | **chip** > UV > *More* |
+| Seams from sharp, Even out island scale, Clear seams | **chip** > UV > *More* |
 | Show grid, snap to grid | *More* > Grid |
 | Snap to surface, 15 degree steps | *More* > Grab |
 

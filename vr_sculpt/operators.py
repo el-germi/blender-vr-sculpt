@@ -2,10 +2,11 @@ import time
 
 import bpy
 from bpy.props import BoolProperty, EnumProperty
-from mathutils import Matrix, Quaternion, Vector
+from mathutils import Quaternion, Vector
 
 from . import (actions, brushes, camera, catalog, desktop, drawing, interactions, kit, measure, menus,
-               native, paint, paths, physics, presence, primitives, rig, shading, snapping, strokes, symmetry, vr_ui)
+               native, paint, paths, physics, presence, primitives, rig, shading, snapping, strokes, symmetry, uv,
+               vr_ui)
 from . import pose as pose_mode  # "pose" is the controller pose in the handlers below
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
@@ -36,6 +37,7 @@ def _on_data_swap(*_args):
     pose_mode.forget_caches()
     rig.forget_caches()
     physics.forget_caches()
+    uv.forget_caches()
 
 
 def get_state(obj):
@@ -114,7 +116,8 @@ def _tip_engaged(context, settings, tip, scale):
 def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
     """Panel press, grab, create or draw for this trigger press; None means sculpt (or nothing)."""
     ss = context.window_manager.xr_session_state
-    if settings.show_panel and hand == actions.HANDS[1] and ss is not None and presence.shown(context, ss):
+    off = actions.is_off_hand(hand, context)
+    if settings.show_panel and not off and ss is not None and presence.shown(context, ss):
         widgets, hit, _m, _h = interactions.panel_pointer(context, ss, pose)
         if hit is not None:
             # A press anywhere on the panel belongs to the panel, even between widgets.
@@ -127,13 +130,17 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         key = paths.nearest_key(context, tip_pose.translation, scale)
         if key is not None:
             return paths.KeyDrag(context, key[0], key[1], tip_pose.translation)
+    if settings.mode == 'MODEL' and settings.uv_tool != 'NONE':
+        handler = uv.pick(context, settings, off, scale)
+        if handler is not None:
+            return handler
     if settings.mode == 'MODEL' and settings.model_mark != 'NONE' and shading.mark_targets(context):
-        how = 'CLEAR' if hand == actions.HANDS[0] else settings.model_mark
+        how = 'CLEAR' if off else settings.model_mark
         return shading.EdgeMark(context, how, scale)
     if settings.mode == 'MODEL':
-        if hand == actions.HANDS[0]:
-            # The left trigger selects what it touches (and moves it, held), or clears the selection in
-            # empty space; the right one only makes things, so it never grabs by accident.
+        if off:
+            # The off-hand trigger selects what it touches (and moves it, held), or clears the selection in
+            # empty space; the main one only makes things, so it never grabs by accident.
             obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale)
             if obj is None:
                 return interactions.Deselect(context)
@@ -144,11 +151,11 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
     if settings.mode == 'DRAW':
         return drawing.pick(context, settings, tip_pose, value, scale)
     if settings.mode == 'PAINT':
-        return paint.pick(context, settings, hand == actions.HANDS[0], pose, tip_pose, scale, value)
+        return paint.pick(context, settings, off, pose, tip_pose, scale, value)
     if settings.mode == 'POSE':
         return pose_mode.pick(context, settings, tip_pose, scale)
     if settings.mode == 'RIG':
-        return rig.pick(context, settings, hand == actions.HANDS[0], tip_pose, scale)
+        return rig.pick(context, settings, off, tip_pose, scale)
     if settings.mode == 'PHYSICS':
         return physics.pick(context, settings, actions.hand_index(hand), tip_pose, scale, value)
     if settings.mode == 'TOOLS':
@@ -205,16 +212,16 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         # Sculpting turns an editable primitive or stroke into a plain mesh.
         primitives.forget(obj)
         strokes.forget(obj)
-        left = self.hand == actions.HANDS[0]
+        off = actions.is_off_hand(self.hand, context)
         if settings.engine == 'NATIVE':
             try:
                 self.stroke = native.NativeStroke(context, obj, settings.radius * scale,
-                                                  invert=settings.left_inverts and left)
+                                                  invert=settings.left_inverts and off)
             except RuntimeError as ex:
                 self.report({'WARNING'}, str(ex))
                 return {'CANCELLED'}
         else:
-            invert = settings.left_inverts and left and settings.brush in {'DRAW', 'INFLATE'}
+            invert = settings.left_inverts and off and settings.brush in {'DRAW', 'INFLATE'}
             self.stroke = brushes.Stroke(
                 get_state(obj), settings.brush, settings.radius * scale, settings.strength,
                 invert=invert, symmetry=symmetry.sculpt_bits(settings), grab_rotate=settings.grab_rotate,
@@ -370,22 +377,22 @@ def undo_last_stroke(context):
 
 
 class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
-    """Right hand (B): next brush (Sculpt), next primitive (Model), undo last stroke (Draw, Paint, Rig
-    weights), end the bone chain (Rig bones), FK / IK (Pose), play / stop the simulation (Physics), remove the
-    last measurement or switch camera (Tools). Left hand (Y): next mode"""
+    """Main hand (B, or Y left-handed): next brush (Sculpt), next primitive (Model), undo last stroke (Draw,
+    Paint, Rig weights), end the bone chain (Rig bones), FK / IK (Pose), play / stop the simulation (Physics),
+    remove the last measurement or switch camera (Tools). Off hand (Y, or B left-handed): next mode"""
     bl_idname = "vrsculpt.cycle_brush"
     bl_label = "VR Next Brush / Switch Mode"
     bl_options = {'INTERNAL'}
 
-    left_hand: BoolProperty(name="Left Hand", options={'SKIP_SAVE'})
+    off_hand: BoolProperty(name="Off Hand", options={'SKIP_SAVE'})
 
     def execute(self, context):
         settings = context.scene.vr_sculpt
         ss = context.window_manager.xr_session_state
-        if not self.left_hand and ss is not None and desktop.pointing_at_content(context, ss):
+        if not self.off_hand and ss is not None and desktop.pointing_at_content(context, ss):
             desktop.right_click(context, ss)
             return {'FINISHED'}
-        if self.left_hand:
+        if self.off_hand:
             i = MODE_CYCLE.index(settings.mode) if settings.mode in MODE_CYCLE else -1
             menus.set_mode(context, MODE_CYCLE[(i + 1) % len(MODE_CYCLE)])
         elif settings.mode == 'DRAW':
@@ -428,25 +435,25 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
 
     def invoke(self, context, event):
         if event.xr:
-            self.left_hand = event.xr.user_path == actions.HANDS[0]
+            self.off_hand = actions.is_off_hand(event.xr.user_path, context)
         self.execute(context)
         if event.xr:
-            haptic(context, event.xr.user_path, 0.8 if self.left_hand else 0.6, 0.08 if self.left_hand else 0.05)
+            haptic(context, event.xr.user_path, 0.8 if self.off_hand else 0.6, 0.08 if self.off_hand else 0.05)
         return {'FINISHED'}
 
 
 class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
-    """Right stick click: next brush radius (Pose: IK chain length; Rig: weight brush radius; Physics: hands on
-    or off). Left stick click: pin or unpin the hand panel"""
+    """Main-hand stick click: next brush radius (Pose: IK chain length; Rig: weight brush radius; Physics: hands
+    on or off). Off-hand stick click: pin or unpin the hand panel"""
     bl_idname = "vrsculpt.cycle_radius"
     bl_label = "VR Next Radius / Pin Panel"
     bl_options = {'INTERNAL'}
 
-    left_hand: BoolProperty(name="Left Hand", options={'SKIP_SAVE'})
+    off_hand: BoolProperty(name="Off Hand", options={'SKIP_SAVE'})
 
     def execute(self, context):
         settings = context.scene.vr_sculpt
-        if self.left_hand:
+        if self.off_hand:
             presence.toggle_pin(context)
             return {'FINISHED'}
         if settings.mode == 'POSE':
@@ -464,7 +471,7 @@ class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
 
     def invoke(self, context, event):
         if event.xr:
-            self.left_hand = event.xr.user_path == actions.HANDS[0]
+            self.off_hand = actions.is_off_hand(event.xr.user_path, context)
         self.execute(context)
         if event.xr:
             haptic(context, event.xr.user_path, 0.4, 0.03)

@@ -6,10 +6,54 @@ Meta Quest over OpenXR.
 
 ![Brush rings at the controller tips, native engine](docs/overlay_native.png)
 
+## Install
+
+You need:
+
+- **Blender 5.4** or newer (built and tested on the 5.4.0 Alpha daily builds).
+- The bundled **VR Scene Inspection** add-on, enabled (**Edit > Preferences >
+  Add-ons**, search "VR").
+- A headset with a working OpenXR runtime (Meta Quest Link / Air Link, Steam
+  Link or SteamVR, ...), set as the active runtime.
+
+From a release:
+
+1. Download `vr_sculpt-<version>.zip` from the
+   [latest release](https://github.com/el-germi/blender-vr-sculpt/releases/latest).
+2. In Blender: **Edit > Preferences > Get Extensions**, the drop-down at the
+   top right, **Install from Disk...**, and pick the zip. Or from a terminal:
+
+   ```bash
+   blender --command extension install-file -r user_default -e vr_sculpt-<version>.zip
+   ```
+
+From source (a clone of this repository), build the zip into `dist/`, then
+install it the same way:
+
+```bash
+blender --background --factory-startup --command extension build --source-dir vr_sculpt --output-dir dist
+```
+
+Then, in the 3D View: **Sidebar (N) > VR > Start VR Session**. The **VR
+Authoring** panel in the same tab has the engine, brush, radius, strength, tip
+offset and display options; **VR Extras** has the grid, navigation, hands
+(Left Handed), camera, desktop window, passthrough and tracking settings
+(including hiding the hand panel's "New here" camera button).
+
+- Python engine: select a mesh in **Object Mode**.
+- Native engine: select a mesh in **Sculpt Mode**. The desktop window needs a
+  3D viewport, but it doesn't have to show the mesh (see below for why).
+
 ## Features
 
 - **Trigger to sculpt**, pressure-sensitive. The left hand does the opposite
   (push in, deflate, ...) where that makes sense.
+- **Left-handed mode**: **gear** > Handed > Left on the hand panel (or **Left
+  Handed** in VR Extras) swaps the hands. The left controller sculpts, points
+  and presses; the panel sits over the right hand and shows with a turn of the
+  right wrist; the face buttons, stick clicks and sticks swap jobs, and the
+  button hints follow. Everywhere this README says right / left, read main /
+  other hand.
 - **Two engines**
   - **Python brushes** (Object Mode): this add-on's own numpy brushes:
     Draw, Smooth, Grab (follows controller rotation), Inflate. X / Y / Z
@@ -84,6 +128,30 @@ Meta Quest over OpenXR.
     inputs), Up / Down and Remove. Applying or removing a cut deletes its
     cutter, and a radial array's center goes with it. Our modifiers keep
     their order, so Up / Down only show where a move is allowed.
+- **UV mapping** (Model mode, the **UV** page of the selected object): the
+  part of UV work that is 3D, deciding where to cut and checking the result
+  on the surface. Arranging islands stays on the desktop.
+  - **Seams** turns the trigger into a seam tool: trace along edges with the
+    right hand to mark them as seams (Blender's own, drawn red), the left
+    hand clears. The tip walks from vertex to vertex and marks the shortest
+    edge path between them, so a fast sweep leaves no gaps and no stray cuts
+    across the line. With **Live** on (More), the mesh unwraps again when you
+    let go. It works on the object and its visible cutters.
+  - **Fix** is a brush for UVs that sculpting stretched or scrambled: brush
+    over the bad patch and, on release, only those faces unwrap again. The
+    patch's border is pinned for the unwrap, so it stays stitched to the rest
+    and nothing outside it moves. A brushed whole island is unwrapped in
+    place. The cost goes with the patch (about 60 ms for 50 faces on a
+    32k-face mesh), not the sculpt.
+  - **View**: a **Checker** on the UVs (squares should stay square and even;
+    pink outside the UV square) or **Stretch**, each face colored from blue
+    (true to the surface) to red (twice or half the typical face's size, or
+    skewed as much).
+  - **Unwrap** (with the method under More: Angle, Conformal, Min Stretch),
+    **Smart UV** (which also marks seams along its islands), **Pack**, and
+    under More: **From sharp** (seams on edges that shade sharp, marked soft
+    ones left out), **Even out** (islands scaled to their share, packed) and
+    Clear seams. Seams and our UVs survive resizing a primitive.
 - **Kit parts (kitbashing)**, in Model mode: the **Kit** button beside Add
   opens your asset libraries on the hand panel, as thumbnails by catalog.
   Choose a part and the trigger places it:
@@ -328,31 +396,12 @@ something you're working on): right trigger = left mouse button, left
 trigger = middle button, B = right click, right stick = scroll wheel.
 Pointing at its title bar: drag to move it, or press Keyboard / Hide.
 
+Left-handed (**gear** > Handed > Left), swap Left and Right in this table:
+Y and B trade jobs, so do the sticks, their clicks and the triggers. It
+switches live, no session restart needed.
+
 Trigger teleport and the stock stick navigation are replaced while "Sculpt
 With Triggers" is on. The setting applies when the VR session starts.
-
-## Install
-
-Needs Blender 5.4+ with the bundled **VR Scene Inspection** add-on enabled
-and a working OpenXR runtime.
-
-```bash
-blender --background --factory-startup --command extension build --source-dir vr_sculpt --output-dir dist
-```
-
-```bash
-blender --background --command extension install-file -r user_default -e dist/vr_sculpt-0.1.0.zip
-```
-
-Then in the 3D View: **Sidebar (N) > VR > Start VR Session**. The **VR
-Authoring** panel in the same tab has the engine, brush, radius, strength, tip
-offset and display options; **VR Extras** has the grid, navigation, camera, desktop
-window, passthrough and tracking settings (including hiding the hand panel's
-"New here" camera button).
-
-- Python engine: select a mesh in **Object Mode**.
-- Native engine: select a mesh in **Sculpt Mode**. The desktop window needs a
-  3D viewport, but it doesn't have to show the mesh (see below for why).
 
 ## How it works
 
@@ -415,6 +464,14 @@ window, passthrough and tracking settings (including hiding the hand panel's
   (angle > Angle or `sharp_edge`) and not `vrs_soft`. Blender's Smooth by
   Angle wouldn't do: it keeps flat faces flat, and its Ignore Sharpness also
   drops hand-marked edges.
+  [uv.py](vr_sculpt/uv.py) runs Blender's `uv.unwrap` / `smart_project` /
+  `pack_islands`, which only work in Edit Mode: the object goes into Edit
+  Mode alone and comes back, with its selection, the other selected objects
+  and pins put back. Fix copies the brushed faces (with their seams and the
+  border pins) into a temporary mesh, unwraps that and copies the UVs back.
+  The checker / stretch view is built from the evaluated mesh in the app
+  timer when the geometry changes (a depsgraph handler counts changes) and
+  drawn with a small shader on the surface, like the rig's heat map.
   Surface snapping ([snapping.py](vr_sculpt/snapping.py)) builds BVH trees
   of the meshes near a grabbed object on first use and keeps them for the
   grab.
@@ -752,6 +809,31 @@ Found with [tests/probe_dyntopo.py](tests/probe_dyntopo.py) and
   | **Shape keys** | resized but scrambled (most vertices lose their offset); rest.py keeps them for sessions started from VR. Blender also leaks a few bytes per session with shape keys |
   | Multires | the toggle turns on anyway; VR Sculpt refuses it |
 
+### What we learned about UV operators (5.4.0 Alpha)
+
+Found with [tests/probe_uv.py](tests/probe_uv.py):
+
+- Seams are `MeshEdge.use_seam`, stored as an edge attribute `uv_seam`.
+  Pins are a corner attribute `.pn.<UV map name>`; `MeshUVLoopLayer.pin` is
+  empty until it exists.
+- `uv.unwrap` (methods `ANGLE_BASED`, `CONFORMAL`, `MINIMUM_STRETCH`),
+  `smart_project`, `pack_islands`, `average_islands_scale` and
+  `seams_from_islands` all run from a script in Edit Mode, also in the
+  background, with a `temp_override` of the object.
+- `uv.unwrap` only solves the selected faces. **Without pins, a partial
+  unwrap repacks the patch** somewhere else in the UV square; with its border
+  corners pinned, the border and everything outside stay exactly where they
+  were and the inside is solved against them.
+- A partial unwrap costs about as much as unwrapping the whole mesh (1000
+  faces of a 131k-face mesh: ~600 ms; the whole mesh: ~630 ms; plus ~50 ms
+  for the Edit Mode round trip), hence the temporary mesh for Fix.
+- Unwrapping a closed mesh with no seams fails with only a warning
+  ("Unwrap failed to solve") and `{'FINISHED'}`, and the probe's timing run
+  on a 500k-face sphere with no seams hadn't finished after 15 minutes. VR
+  Sculpt doesn't run it then and says why.
+- `uv.minimize_stretch` with pins still moved UVs outside the selection a
+  little, so Fix doesn't use it.
+
 ## Performance
 
 Measured on the test machine.
@@ -829,6 +911,10 @@ blender --background --factory-startup --python tests/test_physics.py
 blender --background --factory-startup --python tests/test_rest.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_uv.py
+```
+
 `test_kit.py` registers a temporary asset library and points My Kit at a
 temporary folder, so neither your preferences nor your kit are touched.
 Rebuild the starter kit (`vr_sculpt/assets/kit`) with:
@@ -869,6 +955,8 @@ puppet take while the timeline really plays, and draws the Pose page and
 bones (`probe_pose.py` checked the pose API).
 `kit_preview.py` draws the Kit sheet (`kit_panels.png`) and a box dressed
 with dropped, stamped and cut starter parts (`kit_scene.png`).
+`uv_preview.py` draws the UV page and a seamed sphere with the checker and
+stretch views (`uv_preview_checker.png`, `uv_preview_stretch.png`).
 `paint_preview.py`
 paints real Contact and Spray strokes with simulated controllers and checks
 color, size, undo and picking (`probe_texpaint*.py` found how).
@@ -905,6 +993,13 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   toggle and choice settings: pick objects, vertex groups and curves on the
   desktop. Applying to a mesh other objects share gives the object its own
   copy first. Adding new modifier types from VR isn't there yet.
+- UV page: it works on the selected object in Model mode, so to fix UVs
+  after sculpting, switch to Model (that leaves Sculpt Mode). Live unwrap
+  and Unwrap redo the whole mesh, about 0.6 s at 131k faces, and they lay
+  the islands out again (hand-moved islands move). Only the active UV map
+  is used. Arranging islands by hand (moving, rotating, stitching) is a
+  desktop job. Seams and UVs survive a primitive's settings changing only
+  while its edges stay the same (a resize, not more segments).
 - Geometry-node asset primitives in Add > Mesh aren't listed yet.
 - Kit parts: only mesh objects and collections are parts (no curves,
   geometry-node assets or materials). A collection part can't be a cutter.

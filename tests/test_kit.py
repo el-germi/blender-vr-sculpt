@@ -432,7 +432,7 @@ def test_panel():
     # B cycles through the catalog's parts.
     keys = kit.siblings(settings.primitive)
     i = keys.index(settings.primitive)
-    fake = type("Op", (), {"left_hand": False, "report": lambda *a: None})()
+    fake = type("Op", (), {"off_hand": False, "report": lambda *a: None})()
     operators.VRSCULPT_OT_cycle_brush.execute(fake, bpy.context)  # No XR session: not pointing at the desktop.
     check(settings.primitive == keys[(i + 1) % len(keys)], "B steps to the next part in the catalog")
 

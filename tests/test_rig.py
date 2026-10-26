@@ -397,10 +397,10 @@ def test_modes(arm, body):
     menus.set_mode(ctx, 'PAINT')
     check(arm.mode == 'OBJECT' and ctx.view_layer.objects.active == body,
           "leaving Rig: the rig leaves Edit Mode, the mesh is active again")
-    bpy.ops.vrsculpt.cycle_brush(left_hand=True)
+    bpy.ops.vrsculpt.cycle_brush(off_hand=True)
     check(s.mode == 'RIG' and ctx.view_layer.objects.active == arm and arm.mode == 'EDIT',
           "Y after Paint: Rig, on the mesh's rig")
-    bpy.ops.vrsculpt.cycle_brush(left_hand=True)
+    bpy.ops.vrsculpt.cycle_brush(off_hand=True)
     check(s.mode == 'POSE' and arm.mode == 'POSE', "then Pose, which poses it")
     menus.set_mode(ctx, 'RIG')
     check(s.mode == 'RIG' and arm.mode == 'EDIT', "and back")

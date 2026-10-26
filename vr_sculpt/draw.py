@@ -8,9 +8,9 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-from . import (camera, controllers, desktop, drawing, grid, hardsurface, hud, interactions, kit, measure, menus,
-               onion, operators, paint, paths, physics, presence, primitives, puppet, rig, shading, snapping, strokes,
-               symmetry, vr_ui)
+from . import (actions, camera, controllers, desktop, drawing, grid, hardsurface, hud, interactions, kit, measure,
+               menus, onion, operators, paint, paths, physics, presence, primitives, puppet, rig, shading, snapping,
+               strokes, symmetry, uv, vr_ui)
 from . import pose as pose_mode  # "pose" is a controller pose below
 
 COLORS = hud.PYTHON_COLORS
@@ -76,7 +76,7 @@ def draw_overlay(context, ss, xr=True):
     if settings.mode == 'POSE' and settings.pose_show_bones:
         pose_mode.draw(context, tips, scale)
     if settings.mode == 'RIG':
-        rig.draw(context, tips, scale)
+        rig.draw(context, actions.by_role(tips, context), scale)
     if settings.mode == 'PHYSICS':
         physics.draw(context, tips, scale)
     puppet.draw(context, scale)
@@ -103,12 +103,13 @@ def _draw_cursors(context, ss, settings, xr):
         radius = {'EDIT': drawing.EDIT_RADIUS, 'ERASE': drawing.ERASE_MARGIN}.get(
             settings.draw_tool, settings.draw_width / 2) * scale
     else:
-        marking = model and settings.model_mark != 'NONE'
+        marking = model and (settings.model_mark != 'NONE' or settings.uv_tool == 'SEAM')
+        fixing = model and settings.uv_tool == 'FIX'
         # Stamping, the ring is half the spacing: stamps go where neighboring rings would touch.
         stamping = model and settings.kit_stamp and kit.is_key(settings.primitive)
         radius = (settings.weight_radius if weights else pose_mode.REACH if posing else rig.REACH if rigging else
                   physics.HAND_RADIUS if simulating and settings.physics_hands else
-                  interactions.TOUCH_MARGIN if simulating else
+                  interactions.TOUCH_MARGIN if simulating else settings.uv_fix_radius if fixing else
                   shading.MARK_REACH if marking else settings.kit_spacing / 2 if stamping else
                   interactions.TOUCH_MARGIN if model or tools else
                   settings.paint_radius if painting else settings.radius) * scale
@@ -124,6 +125,7 @@ def _draw_cursors(context, ss, settings, xr):
     shader = gpu.shader.from_builtin('UNIFORM_COLOR')
     gpu.state.blend_set('ALPHA')
     gpu.state.depth_test_set('NONE')
+    off = actions.off_index(context)
     for idx in range(2):
         pose = operators.controller_pose(ss.controller_aim_location_get(context, idx),
                                          ss.controller_aim_rotation_get(context, idx))
@@ -137,12 +139,16 @@ def _draw_cursors(context, ss, settings, xr):
                 near = strokes.nearest(context, tip, reach)
                 if near is not None:
                     _draw_bounds(shader, near, (*color, 0.9))
+        elif model and settings.uv_tool != 'NONE':
+            color = uv.SEAM_COLOR if settings.uv_tool == 'SEAM' else uv.FIX_COLOR
+            if idx == off and settings.uv_tool == 'SEAM':
+                color = (1.0, 1.0, 1.0)  # The off hand clears.
         elif model and settings.model_mark != 'NONE':
             color = {'HARD': shading.HARD_COLOR, 'SOFT': shading.SOFT_COLOR}.get(settings.model_mark, (1.0, 1.0, 1.0))
-            if idx == 0:
-                color = (1.0, 1.0, 1.0)  # The left hand clears.
-        elif model and idx == 0:
-            # The left trigger selects: the ring is the selection's color, and what it would select is boxed.
+            if idx == off:
+                color = (1.0, 1.0, 1.0)  # The off hand clears.
+        elif model and idx == off:
+            # The off-hand trigger selects: the ring is the selection's color, and what it would select is boxed.
             color = SELECT_COLOR
             touched = primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale)
             if touched is not None:
@@ -155,19 +161,19 @@ def _draw_cursors(context, ss, settings, xr):
         elif posing:
             color = hud.POSE_COLORS[settings.pose_tool]
         elif weights:
-            brush = rig.flip(settings.weight_brush) if idx == 0 else settings.weight_brush
+            brush = rig.flip(settings.weight_brush) if idx == off else settings.weight_brush
             color = rig.BRUSH_COLORS[brush]
         elif rigging:
-            color = rig.DELETE_COLOR if idx == 0 else rig.BONES_COLOR
+            color = rig.DELETE_COLOR if idx == off else rig.BONES_COLOR
         elif simulating:
-            color = hud.physics_color(settings, idx)
+            color = hud.physics_color(settings, idx != off)
             if not settings.physics_hands or settings.physics_tool == 'GRAB':
                 touched = primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale)
                 if touched is not None:
                     _draw_bounds(shader, touched, (1.0, 0.85, 0.3, 0.9))
         elif painting:
-            color = paint.get_color(context, secondary=idx == 0)
-        elif idx == 0 and settings.left_inverts and (native or settings.brush in {'DRAW', 'INFLATE'}):
+            color = paint.get_color(context, secondary=idx == off)
+        elif idx == off and settings.left_inverts and (native or settings.brush in {'DRAW', 'INFLATE'}):
             color = INVERT_COLOR
         alpha = 1.0 if idx in operators.active_hands else 0.6
 
@@ -208,6 +214,11 @@ def _draw_cursors(context, ss, settings, xr):
                                                                   ss.controller_aim_rotation_get(context, i)), offset)
                     for i in range(2)]
             shading.draw(shader, context, tips, scale, settings.model_mark != 'NONE')
+        if uv.page_shown(context):
+            tips = [operators.brush_tip(operators.controller_pose(ss.controller_aim_location_get(context, i),
+                                                                  ss.controller_aim_rotation_get(context, i)), offset)
+                    for i in range(2)]
+            uv.draw(shader, context, tips, scale)
     if sketch:
         _draw_mirror_planes(shader, drawing.mirror_bits(settings), context.scene.cursor.location, scale)
     if rigging and settings.rig_tool == 'BONES' and settings.rig_mirror:
@@ -218,20 +229,21 @@ def _draw_cursors(context, ss, settings, xr):
 
     viewer = Vector(ss.viewer_pose_location)
     if selected is not None:
-        # Its name above it, so you know what the left trigger picked.
+        # Its name above it, so you know what the off-hand trigger picked.
         top = max(_box(selected), key=lambda c: c.z)
         center = sum(_box(selected), Vector()) / 8
         hud.draw_tag(Vector((center.x, center.y, top.z)) + Vector((0.0, 0.0, 0.012 * scale)), viewer, scale,
                      selected.name, SELECT_COLOR)
     camera_tool = tools and settings.tool == 'CAMERA'
     if settings.show_brush_card:
-        # The tip status: a slim line above the right hand, facing the headset.
-        anchor = Vector(ss.controller_grip_location_get(context, 1)) + Vector((0.0, 0.0, 0.05 * scale))
+        # The tip status: a slim line above the main hand, facing the headset.
+        anchor = Vector(ss.controller_grip_location_get(context, actions.main_index(context))) + Vector((0.0, 0.0, 0.05 * scale))
         content = hud.card_content(settings, sculpt_brush)
         hud.draw_status(anchor, viewer, scale, content, hud.status_size(context, settings))
     if xr and camera_tool and context.scene.camera is not None:
         # A viewfinder above the status: the controller is the camera.
-        anchor = Vector(ss.controller_grip_location_get(context, 1)) + Vector((0.0, 0.0, 0.075 * scale))
+        anchor = Vector(ss.controller_grip_location_get(context, actions.main_index(context))) + \
+            Vector((0.0, 0.0, 0.075 * scale))
         camera.draw_preview(hud.billboard(anchor, viewer, scale), context.scene)
     _draw_panel(context, ss, settings, xr)
 
@@ -240,12 +252,13 @@ def _draw_panel(context, ss, settings, xr):
     """The hand panel and timeline, faded in and out by presence.py; hidden, its ghost."""
     if not settings.show_panel:
         return
-    right = operators.controller_pose(ss.controller_aim_location_get(context, 1),
-                                      ss.controller_aim_rotation_get(context, 1))
+    main = actions.main_index(context)
+    aim = operators.controller_pose(ss.controller_aim_location_get(context, main),
+                                    ss.controller_aim_rotation_get(context, main))
     frames = interactions.panel_frames(context, ss)
-    widgets, hit, hit_matrix, _h = interactions.panel_pointer(context, ss, right, frames)
+    widgets, hit, hit_matrix, _h = interactions.panel_pointer(context, ss, aim, frames)
     was_shown = presence.shown(context, ss)
-    ghost = not was_shown and vr_ui.ghost_hit(frames[0][0], right.translation, interactions.aim_direction(right))
+    ghost = not was_shown and vr_ui.ghost_hit(frames[0][0], aim.translation, interactions.aim_direction(aim))
     alpha = presence.update(context, ss, using=(hit is not None and was_shown) or ghost or
                             interactions.pressed_id is not None)
     if alpha < 0.98:
@@ -264,7 +277,7 @@ def _draw_panel(context, ss, settings, xr):
         vr_ui.draw_panel(vr_ui.lift(matrix, alpha), panel_widgets, height, hover.id if hover else None,
                          interactions.pressed_id, width=width, alpha=alpha, pointer=pointer)
     if hit is not None and shown:
-        vr_ui.draw_ray(right.translation, hit_matrix @ Vector((hit[0], hit[1], 0.0)), True)
+        vr_ui.draw_ray(aim.translation, hit_matrix @ Vector((hit[0], hit[1], 0.0)), True)
     camera_tool = settings.mode == 'TOOLS' and settings.tool == 'CAMERA'
     if xr and settings.camera_preview and context.scene.camera is not None and alpha > 0.5 and not camera_tool:
         # Pinned to the left of the hand panel.
@@ -299,7 +312,8 @@ def _draw_paint_cursors(context, ss, settings):
         coords = [p for i in range(_SEGMENTS) for p in (ring[i], ring[(i + 1) % _SEGMENTS])]
         if settings.paint_reach == 'SPRAY':
             coords += [pose.translation, point]
-        color = (1.0, 1.0, 1.0) if settings.paint_tool == 'PICK' else paint.get_color(context, secondary=idx == 0)
+        secondary = idx == actions.off_index(context)
+        color = (1.0, 1.0, 1.0) if settings.paint_tool == 'PICK' else paint.get_color(context, secondary=secondary)
         batch = batch_for_shader(shader, 'LINES', {"pos": coords})
         shader.uniform_float("color", (*color, 0.95))
         batch.draw(shader)

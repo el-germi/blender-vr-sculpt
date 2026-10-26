@@ -635,9 +635,9 @@ def test_modes(arm):
     primitives.make_active(ctx, arm)
     menus.set_mode(ctx, 'POSE')
     check(arm.mode == 'POSE', "Pose poses the rig")
-    bpy.ops.vrsculpt.cycle_brush(left_hand=True)
+    bpy.ops.vrsculpt.cycle_brush(off_hand=True)
     check(s.mode == 'PHYSICS' and arm.mode == 'OBJECT', "Y after Pose: Physics, the rig back in Object Mode")
-    bpy.ops.vrsculpt.cycle_brush(left_hand=True)
+    bpy.ops.vrsculpt.cycle_brush(off_hand=True)
     check(s.mode == 'TOOLS', "then Tools")
     menus.set_mode(ctx, 'PHYSICS')
     s.physics_hands = False

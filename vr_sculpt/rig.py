@@ -6,7 +6,7 @@ chain sets its root; every press after that ends a bone at the tip and the next 
 from there, connected (hold and move to place the joint precisely). Between presses a rubber band
 runs from the last joint to the tip. A press on a joint carries on from it: on a bone's tail the next
 bone is its child, so pressing an inner joint branches; on a root's head, a new root starts beside
-it. Dragging a joint moves it, and the bones connected to it follow. The left trigger deletes the
+it. Dragging a joint moves it, and the bones connected to it follow. The off-hand trigger deletes the
 bone it touches, or ends the chain in empty space; End chain (B) ends it too. Mirror X builds and
 edits .L / .R pairs across the rig's X = 0 plane (a new rig's origin is its first joint).
 
@@ -14,7 +14,7 @@ Bind: an Armature modifier and automatic weights (Blender's bone heat, object.pa
 type 'ARMATURE_AUTO').
 
 Weights tool (the rig in Object Mode): a numpy brush, like brushes.py, writes the active bone's
-vertex group: Add / Subtract / Smooth in a sphere at the tip, pressure-sensitive, the left hand doing
+vertex group: Add / Subtract / Smooth in a sphere at the tip, pressure-sensitive, the off hand doing
 the opposite (Smooth smooths with both). Vertex groups aren't mesh attributes in 5.4, but
 VertexGroup.add() for one vertex costs under a microsecond, so only the touched vertices are
 written. A press near a bone, and nearer to it than to the surface, picks that bone instead. The
@@ -546,7 +546,7 @@ class SelectBone:
 
 
 class DeleteBone:
-    """Left trigger on a bone or joint: delete that bone (with Mirror X, its counterpart too)."""
+    """Off-hand trigger on a bone or joint: delete that bone (with Mirror X, its counterpart too)."""
 
     def __init__(self, context, settings, arm, name):
         self.deleted = delete_bone(arm, name, settings.rig_mirror)
@@ -1087,7 +1087,8 @@ def _cross(p, r):
 
 
 def draw(context, tips, scale):
-    """Rig mode in the headset: the heat map (Weights), the bones, joints and the rubber band."""
+    """Rig mode in the headset: the heat map (Weights), the bones, joints and the rubber band. tips: the
+    (off hand's, main hand's) tips."""
     settings = context.scene.vr_sculpt
     arm = target(context)
     if settings.rig_tool == 'WEIGHTS':

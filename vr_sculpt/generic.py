@@ -194,8 +194,9 @@ def regenerate(context, obj):
     fresh = objs[0]
     old = obj.data
     if fresh.type == obj.type:
-        from . import shading
+        from . import shading, uv
         shading.restore_marks(fresh.data, shading.save_marks(old))  # Kept when the edges are the same.
+        uv.restore(fresh.data, uv.save(old))
         obj.data = fresh.data
     for o in objs:
         bpy.data.objects.remove(o)
@@ -214,7 +215,6 @@ def fit(context, obj, corner_a, corner_b, min_extent):
     Whatever that leaves off (settings we can't tell are lengths, modifiers, slow generators)
     is corrected with a uniform object scale, so the result always fills the box exactly.
     """
-    import time
     a, b = Vector(corner_a), Vector(corner_b)
     target = max(max(abs(b[i] - a[i]) for i in range(3)), min_extent)
     prim = obj.vr_prim

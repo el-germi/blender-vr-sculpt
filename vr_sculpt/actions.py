@@ -39,6 +39,28 @@ def hand_index(user_path):
     return HANDS.index(user_path) if user_path in HANDS else 1
 
 
+# The main hand sculpts and points at the panel, the off hand holds the panel. Right-handed, they are
+# the right and left controllers; Left Handed (settings.left_handed) swaps them.
+
+def main_index(context=None):
+    """Controller index (0 left, 1 right) of the main hand."""
+    settings = getattr((context or bpy.context).scene, "vr_sculpt", None)
+    return 0 if settings is not None and settings.left_handed else 1
+
+
+def off_index(context=None):
+    return 1 - main_index(context)
+
+
+def is_off_hand(user_path, context=None):
+    return hand_index(user_path) == off_index(context)
+
+
+def by_role(pair, context=None):
+    """(off hand's, main hand's) from a (left, right) pair."""
+    return pair[off_index(context)], pair[main_index(context)]
+
+
 def _patch(session_state):
     vr = vr_addon()
     defaults = vr.defaults

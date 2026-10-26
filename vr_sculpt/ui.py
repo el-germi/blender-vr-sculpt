@@ -266,6 +266,7 @@ class VIEW3D_PT_vr_extras(bpy.types.Panel):
         sub.prop(settings, "desktop_interactive")
         sub.prop(settings, "desktop_keyboard")
         col.prop(context.window_manager.xr_session_settings, "show_passthrough", text="Passthrough")
+        col.prop(settings, "left_handed")
         col.prop(settings, "own_controllers")
         sub = col.column()
         sub.active = settings.own_controllers
