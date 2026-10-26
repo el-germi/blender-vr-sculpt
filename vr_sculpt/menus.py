@@ -14,7 +14,7 @@ import math
 import bpy
 
 from . import (anim, camera, catalog, desktop, generic, hardsurface, hud, kit, measure, native, paint, physics,
-               pose, presence, primitives, puppet, rig, shading, strokes, symmetry, vr_ui)
+               pose, presence, primitives, puppet, rest, rig, shading, strokes, symmetry, vr_ui)
 from .props import BRUSH_ITEMS
 
 NATIVE_SHORT = {
@@ -45,14 +45,18 @@ def set_object_mode(context, obj, mode):
         return
     if obj.type != 'MESH' and not (obj.type == 'ARMATURE' and mode in {'OBJECT', 'POSE', 'EDIT'}):
         return
+    if mode == 'SCULPT' and obj.type == 'MESH' and obj.data.get(rest.DYNTOPO):
+        rest.prepare(obj)  # Blender turns dyntopo back on as it enters: keep UVs and shape keys first.
     window, view = _desktop_view(context)
     if view is None:
         if bpy.app.background:  # Tests: no window, and none needed.
             with context.temp_override(active_object=obj, object=obj):
                 bpy.ops.object.mode_set(mode=mode)
+            rest.sync(obj)
         return
     with context.temp_override(window=window, area=view[0], region=view[1], active_object=obj, object=obj):
         bpy.ops.object.mode_set(mode=mode)
+    rest.sync(obj)  # Leaving a dyntopo session gives back what it reset.
 
 
 def set_mode(context, mode):
@@ -356,7 +360,9 @@ def _axes_row(text, prefix, states, toggle, here=None):
 
 def _sculpt_rows(context, settings):
     is_native = settings.engine == 'NATIVE'
-    out = [_header(context, settings, "Sculpt", "Native brushes" if is_native else "")]
+    dyntopo = is_native and native.dyntopo_enabled(context)
+    subtitle = (native.message() or ("Native, dyntopo" if dyntopo else "Native brushes")) if is_native else ""
+    out = [_header(context, settings, "Sculpt", subtitle)]
     if is_native:
         brush = native.sculpt_brush(context)
         current = brush.name if brush else ""
@@ -379,14 +385,54 @@ def _sculpt_rows(context, settings):
                                      lambda v: native.set_strength(context, v), fmt=_percent)])
     out.append(_axes_row("Symmetry", "sym_", symmetry.sculpt_axes(context),
                          lambda i: symmetry.sculpt_toggle(context, i)))
-    more = [
+    more = _dyntopo_rows(context) if is_native else []
+    more += [
         [vr_ui.label("Engine", fixed=LABEL_W)] + _segments(
             "engine_", "engine", (('python', "Python"), ('native', "Native")), settings.engine.lower(),
             lambda v: set_engine(context, v.upper())),
         [vr_ui.toggle("left_inverts", "Left hand inverts", settings.left_inverts, _toggle(settings, "left_inverts"),
                       icon="swap")],
     ]
-    return _disclose('SCULPT', out, more, "Engine, left hand")
+    return _disclose('SCULPT', out, more, "Dyntopo, engine, left hand" if is_native else "Engine, left hand")
+
+
+def _dyntopo_rows(context):
+    """Blender's dynamic topology (native engine): the toggle, then detail and refine while it's on."""
+    on = native.dyntopo_enabled(context)
+    if not on:
+        return [[vr_ui.toggle("dyntopo", "Dyntopo", on, lambda: native.toggle_dyntopo(context), icon="grid")]]
+    sculpt = context.tool_settings.sculpt
+    method = sculpt.detail_type_method
+    # The detail methods share the toggle's row (no room for its icon there), so the panel still fits.
+    toggle = vr_ui.toggle("dyntopo", "Dyntopo", on, lambda: native.toggle_dyntopo(context))
+    rows = [[toggle] + _segments(
+        "detail_", "detail", [(m.lower(), n) for m, n in native.DETAIL_METHODS], method.lower(),
+        lambda v: setattr(sculpt, "detail_type_method", v.upper()))]
+    value = native.detail_value(context)
+    # Strokes leave the patches they touch untextured until the session ends; these show it now.
+    settings = context.scene.vr_sculpt
+    texture = [
+        vr_ui.icon_button("dyntopo_texture", "shading", lambda: native.refresh_texture(context), "Show texture"),
+        vr_ui.toggle("dyntopo_auto_texture", "Auto", settings.dyntopo_auto_texture,
+                     _toggle(settings, "dyntopo_auto_texture"), tip="Show the texture 2 s after a stroke"),
+    ] if native.texture_restorable(context) else []
+    if method == 'BRUSH':
+        rows.append([vr_ui.slider("detail_size", "Edge", value, 0.05, 1.0,
+                                  lambda v: native.set_detail_value(context, v), fmt=_percent, weight=3.0)]
+                    + texture)
+    elif value is not None:
+        rows.append([vr_ui.slider("detail_size", "Edge", min(max(value, native.DETAIL_EDGE_MIN),
+                                                             native.DETAIL_EDGE_MAX),
+                                  native.DETAIL_EDGE_MIN, native.DETAIL_EDGE_MAX,
+                                  lambda v: native.set_detail_value(context, v), fmt=_meters, weight=3.0),
+                     vr_ui.button("detail_fill", "Fill", lambda: native.flood_fill(context))] + texture)
+    else:
+        rows.append([vr_ui.label("Detail follows the desktop view", weight=3.0, align='CENTER')] + texture)
+    if method != 'MANUAL':
+        rows.append([vr_ui.label("Refine", fixed=LABEL_W)] + _segments(
+            "refine_", "refine", [(m.lower(), n) for m, n in native.REFINE_METHODS],
+            sculpt.detail_refine_method.lower(), lambda v: setattr(sculpt, "detail_refine_method", v.upper())))
+    return rows
 
 
 # --- Model ----------------------------------------------------------------------

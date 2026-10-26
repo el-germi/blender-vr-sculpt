@@ -16,7 +16,8 @@ Meta Quest over OpenXR.
     symmetry, works on moved, rotated and scaled objects.
   - **Native (experimental)** (Sculpt Mode): drives Blender's real sculpt
     brushes from the controller tip: Draw, Clay Strips, Smooth,
-    Inflate/Deflate, Crease Sharp, Flatten/Contrast.
+    Inflate/Deflate, Crease Sharp, Flatten/Contrast. With **Dyntopo**
+    (Blender's dynamic topology) on, strokes add and remove detail as they go.
 - **Brush cursor in the headset**: rings at each controller tip, colored per
   brush (blue when that hand inverts).
 - **Quest controller models** (Meta's, converted by `tools/convert_controllers.py`)
@@ -350,8 +351,8 @@ window, passthrough and tracking settings (including hiding the hand panel's
 "New here" camera button).
 
 - Python engine: select a mesh in **Object Mode**.
-- Native engine: select a mesh in **Sculpt Mode** and keep it visible in the
-  desktop 3D viewport (see below for why).
+- Native engine: select a mesh in **Sculpt Mode**. The desktop window needs a
+  3D viewport, but it doesn't have to show the mesh (see below for why).
 
 ## How it works
 
@@ -371,7 +372,37 @@ window, passthrough and tracking settings (including hiding the hand panel's
   `foreach_set` + `mesh.update()` per frame.
 - **Native engine** ([native.py](vr_sculpt/native.py)): calls
   `bpy.ops.sculpt.brush_stroke` once per dab with a stroke element at the
-  controller tip.
+  controller tip. **Dyntopo** is Blender's own: Sculpt > *More* > Dyntopo runs
+  `sculpt.dynamic_topology_toggle`, and the detail (Brush: edge length as a
+  percentage of the brush; Constant / Manual: edge length, with Fill =
+  `sculpt.detail_flood_fill`) and refine (Split / Collapse / Both) rows edit
+  the sculpt tool settings directly. Blender's Relative detail is in pixels of
+  the desktop view, so turning dyntopo on from VR switches it to Brush. It
+  refuses a mesh with Multires. The Python engine has no dyntopo: a bmesh
+  round trip alone takes ~20 ms on a 50k-vertex mesh, before any splitting.
+- **UVs through dyntopo** ([rest.py](vr_sculpt/rest.py)). Dyntopo resets
+  every face-corner layer and scrambles shape keys (below), but carries point
+  attributes onto its new vertices. So before a session each vertex gets its
+  position as a hidden attribute (`.vrs_rest`), the mesh is copied with its
+  vertices there (a fake-user source mesh), and shape keys become offsets
+  from the basis. When the session ends, each corner is matched to the source
+  in rest space and takes its value from the source triangle there
+  (interpolated; the nearest corner for int data), and the shape keys are
+  rebuilt with their settings, action and drivers. A corner prefers its face's
+  own source polygon, and where the nearest triangle's UV jumps by more than
+  the face's UV size it is across a seam and extrapolates the face's own, so
+  nothing smears across seams. Sessions close from the live timer however
+  Sculpt Mode is left (after Edit Mode, if that's where it went), and the
+  corners also come back right away when dyntopo is turned off. Untouched
+  vertices and triangles are matched exactly with numpy; only new ones need
+  the BVH. About 0.4 s for 32k vertices / 65k faces when leaving Sculpt Mode.
+  While a session runs, Blender draws the patches a stroke rebuilt with UV
+  (0, 0) (they're without UVs inside its sculpt mesh, out of Python's reach).
+  The texture icon beside Edge (*Show texture*) leaves Sculpt Mode, restores
+  and comes back in, where dyntopo draws the restored mesh textured: 0.12 s at
+  10k vertices, 0.43 s at 33k. **Auto** does it 2 s after the last native
+  dyntopo stroke, from the live timer, when no trigger is held. Each one adds
+  the two mode switches to the undo history.
 - **Model mode** ([interactions.py](vr_sculpt/interactions.py),
   [primitives.py](vr_sculpt/primitives.py)): the same trigger operator picks
   a handler per press: hand panel, grab, or create. Primitive settings are a
@@ -677,8 +708,11 @@ Found with the probes in [tests/](tests/):
   land at the controller tip, including on parts hidden from the desktop
   view. It is in **object space**, not world space.
 - The element's **`mouse` must still be over the mesh** in a 3D viewport, or
-  the dab is silently dropped. The add-on aims it at the mesh vertex nearest
-  the tip.
+  the dab is silently dropped. Like Paint, each dab points the largest desktop
+  3D view at the tip from along the surface normal, puts the mouse at the
+  region center and puts the view back (`native.AimedView`). Before, the mouse
+  was the nearest vertex in the view as it was, and every dab was lost while
+  the desktop view looked elsewhere.
 - The element's **`size` is ignored**. The radius comes from the unified paint
   settings, even with unified size off. With the size locked to `'SCENE'`,
   `unprojected_size` is a **diameter in object space**.
@@ -689,6 +723,34 @@ Found with the probes in [tests/](tests/):
 - **XR action operators get a temporary context**: don't keep `context`
   across modal events. Use `bpy.context` each time.
 - Python `Event` objects have no `timer` attribute.
+
+### What we learned about dynamic topology (5.4.0 Alpha)
+
+Found with [tests/probe_dyntopo.py](tests/probe_dyntopo.py) and
+[tests/native_dyntopo.py](tests/native_dyntopo.py):
+
+- `sculpt.dynamic_topology_toggle` runs without its warning popup when called
+  from Python, also in the background. `sculpt.detail_flood_fill` **crashes
+  Blender with no window**, so Fill only runs with the desktop view override.
+- `Object.use_dynamic_topology_sculpting` is only true in Sculpt Mode, but the
+  mesh remembers it: entering Sculpt Mode again turns dyntopo back on.
+- While dyntopo sculpts, **`obj.data` isn't written** (nor the evaluated mesh
+  or the scene statistics) until Sculpt Mode ends. A Sculpt / Object / Sculpt
+  round trip writes it back, but costs ~45 ms at 41k vertices. So a native
+  stroke's snapshot of the mesh can be far behind the surface. When the tip has
+  no snapshot vertex in reach, the stroke dabs anyway with the mouse on the
+  nearest one, and Blender sculpts whatever is around `location`. Haptics still
+  follow the snapshot.
+- What dyntopo does to mesh data (the result is all triangles):
+
+  | Data | Result |
+  |---|---|
+  | Point domain: colors, vertex group weights, mask, other attributes | interpolated onto new vertices |
+  | Edge crease, bevel weight, sharp, seam | kept, and both halves of a split edge keep it |
+  | Face sets, material index | kept |
+  | **Face corner: UV maps, corner colors, other corner attributes** | **reset** (UVs to 0, colors to white); rest.py restores them |
+  | **Shape keys** | resized but scrambled (most vertices lose their offset); rest.py keeps them for sessions started from VR. Blender also leaks a few bytes per session with shape keys |
+  | Multires | the toggle turns on anyway; VR Sculpt refuses it |
 
 ## Performance
 
@@ -763,6 +825,10 @@ blender --background --factory-startup --python tests/test_kit.py
 blender --background --factory-startup --python tests/test_physics.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_rest.py
+```
+
 `test_kit.py` registers a temporary asset library and points My Kit at a
 temporary folder, so neither your preferences nor your kit are touched.
 Rebuild the starter kit (`vr_sculpt/assets/kit`) with:
@@ -775,9 +841,11 @@ blender --background --factory-startup --python tests/make_starter_kit.py
 settings, so your preferences aren't touched) and checks all 42 entries.
 
 Windowed (opens Blender briefly, writes `tests/*_result.txt`):
-`native_engine.py`, `native_modal.py`, `native_transform.py`. The
+`native_engine.py`, `native_modal.py`, `native_transform.py`,
+`native_dyntopo.py` (grows a bump past the stale mesh snapshot). The
 `overlay_preview.py`, `panel_preview.py`, `hud_preview.py` and
-`tools_preview.py` scripts render the overlay to PNG; `probe_capture.py`
+`tools_preview.py` scripts render the overlay to PNG, and `dyntopo_preview.py`
+the Sculpt page's dyntopo rows (`dyntopo_panels.png`); `probe_capture.py`
 checks region capture and offscreen camera rendering. `anim_preview.py`
 checks motion paths, key dragging, onion ghosts on a rig and playback.
 `undo_preview.py` runs real undos while a tape measure and a pose grab are
@@ -810,7 +878,15 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
 ## Status and limits
 
 - Prototype. Only tested on Blender 5.4.0 Alpha with Meta Quest controllers.
-- The native engine's undo granularity in VR hasn't been checked.
+- The native engine's undo granularity in VR hasn't been checked, with or
+  without dyntopo.
+- UVs through dyntopo: a session dyntopo starts on its own from the desktop
+  (Sculpt Mode entered there) gets its corners back only if the mesh already
+  has rest positions from an earlier VR session, and its shape keys aren't
+  kept (Blender has turned dyntopo on before anything can take them off).
+  Custom normals aren't restored. Geometry added in Edit Mode between
+  sessions sits at its rest positions, which can be degenerate (an extrude):
+  start the next session from VR, which takes fresh ones.
 - Creation is aligned to the world axes. Only Cube and Cylinder (our own
   versions) size non-uniformly to the drag box; other primitives keep their
   proportions. Surface snapping works when you grab, not while you drag out

@@ -24,7 +24,7 @@ blender --background --command extension install-file -r user_default -e dist/vr
 
 Background tests, one file per area (`test_brushes`, `test_modal`, `test_model`, `test_generic`,
 `test_draw`, `test_tools`, `test_paint`, `test_anim`, `test_pose`, `test_ik_limits`,
-`test_hard_surface`, `test_ui`, `test_rig`, `test_kit`, `test_physics`):
+`test_hard_surface`, `test_ui`, `test_rig`, `test_kit`, `test_physics`, `test_rest`):
 
 ```bash
 blender --background --factory-startup --python tests/test_tools.py
@@ -85,6 +85,13 @@ Mode, or `native.py` driving `sculpt.brush_stroke` in Sculpt Mode). A handler is
 whether the operator returns FINISHED (one undo step) or CANCELLED. New trigger behavior = a new
 handler class plus a branch in `_pick_handler`.
 
+- Native dabs aim the largest desktop 3D view at the tip and put it back (`native.AimedView`, shared
+  with Paint): Blender drops a dab whose mouse isn't over the mesh in that view.
+- Native dyntopo is Blender's (`native.toggle_dyntopo`). It wipes UVs / corner data and scrambles shape
+  keys, and doesn't write `obj.data` until Sculpt Mode ends; `rest.py` restores them through a hidden
+  `.vrs_rest` point attribute and a fake-user source mesh. Mode switches from VR go through
+  `menus.set_object_mode`, which calls `rest.prepare` / `rest.sync`.
+
 - XR action operators get a temporary context: don't keep `context` across modal events; use
   `bpy.context` each time.
 - Undo guard: undo/redo/load replace Blender's data, so `undo_*` / `redo_*` / `load_post` handlers
@@ -95,7 +102,8 @@ handler class plus a branch in `_pick_handler`.
 **Per-frame work outside the operator.** `live.py` is the one persistent app timer (90 Hz while
 something needs it, 4 Hz idle) that drives tracking empties, desktop captures, camera preview
 redraws, puppet bindings and takes, motion paths, onion skin, the physics hand colliders and spring
-bones (which also run outside VR while the timeline plays). Add continuous updates there rather than
+bones (which also run outside VR while the timeline plays), and closes dyntopo sessions (`rest.py`,
+also outside VR). Add continuous updates there rather than
 registering new timers. `draw.py` / `hud.py` register `SpaceView3D` draw handlers on region
 `'XR'` (headset) and `'WINDOW'` (desktop); everything in the headset (brush rings, controller models,
 panels, motion paths, ghosts, desktop screen) is drawn with `gpu`/`blf` from there (`actions.py`

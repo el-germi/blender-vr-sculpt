@@ -693,13 +693,75 @@ def test_status():
     s.mode = 'SCULPT'
 
 
+def test_dyntopo():
+    print("== dyntopo (native engine)")
+    from vr_sculpt import native
+    ctx = bpy.context
+    s = ctx.scene.vr_sculpt
+    sculpt = ctx.tool_settings.sculpt
+    menus.reset()
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8)  # Comes with a UV map.
+    ball = ctx.active_object
+    s.engine = 'PYTHON'
+    menus.set_mode(ctx, 'SCULPT')
+    menus.set_more('SCULPT', True)
+    check("dyntopo" not in ids(), "Python engine: no dyntopo row")
+    menus.set_engine(ctx, 'NATIVE')
+    check(ball.mode == 'SCULPT' and "dyntopo" in ids() and "detail_brush" not in ids(),
+          "native: a Dyntopo toggle under More, its settings hidden while it's off")
+    sculpt.detail_type_method = 'RELATIVE'
+    vr_ui.find(menus.layout(ctx)[0], "dyntopo").on_press()
+    check(ball.use_dynamic_topology_sculpting and sculpt.detail_type_method == 'BRUSH',
+          "one press turns it on (the UVs are kept), with detail relative to the brush instead of the desktop view")
+    check(content_rows()[0][0].value_text == "Native, dyntopo", "the header says dyntopo is on")
+    got = ids()
+    check({"detail_brush", "detail_constant", "detail_manual", "detail_size", "refine_subdivide_collapse"} <= got
+          and "detail_fill" not in got, "on: detail and refine rows; no Fill with brush detail")
+    vr_ui.find(menus.layout(ctx)[0], "detail_size").on_change(0.5)
+    check(abs(sculpt.detail_percent - 50.0) < 1e-4, "the slider sets the brush percentage")
+    vr_ui.find(menus.layout(ctx)[0], "refine_collapse").on_press()
+    check(sculpt.detail_refine_method == 'COLLAPSE', "Refine sets Blender's refine method")
+    vr_ui.find(menus.layout(ctx)[0], "detail_constant").on_press()
+    slider = vr_ui.find(menus.layout(ctx)[0], "detail_size")
+    slider.on_change(0.01)
+    check(sculpt.detail_type_method == 'CONSTANT' and abs(sculpt.constant_detail_resolution - 100.0) < 1e-3
+          and slider.fmt(0.01) == "1.0 cm" and "detail_fill" in ids(),
+          "Constant: the slider is the edge length (1 cm = resolution 100), with Fill beside it")
+    vr_ui.find(menus.layout(ctx)[0], "detail_fill").on_press()
+    check("desktop" in native.message(), "Fill without a window says so (detail_flood_fill would crash)")
+    vr_ui.find(menus.layout(ctx)[0], "detail_manual").on_press()
+    check("refine_collapse" not in ids() and "detail_fill" in ids(), "Manual: Fill, and no refine row")
+    sculpt.detail_type_method = 'BRUSH'  # The most rows.
+    widgets, height = menus.layout(ctx)
+    overlap = any(a is not b and a.rect[0] < b.rect[2] - 1e-9 and b.rect[0] < a.rect[2] - 1e-9 and
+                  a.rect[1] < b.rect[3] - 1e-9 and b.rect[1] < a.rect[3] - 1e-9 for a in widgets for b in widgets)
+    check(not overlap and height < 0.32, f"the panel fits with every dyntopo row open ({height:.3f} m)")
+    vr_ui.find(menus.layout(ctx)[0], "dyntopo").on_press()
+    check(not ball.use_dynamic_topology_sculpting and "detail_brush" not in ids(), "one press turns it off")
+
+    # Multires is refused.
+    menus.set_object_mode(ctx, ball, 'OBJECT')
+    ball.modifiers.new("Multires", 'MULTIRES')
+    menus.set_object_mode(ctx, ball, 'SCULPT')
+    native.toggle_dyntopo(ctx)
+    check(not ball.use_dynamic_topology_sculpting and "Multires" in native.message(), "Multires: refused")
+    menus.set_object_mode(ctx, ball, 'OBJECT')
+    me = ball.data
+    bpy.data.objects.remove(ball)
+    bpy.data.meshes.remove(me)
+    s.engine = 'PYTHON'
+    menus.reset()
+    s.mode = 'SCULPT'
+
+
 def main():
     vr_sculpt.register()
     try:
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o)
         for t in (test_disclosure, test_sheets, test_layout, test_stepper_and_detents, test_presence, test_ghost,
-                  test_controller_hints, test_controller_inputs, test_controller_visibility, test_status):
+                  test_controller_hints, test_controller_inputs, test_controller_visibility, test_status,
+                  test_dyntopo):
             try:
                 t()
             except Exception:

@@ -99,6 +99,30 @@ def main():
             d = np.linalg.norm(positions(obj) - start, axis=1)
             log(f"back side: {s.dabs} dabs, {s.dropped} dropped, moved {int((d > 1e-6).sum())} verts")
 
+            # The desktop view looking elsewhere (in VR nobody watches it): the mesh is off screen.
+            # Each dab aims the view at the tip (AimedView); with that turned off, as before, nothing lands.
+            saved = (rv3d.view_location.copy(), rv3d.view_rotation.copy(), rv3d.view_distance)
+            rv3d.view_location = (30.0, 0.0, 0.0)
+            rv3d.view_distance = 2.0
+            rv3d.update()
+            real_look = native.AimedView.look
+            for aimed, z0 in ((False, -0.1), (True, -0.1)):
+                if not aimed:
+                    native.AimedView.look = lambda self, eye, at: None
+                try:
+                    s = native.NativeStroke(c, obj, 0.15)
+                    start = positions(obj)
+                    for i in range(10):
+                        s.update(Vector((0.05 * i - 0.25, -1.0, z0)).normalized() * 1.02, None, 1.0)
+                    s.finish()
+                finally:
+                    native.AimedView.look = real_look
+                d = np.linalg.norm(positions(obj) - start, axis=1)
+                kept = (tuple(rv3d.view_location), rv3d.view_distance) == ((30.0, 0.0, 0.0), 2.0)
+                log(f"mesh off the desktop view, {'aimed' if aimed else 'not aimed'}: {s.dabs} dabs, "
+                    f"{s.dropped} dropped, moved {int((d > 1e-6).sum())} verts, desktop view put back: {kept}")
+            rv3d.view_location, rv3d.view_rotation, rv3d.view_distance = saved
+
             # Strength from the hand panel's slider: the same stroke at 1.0 and 0.2.
             from vr_sculpt import menus, vr_ui
             c.scene.vr_sculpt.engine = 'NATIVE'
