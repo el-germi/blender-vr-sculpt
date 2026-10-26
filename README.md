@@ -519,9 +519,15 @@ With Triggers" is on. The setting applies when the VR session starts.
   Khronos render model extensions: it asks for the interaction render
   models, keeps the two with a hand's subaction path and moving parts,
   measures each model's space in that hand's aim pose space
-  (`xrLocateSpace`), and converts its glTF (parts by node name, one shared
+  (`xrLocateSpace`), and converts its glTF (a part per node, one shared
   texture, V flipped) into the same .npz format in the extension's user
-  folder, where it's drawn instead of the bundled one. The glTF has no
+  folder, where it's drawn instead of the bundled one. Each button part
+  keeps its key letter (the legend shows it) and a role: which of our
+  buttons moves and lights it. Face buttons follow Touch's layout, the one
+  the stock bindings assume (Y / B on top, X / A below, the hand's own
+  letters first); extra buttons, like X / Y on a controller that has all
+  four, are drawn but never light up. Which physical button SteamVR
+  really binds is still to do ([docs/controller_bindings.md](docs/controller_bindings.md)). The glTF has no
   press animation, so the motions are guessed from the shapes: face
   buttons sink 1.5 mm along their mean face normal, the stick tilts 20
   degrees about its base (the face plate's normal is its axis), the
@@ -1110,7 +1116,9 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   hand panel (pick them on the desktop; they need extra setup).
 - Controller models come from the runtime only on SteamVR (Meta's runtime
   has no model extension), only before a session, and their press motions
-  are guesses from the shapes.
+  are guesses from the shapes. On controllers laid out unlike Touch, the
+  face button that lights may not be the one SteamVR binds
+  ([docs/controller_bindings.md](docs/controller_bindings.md)).
 - Hand tracking isn't possible from an add-on: Blender's VR layer doesn't
   enable OpenXR's hand tracking or hand interaction extensions, so drawing
   uses controllers.

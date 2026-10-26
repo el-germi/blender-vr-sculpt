@@ -493,23 +493,30 @@ void main() {
 
 class Model:
     """One hand's controller: a batch per part, how the moving parts move, and the texture (made on
-    first draw: it needs the GPU)."""
+    first draw: it needs the GPU). Parts move and light by role (body, top, bottom, system, trigger,
+    grip, stick, or "" for a button none of ours reaches): the bundled models' parts are their roles; a
+    fetched model's are its glTF nodes, with their roles and key letters beside them."""
 
     def __init__(self, path):
         data = np.load(path)
         pos, part, tris = data["pos"], data["part"], data["tris"]
         self.offset = Vector(data["offset"]) if "offset" in data.files else MODEL_OFFSET.copy()
         self.names = [str(n) for n in data["parts"]]
+        roles = [str(r) for r in data["roles"]] if "roles" in data.files else self.names
+        self.roles = dict(zip(self.names, roles))
+        labels = [str(lab) for lab in data["labels"]] if "labels" in data.files else [""] * len(roles)
+        self.labels = {r: lab for r, lab in zip(roles, labels) if r and lab}  # role -> key letter
         self.arrays = {"pos": pos, "nor": data["nor"], "uv": data["uv"]}
         tri_part = part[tris[:, 0]]
         self.tris = {name: tris[tri_part == i] for i, name in enumerate(self.names)}
-        self.centers, self.tops = {}, {}
-        for i, name in enumerate(self.names):
-            sel = pos[part == i]
+        self.centers, self.tops = {}, {}  # by role
+        role_of = np.array([roles.index(r) if r else -1 for r in roles])[part]
+        for role in set(roles) - {""}:
+            sel = pos[role_of == roles.index(role)]
             if len(sel):
                 c = sel.mean(axis=0)
-                self.centers[name] = Vector(c)
-                self.tops[name] = Vector((c[0], sel[:, 1].max(), c[2]))
+                self.centers[role] = Vector(c)
+                self.tops[role] = Vector((c[0], sel[:, 1].max(), c[2]))
         self.moves = {str(n): (Vector(p), Vector(a), float(ang), Vector(mv))
                       for n, p, a, ang, mv in zip(data["moves"], data["pivot"], data["axis"], data["angle"],
                                                   data["move"])}
@@ -529,7 +536,7 @@ class Model:
                                                 data=gpu.types.Buffer('FLOAT', rgba.size, rgba.ravel()))
 
     def part_matrix(self, name, inputs):
-        """Where the buttons move a part to, in the controller frame."""
+        """Where the buttons move a part to, in the controller frame (name: the part's role)."""
         def turn(key, amount):
             pivot, axis, angle, _mv = self.moves[key]
             return Matrix.Translation(pivot) @ Matrix.Rotation(angle * amount, 4, axis) @ Matrix.Translation(-pivot)
@@ -598,6 +605,12 @@ def _shader():
         info.fragment_source(_SHADER_SOURCES[1])
         _gpu["shader"] = gpu.shader.create_from_info(info)
     return _gpu["shader"]
+
+
+def key_names(hand):
+    """What the legend calls each button: the face buttons' letters as the model has them (a fetched
+    controller may put A / B on the left), else Touch's."""
+    return {**KEY_NAMES[hand], **model(hand).labels}
 
 
 def layout(hand):
@@ -678,8 +691,9 @@ def draw(context, ss, xr=True):
         shader.uniform_float("eye", (to_local @ toward_head).normalized())
         shader.uniform_float("alpha", 1.0)
         for name, batch in mdl.batches.items():
-            level = lit.get(name, 0.0)
-            shader.uniform_float("mvp", view_proj @ m @ mdl.part_matrix(name, inputs))
+            role = mdl.roles[name]
+            level = lit.get(role, 0.0)
+            shader.uniform_float("mvp", view_proj @ m @ mdl.part_matrix(role, inputs))
             shader.uniform_float("glow", (*vr_ui.COL_ACCENT[:3], level if level > 0.01 else 0.0))
             batch.draw(shader)
     gpu.state.depth_mask_set(False)
@@ -730,7 +744,7 @@ def _draw_legend(context, ss, idx, hand, rows, alpha, head):
     side = -1.0 if hand == 'left' else 1.0
     anchor = m @ Vector((0.0, 0.01, 0.0))
     board = hud.billboard(anchor, head, scale)
-    keys = KEY_NAMES[hand]
+    keys = key_names(hand)
     key_w = max(hud.text_width(keys[b], LEGEND_TEXT * 0.85) for b, _h in rows) + 0.003
     text_w = max(hud.text_width(label, LEGEND_TEXT) for _b, (_i, label) in rows)
     width = 0.004 + key_w + LEGEND_TEXT * 1.4 + 0.002 + text_w + 0.004

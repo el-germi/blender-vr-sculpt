@@ -14,9 +14,13 @@ Blender's session quit. So it runs before one, with the headset awake and the co
 
 For each hand it writes <out>/<hand>.npz in the format of assets/controllers (see
 tools/convert_controllers.py): the mesh in the aim pose's frame (measured with xrLocateSpace, so
-offset is zero), split into parts by glTF node, the texture, and the press motions. The runtime's
-glTF has no animation, so those are guessed from the shapes: buttons sink along their face, the
-stick tilts about its base, the trigger swings back about the lateral axis, the grip squeezes in.
+offset is zero), split into parts by glTF node, the texture, and the press motions. Every button
+keeps its own part, with its key letter, and a role: which of the add-on's buttons (ROLES) moves and
+lights it. The face buttons' roles follow the Touch layout the stock bindings assume (Y / B on top,
+X / A below); a controller's extra buttons get none and stay still (see docs/controller_bindings.md
+for finding the real binding). The runtime's glTF has no animation, so the motions are guessed from
+the shapes: buttons sink along their face, the stick tilts about its base, the trigger swings back
+about the lateral axis, the grip squeezes in.
 <out>/status.json is written last, atomically: {"ok", "message", "runtime", "hands": {hand: npz}}.
 """
 
@@ -32,7 +36,7 @@ import time
 import numpy as np
 
 TEXTURE_SIZE = 1024
-PARTS = ('body', 'top', 'bottom', 'system', 'trigger', 'grip', 'stick')
+ROLES = ('body', 'top', 'bottom', 'system', 'trigger', 'grip', 'stick')  # the parts controllers.py moves
 TIMEOUT = 12.0  # seconds to wait for both controllers' models
 START_TIMEOUT = 30.0  # seconds to wait for the runtime to start
 
@@ -45,29 +49,56 @@ GRIP_TRAVEL = 0.002
 
 # --- the parts ---------------------------------------------------------------------------
 
-def part_of(node_name):
-    """Which of PARTS a glTF node is, from its name (SteamVR: body, button_x / y / a / b, button_enter,
-    button_grip, thumbstick, trigger)."""
+LETTERS = ("a", "b", "x", "y")
+# Which face button plays our top / bottom one, by preference: Touch's layout (what Blender's stock
+# bindings assume), then the other hand's letters for a controller that has those instead.
+FACE = {'left': (("y", "b"), ("x", "a")), 'right': (("b", "y"), ("a", "x"))}
+
+
+def kind_of(node_name):
+    """(kind, letter) of a glTF node from its name (SteamVR: body, button_x / y / a / b, button_enter,
+    button_grip, thumbstick, trigger): kind is 'button' (with its letter), 'trigger', 'grip', 'stick',
+    'system' or 'body' (anything else: drawn, never moved)."""
     n = node_name.lower()
     words = set(re.split(r"[^a-z0-9]+", n))
     if "trigger" in n:
-        return 'trigger'
+        return 'trigger', ""
     if "grip" in n or "squeeze" in n:
-        return 'grip'
+        return 'grip', ""
     if "thumbstick" in n or "joystick" in n:
-        return 'stick'
-    if words & {"y", "b"}:
-        return 'top'
-    if words & {"x", "a"}:
-        return 'bottom'
+        return 'stick', ""
+    letters = words & set(LETTERS)
+    if letters:
+        return 'button', min(letters)
     if words & {"enter", "menu", "system", "home", "oculus"}:
-        return 'system'
-    return 'body'
+        return 'system', ""
+    return 'body', ""
 
 
 def is_controller(node_names):
     """A controller has moving parts; SteamVR's hand tracking placeholder is a body alone."""
-    return any(part_of(n) != 'body' for n in node_names)
+    return any(kind_of(n)[0] != 'body' for n in node_names)
+
+
+def assign(node_names, hand):
+    """{node: (part name, role, label)}. Every node that isn't body is a part of its own; role is one of
+    ROLES or "" (a button no binding of ours reaches), label the key letter for the button hints."""
+    kinds = {n: kind_of(n) for n in node_names}
+    present = [letter for kind, letter in kinds.values() if kind == 'button']
+    roles = {}
+    for role, prefer in zip(('top', 'bottom'), FACE[hand]):
+        letter = next((p for p in prefer if p in present and p not in roles), None)
+        if letter is not None:
+            roles[letter] = role
+    out = {}
+    for n, (kind, letter) in kinds.items():
+        if kind == 'body':
+            out[n] = ('body', 'body', "")
+        elif kind == 'button':
+            out[n] = (n, roles.get(letter, ""), letter.upper())
+        else:
+            out[n] = (n, kind, "")
+    return out
 
 
 # --- glTF ----------------------------------------------------------------------------------
@@ -171,22 +202,22 @@ def _face_normal(pos, tris):
     return mean / length, length / total
 
 
-def guess_moves(pos, part, tris):
+def guess_moves(pos, role, tris):
     """{move: (pivot, axis, angle, move)} for the parts present, in the aim frame (+X right, +Y up, -Z
-    forward). Same keys as the bundled models (top, bottom, trigger, grip, stick_forward, stick_right)
-    plus stick_click."""
-    tri_part = part[tris[:, 0]]
+    forward), by role (role: each vertex's index in ROLES, or -1 for none). Same keys as the bundled
+    models (top, bottom, trigger, grip, stick_forward, stick_right) plus stick_click."""
+    tri_role = role[tris[:, 0]]
     zero = np.zeros(3)
     moves = {}
     center = {}
-    for i, name in enumerate(PARTS):
-        sel = part == i
+    for i, name in enumerate(ROLES):
+        sel = role == i
         if sel.any():
             center[name] = pos[sel].mean(axis=0)
     body = center.get('body', pos.mean(axis=0))
 
     def normal(name):
-        t = tris[tri_part == PARTS.index(name)]
+        t = tris[tri_role == ROLES.index(name)]
         return _face_normal(pos, t) if len(t) else (None, 0.0)
 
     faces = []
@@ -208,7 +239,7 @@ def guess_moves(pos, part, tris):
             up, _agree = normal('stick')
             up = up if up is not None else np.array((0.0, 1.0, 0.0))
         up /= max(np.linalg.norm(up), 1e-12)
-        sel = pos[part == PARTS.index('stick')]
+        sel = pos[role == ROLES.index('stick')]
         heights = sel @ up
         pivot = center['stick'] + up * (heights.min() - center['stick'] @ up)
         for key, toward in (('stick_forward', np.array((0.0, 0.0, -1.0))), ('stick_right', np.array((1.0, 0.0, 0.0)))):
@@ -218,7 +249,7 @@ def guess_moves(pos, part, tris):
             moves[key] = (pivot, axis / max(np.linalg.norm(axis), 1e-12), STICK_TILT, zero)
         moves['stick_click'] = (pivot, up, 0.0, -up * STICK_SINK)
     if 'trigger' in center:
-        sel = pos[part == PARTS.index('trigger')]
+        sel = pos[role == ROLES.index('trigger')]
         y = sel[:, 1]
         top = sel[y >= y.max() - 0.15 * max(np.ptp(y), 1e-6)]  # the hinge: along its top edge
         pivot = np.array((center['trigger'][0], top[:, 1].mean(), top[:, 2].mean()))
@@ -293,12 +324,18 @@ def build_texture(sources, folder, decode=_decode_png):
 
 # --- the model --------------------------------------------------------------------------------
 
-def convert(glb, model_in_aim, folder, decode=_decode_png):
-    """The .npz arrays of one controller: glb bytes, and the 4x4 matrix taking the model's space to the
-    hand's aim pose space."""
+def convert(glb, model_in_aim, folder, hand, decode=_decode_png):
+    """The .npz arrays of one controller: glb bytes, the 4x4 matrix taking the model's space to the
+    hand's aim pose space, and the hand ('left' / 'right'). Beside the bundled models' arrays: roles and
+    labels, one per part."""
     gltf, binary = read_glb(glb)
+    meshes = gltf_meshes(gltf, binary)
+    assigned = assign({name for name, _w, _p in meshes}, hand)
+    parts = ['body'] + sorted({p for p, _r, _l in assigned.values()} - {'body'})
+    roles = ['body'] + [next(r for p, r, _l in assigned.values() if p == part) for part in parts[1:]]
+    labels = [""] + [next(lab for p, _r, lab in assigned.values() if p == part) for part in parts[1:]]
     pieces = []
-    for name, world, prim in gltf_meshes(gltf, binary):
+    for name, world, prim in meshes:
         attrs = prim["attributes"]
         pos = _accessor(gltf, binary, attrs["POSITION"]).astype(np.float64)
         n = len(pos)
@@ -316,7 +353,7 @@ def convert(glb, model_in_aim, folder, decode=_decode_png):
             nor /= np.maximum(np.linalg.norm(nor, axis=1, keepdims=True), 1e-12)
         image, factor = _material_source(gltf, prim)
         source = (_image_bytes(gltf, binary, image) if image is not None else None, factor)
-        pieces.append((PARTS.index(part_of(name)), pos, nor, uv, tris, source))
+        pieces.append((parts.index(assigned[name][0]), pos, nor, uv, tris, source))
     if not pieces:
         raise ValueError("the model has no meshes")
     tex, where = build_texture([p[5] for p in pieces], folder, decode)
@@ -335,11 +372,13 @@ def convert(glb, model_in_aim, folder, decode=_decode_png):
     pos = np.concatenate(all_pos).astype(np.float32)
     part = np.concatenate(all_part)
     tris = np.concatenate(all_tris).astype(np.uint32)
-    moves = guess_moves(pos.astype(np.float64), part, tris)
+    role_index = np.array([ROLES.index(r) if r else -1 for r in roles])
+    moves = guess_moves(pos.astype(np.float64), role_index[part], tris)
     names = sorted(moves)
     return dict(
         pos=pos, nor=np.concatenate(all_nor).astype(np.float32), uv=np.concatenate(all_uv).astype(np.float32),
-        part=part, tris=tris, parts=np.array(PARTS), moves=np.array(names),
+        part=part, tris=tris, parts=np.array(parts), roles=np.array(roles), labels=np.array(labels),
+        moves=np.array(names),
         pivot=np.array([moves[k][0] for k in names], np.float32).reshape(-1, 3),
         axis=np.array([moves[k][1] for k in names], np.float32).reshape(-1, 3),
         angle=np.array([moves[k][2] for k in names], np.float32),
@@ -716,7 +755,7 @@ def main():
     try:
         found, status["runtime"] = fetch(active_runtime())
         for hand, (glb, where, _names) in found.items():
-            arrays = convert(glb, where, out)
+            arrays = convert(glb, where, out, HANDS[hand])
             name = HANDS[hand] + ".npz"
             tmp = os.path.join(out, HANDS[hand] + ".tmp.npz")
             np.savez_compressed(tmp, **arrays)

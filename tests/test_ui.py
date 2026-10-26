@@ -714,12 +714,24 @@ def test_controller_fetched():
     worker = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(worker)
 
-    names = {"body": 'body', "button_y": 'top', "button_b": 'top', "button_x": 'bottom', "button_a": 'bottom',
-             "button_enter": 'system', "button_grip": 'grip', "thumbstick": 'stick', "trigger": 'trigger',
-             "trackpad": 'body'}
-    check(all(worker.part_of(n) == p for n, p in names.items()), "SteamVR's node names map to our parts")
+    kinds = {"body": ('body', ""), "button_y": ('button', "y"), "button_a": ('button', "a"),
+             "button_enter": ('system', ""), "button_grip": ('grip', ""), "thumbstick": ('stick', ""),
+             "trigger": ('trigger', ""), "trackpad": ('body', "")}
+    check(all(worker.kind_of(n) == k for n, k in kinds.items()), "SteamVR's node names say what each part is")
     check(not worker.is_controller(["body"]) and worker.is_controller(["body", "trigger"]),
           "a lone body is the hand tracking placeholder, not a controller")
+    touch = ["body", "button_x", "button_y", "thumbstick", "trigger"]
+    got = worker.assign(touch, 'left')
+    check(got["button_y"] == ("button_y", 'top', "Y") and got["button_x"] == ("button_x", 'bottom', "X") and
+          got["body"] == ('body', 'body', "") and got["trigger"] == ("trigger", 'trigger', ""),
+          "Touch's left controller: Y on top, X below, every button a part of its own")
+    four = worker.assign(["body", "button_a", "button_b", "button_x", "button_y"], 'right')
+    check(four["button_b"][1:] == ('top', "B") and four["button_a"][1:] == ('bottom', "A") and
+          four["button_x"][1:] == ("", "X") and four["button_y"][1:] == ("", "Y"),
+          "all four on one controller: B / A play our buttons on the right, X and Y stay their own, unbound")
+    ab_left = worker.assign(["body", "button_a", "button_b"], 'left')
+    check(ab_left["button_b"][1:] == ('top', "B") and ab_left["button_a"][1:] == ('bottom', "A"),
+          "a left controller with A / B: those play its top and bottom buttons")
 
     tmp = tempfile.mkdtemp(prefix="vrs_ctrl_")
     saved = controllers._cache_dir[0]
@@ -736,20 +748,24 @@ def test_controller_fetched():
         # The model in the aim pose's frame: turned 30 degrees about X and moved, as a runtime might.
         turn = Matrix.Rotation(math.radians(30), 4, 'X')
         model_in_aim = Matrix.Translation((0.0, -0.01, 0.02)) @ turn
-        arrays = worker.convert(glb, np.array(model_in_aim), tmp)
+        arrays = worker.convert(glb, np.array(model_in_aim), tmp, 'right')
         pos, part = arrays["pos"], arrays["part"]
-        body_idx = list(worker.PARTS).index('body')
+        names = list(arrays["parts"])
+        check(names == ['body', 'button_a', 'button_b', 'button_grip', 'thumbstick', 'trigger'] and
+              list(arrays["roles"]) == ['body', 'bottom', 'top', 'grip', 'stick', 'trigger'] and
+              list(arrays["labels"]) == ["", "A", "B", "", "", ""],
+              "a part per node, with its role and key letter")
         want = model_in_aim @ Vector((0.0, 0.0, 0.05))
-        check((Vector(pos[part == body_idx].mean(axis=0)) - want).length < 1e-5,
+        check((Vector(pos[part == names.index('body')].mean(axis=0)) - want).length < 1e-5,
               "the mesh lands in the aim frame (moved by where the model sits on the aim pose)")
         check(not arrays["offset"].any() and arrays["tex"].shape == (1024, 1024, 3),
               "offset 0 (already on the aim pose), a 1024 px texture")
 
         def texel(part_name):
-            uv = arrays["uv"][part == list(worker.PARTS).index(part_name)].mean(axis=0)
+            uv = arrays["uv"][part == names.index(part_name)].mean(axis=0)
             h, w = arrays["tex"].shape[:2]
             return arrays["tex"][min(int(uv[1] * h), h - 1), min(int(uv[0] * w), w - 1)]
-        check(tuple(texel('body')) == (255, 0, 0) and tuple(texel('top')) == (0, 0, 255) and
+        check(tuple(texel('body')) == (255, 0, 0) and tuple(texel('button_b')) == (0, 0, 255) and
               tuple(texel('trigger')) == (0, 255, 0),
               "each part samples its own texture or color in the shared texture (V flipped from glTF)")
 
@@ -786,6 +802,33 @@ def test_controller_fetched():
         m = controllers.controller_matrix(ss, bpy.context, 1)
         check((m.translation - Vector(ss.controller_aim_location_get(bpy.context, 1))).length < 1e-9,
               "the fetched model's origin is the aim pose itself")
+        check(controllers.key_names('right')['top'] == "B" and controllers.key_names('right')['grip'] == "Grip",
+              "the legend names the buttons by the model's letters")
+
+        # All four face buttons on the right controller; A / B only on the left one.
+        cap = (0.008, 0.004, 0.008)
+        body = ("body", _box((0.0, 0.0, 0.05), (0.04, 0.03, 0.1)), None)
+        four = [body, ("button_a", _box((-0.008, 0.017, 0.045), cap, True), (0.0, 0.0, 1.0)),
+                ("button_b", _box((-0.008, 0.017, 0.03), cap, True), (0.0, 0.0, 1.0)),
+                ("button_x", _box((0.008, 0.017, 0.045), cap, True), (0.0, 0.0, 1.0)),
+                ("button_y", _box((0.008, 0.017, 0.03), cap, True), (0.0, 0.0, 1.0))]
+        for hand, model_parts in (('right', four), ('left', four[:3])):
+            arr = worker.convert(_glb(model_parts, _png(tmp)), np.identity(4), tmp, hand)
+            np.savez_compressed(os.path.join(tmp, hand + ".npz"), **arr)
+        controllers.clear()
+        mdl = controllers.model('right')
+        check(mdl.roles == {'body': 'body', 'button_a': 'bottom', 'button_b': 'top', 'button_x': "", 'button_y': ""}
+              and set(mdl.batches or mdl.tris) >= {'button_x', 'button_y'},
+              "four buttons: four parts, X and Y drawn but bound to nothing of ours")
+        check((mdl.centers['top'] - Vector((-0.008, 0.017 + 0.001, 0.03))).length < 0.002 and
+              (mdl.centers['bottom'] - Vector((-0.008, 0.017 + 0.001, 0.045))).length < 0.002,
+              "B alone is the top button and A alone the bottom one (they light and sink apart)")
+        press = mdl.part_matrix(mdl.roles['button_y'], rest._replace(top=True, bottom=True))
+        check(press == Matrix.Identity(4), "the unbound buttons stay still whatever's pressed")
+        check(controllers.key_names('right')['top'] == "B" and controllers.key_names('right')['bottom'] == "A" and
+              controllers.key_names('left')['top'] == "B" and controllers.key_names('left')['bottom'] == "A",
+              "the legend says B / A on both hands when that's what they have")
+        controllers.clear()
 
         # The worker's answer, taken in from the app timer.
         class Done:
