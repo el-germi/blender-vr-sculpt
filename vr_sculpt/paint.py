@@ -19,7 +19,6 @@ import time
 
 import bpy
 import numpy as np
-from bpy_extras import view3d_utils
 from mathutils import Vector
 from mathutils.geometry import barycentric_transform, intersect_point_tri
 
@@ -377,43 +376,6 @@ def unregister():
 
 # --- painting --------------------------------------------------------------
 
-class _View:
-    """Point the desktop 3D view at a dab and put it back afterwards."""
-
-    def __init__(self, area, region):
-        self.region = region
-        self.rv3d = area.spaces.active.region_3d
-        r = self.rv3d
-        self.saved = (r.view_location.copy(), r.view_rotation.copy(), r.view_distance, r.view_perspective)
-
-    def look(self, eye, at):
-        r = self.rv3d
-        d = at - eye
-        r.view_perspective = 'PERSP'
-        r.view_rotation = d.to_track_quat('-Z', 'Y')
-        r.view_distance = d.length
-        r.view_location = at
-        r.update()
-
-    def pixels(self, at, radius):
-        """radius (world) at point `at` in region pixels, in the current view."""
-        side = self.rv3d.view_rotation @ Vector((1.0, 0.0, 0.0))
-        a = view3d_utils.location_3d_to_region_2d(self.region, self.rv3d, at)
-        b = view3d_utils.location_3d_to_region_2d(self.region, self.rv3d, at + side * radius)
-        return (b - a).length if a is not None and b is not None else None
-
-    def mouse(self, point):
-        p = view3d_utils.location_3d_to_region_2d(self.region, self.rv3d, point)
-        if p is None or not (0 <= p.x < self.region.width and 0 <= p.y < self.region.height):
-            return None
-        return (p.x, p.y)
-
-    def restore(self):
-        r = self.rv3d
-        r.view_location, r.view_rotation, r.view_distance, r.view_perspective = self.saved
-        r.update()
-
-
 def pressure_from(value):
     return min(max((value - TRIGGER_THRESHOLD) / (1.0 - TRIGGER_THRESHOLD), 0.05), 1.0)
 
@@ -523,7 +485,7 @@ class PaintStroke:
         else:
             back = sum((n for _p, n, _f in targets), Vector())
             back = back.normalized() if back.length > 1e-9 else targets[-1][1]
-        v = _View(area, region)
+        v = native.AimedView(area, region)
         try:
             v.look(center + back * EYE_DISTANCE * self.scale, center)
             if self.tan_half is None:

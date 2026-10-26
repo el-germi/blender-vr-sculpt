@@ -154,6 +154,10 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Radius | slider; **right stick click** cycles 1-16 cm |
 | Strength | slider |
 | Symmetry X / Y / Z | toggles |
+| Dyntopo on / off (native engine; UVs, corner colors and shape keys come back when the session ends) | *More* > Dyntopo |
+| Dyntopo detail Brush / Constant / Manual, edge size, Fill (Constant, Manual) | *More*, beside Dyntopo; the row under it |
+| Dyntopo refine Split / Collapse / Both | *More* > Refine |
+| Show the texture mid-session (strokes leave their patches untextured), or automatically 2 s after a stroke | *More*: texture icon and **Auto** beside Edge (meshes with UVs or colors) |
 | Engine Python / Native | *More* > Engine |
 | Left hand inverts | *More* |
 

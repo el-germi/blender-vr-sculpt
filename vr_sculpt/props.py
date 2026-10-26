@@ -394,6 +394,10 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         ),
         default=0.35, min=0.0, soft_max=2.0, subtype='TIME_ABSOLUTE', unit='TIME_ABSOLUTE')
     left_inverts: BoolProperty(name="Left Hand Inverts", description="Left trigger subtracts with Draw and Inflate", default=True)
+    dyntopo_auto_texture: BoolProperty(
+        name="Auto Texture",
+        description="With dyntopo, show the texture again 2 s after the last stroke (a short freeze while it's restored)",
+        default=False)
     tip_offset: FloatProperty(
         name="Tip Offset",
         description="Distance of the brush in front of the controller (meters, hand space)",

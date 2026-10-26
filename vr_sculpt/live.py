@@ -1,13 +1,14 @@
 """One app timer for the things that update while VR runs, outside of any operator:
 tracking objects, desktop window captures, camera preview redraws, puppet bindings and takes, the
 weight heat map's geometry, kit listings coming in from their background worker, and physics (the
-hands' colliders and spring bones, which also run while the timeline plays outside VR)."""
+hands' colliders and spring bones, which also run while the timeline plays outside VR). Dyntopo
+sessions (rest.py) are closed from here too, VR or not, however Sculpt Mode was left."""
 
 import time
 
 import bpy
 
-from . import camera, controllers, desktop, kit, onion, operators, paths, physics, puppet, rig, tracking
+from . import camera, controllers, desktop, kit, native, onion, operators, paths, physics, puppet, rest, rig, tracking
 
 FAST = 1.0 / 90.0
 IDLE = 0.25
@@ -25,6 +26,7 @@ def _tick():
             return IDLE
         desktop.tick(context)
         kit.tick(context)
+        _rest_tick(context)
         if not operators.session_running(context):
             if puppet.active():
                 puppet.end_session(context)
@@ -33,6 +35,8 @@ def _tick():
             physics.end_session(context)
             return FAST if physics.tick(context, None) else IDLE  # Springs while the timeline plays.
         ss = context.window_manager.xr_session_state
+        if settings.mode == 'SCULPT' and settings.engine == 'NATIVE':
+            native.auto_texture(context, settings, bool(operators.active_hands))
         if settings.mode == 'MODEL':
             kit.prewarm(context)  # Listed in the background before the Kit is first opened.
         if settings.tracking:
@@ -60,6 +64,20 @@ def _tick():
             traceback.print_exc()
         _errors.append(1)
         return IDLE
+
+
+def _rest_tick(context):
+    """Dyntopo sessions end however Sculpt Mode is left, VR or not; a failure here mustn't stop the rest."""
+    try:
+        rest.tick(context)
+    except Exception:
+        if not _rest_errors:
+            import traceback
+            traceback.print_exc()
+        _rest_errors.append(1)
+
+
+_rest_errors = []
 
 
 def register():
