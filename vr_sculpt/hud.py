@@ -193,6 +193,9 @@ def card_content(settings, sculpt_brush):
         else:
             title = "Add " + primitives.label(settings.primitive)
             content = (title, "Drag to create. Other hand: touch to select and move", MODEL_COLOR, "model")
+    elif settings.mode == 'RETOPO':
+        from . import retopo
+        content = retopo.card_content(settings)
     elif settings.engine == 'NATIVE':
         name = sculpt_brush.name if sculpt_brush else "No brush"
         content = (name, NATIVE_INFO.get(name, ""), NATIVE_COLORS.get(name, (0.9, 0.9, 0.9)), "sculpt")
@@ -215,6 +218,9 @@ def status_size(context, settings):
     mode = settings.mode
     if mode == 'SCULPT':
         return _cm(settings.radius)
+    if mode == 'RETOPO':
+        from . import retopo
+        return retopo.status_size(settings)
     if mode == 'PAINT':
         return _cm(settings.paint_radius)
     if mode == 'DRAW':

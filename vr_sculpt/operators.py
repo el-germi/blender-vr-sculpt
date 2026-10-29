@@ -5,8 +5,8 @@ from bpy.props import BoolProperty, EnumProperty
 from mathutils import Quaternion, Vector
 
 from . import (actions, brushes, camera, catalog, desktop, drawing, interactions, kit, measure, menus,
-               native, paint, paths, physics, presence, primitives, rig, shading, snapping, strokes, symmetry, uv,
-               vr_ui)
+               native, paint, paths, physics, presence, primitives, retopo, rig, shading, snapping, strokes, symmetry,
+               uv, vr_ui)
 from . import pose as pose_mode  # "pose" is the controller pose in the handlers below
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
@@ -34,6 +34,7 @@ def _on_data_swap(*_args):
     snapping.clear()
     brushes.forget_caches()
     strokes.forget_caches()
+    retopo.forget_caches()
     pose_mode.forget_caches()
     rig.forget_caches()
     physics.forget_caches()
@@ -96,6 +97,8 @@ def _tip_engaged(context, settings, tip, scale):
     """Whether the tip is at work on something, so a desktop screen behind it doesn't take the trigger."""
     if settings.mode == 'SCULPT':
         return primitives.touching(context, tip, settings.radius * scale) is not None
+    if settings.mode == 'RETOPO':
+        return retopo.engaged(context, settings, tip, scale)
     if settings.mode == 'MODEL':
         return primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale) is not None
     if settings.mode == 'DRAW' and settings.draw_tool in {'EDIT', 'ERASE'}:
@@ -148,6 +151,8 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         if kit.is_key(settings.primitive):
             return interactions.pick_kit(context, settings, tip_pose, scale)
         return interactions.CreatePrimitive(context, settings.primitive, tip_pose.translation, scale)
+    if settings.mode == 'RETOPO':
+        return retopo.pick(context, settings, off, pose, tip_pose, scale, value)
     if settings.mode == 'DRAW':
         return drawing.pick(context, settings, tip_pose, value, scale)
     if settings.mode == 'PAINT':
@@ -362,7 +367,7 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         return {'FINISHED'} if self.times else {'CANCELLED'}
 
 
-MODE_CYCLE = ('SCULPT', 'MODEL', 'DRAW', 'PAINT', 'RIG', 'POSE', 'PHYSICS', 'TOOLS')
+MODE_CYCLE = ('SCULPT', 'RETOPO', 'MODEL', 'DRAW', 'PAINT', 'RIG', 'POSE', 'PHYSICS', 'TOOLS')
 
 
 def undo_last_stroke(context):
@@ -377,9 +382,10 @@ def undo_last_stroke(context):
 
 
 class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
-    """Main hand (B, or Y left-handed): next brush (Sculpt), next primitive (Model), undo last stroke (Draw,
-    Paint, Rig weights), end the bone chain (Rig bones), FK / IK (Pose), play / stop the simulation (Physics),
-    remove the last measurement or switch camera (Tools). Off hand (Y, or B left-handed): next mode"""
+    """Main hand (B, or Y left-handed): next brush (Sculpt), end the open quad or next tool (Retopo), next
+    primitive (Model), undo last stroke (Draw, Paint, Rig weights), end the bone chain (Rig bones), FK / IK (Pose),
+    play / stop the simulation (Physics), remove the last measurement or switch camera (Tools). Off hand (Y, or B
+    left-handed): next mode"""
     bl_idname = "vrsculpt.cycle_brush"
     bl_label = "VR Next Brush / Switch Mode"
     bl_options = {'INTERNAL'}
@@ -395,6 +401,8 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
         if self.off_hand:
             i = MODE_CYCLE.index(settings.mode) if settings.mode in MODE_CYCLE else -1
             menus.set_mode(context, MODE_CYCLE[(i + 1) % len(MODE_CYCLE)])
+        elif settings.mode == 'RETOPO':
+            retopo.cycle_tool(context)
         elif settings.mode == 'DRAW':
             undo_last_stroke(context)
         elif settings.mode == 'PAINT':
@@ -443,8 +451,8 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
 
 
 class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
-    """Main-hand stick click: next brush radius (Pose: IK chain length; Rig: weight brush radius; Physics: hands
-    on or off). Off-hand stick click: pin or unpin the hand panel"""
+    """Main-hand stick click: next brush radius (Pose: IK chain length; Rig: weight brush radius; Retopo: size;
+    Physics: hands on or off). Off-hand stick click: pin or unpin the hand panel"""
     bl_idname = "vrsculpt.cycle_radius"
     bl_label = "VR Next Radius / Pin Panel"
     bl_options = {'INTERNAL'}
@@ -464,7 +472,7 @@ class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
         if settings.mode == 'PHYSICS':
             settings.physics_hands = not settings.physics_hands
             return {'FINISHED'}
-        prop = {'PAINT': "paint_radius", 'RIG': "weight_radius"}.get(settings.mode, "radius")
+        prop = {'PAINT': "paint_radius", 'RIG': "weight_radius", 'RETOPO': "retopo_size"}.get(settings.mode, "radius")
         bigger = [r for r in RADIUS_STEPS if r > getattr(settings, prop) + 1e-6]
         setattr(settings, prop, bigger[0] if bigger else RADIUS_STEPS[0])
         return {'FINISHED'}
@@ -520,12 +528,13 @@ class VRSCULPT_OT_clear_measures(bpy.types.Operator):
 
 
 class VRSCULPT_OT_set_mode(bpy.types.Operator):
-    """Switch the VR tools between Sculpt, Model, Draw, Paint, Rig, Pose, Physics and Tools mode"""
+    """Switch the VR tools between Sculpt, Retopo, Model, Draw, Paint, Rig, Pose, Physics and Tools mode"""
     bl_idname = "vrsculpt.set_mode"
     bl_label = "Set VR Mode"
     bl_options = {'INTERNAL'}
 
-    mode: EnumProperty(items=(('SCULPT', "Sculpt", ""), ('MODEL', "Model", ""), ('DRAW', "Draw", ""),
+    mode: EnumProperty(items=(('SCULPT', "Sculpt", ""), ('RETOPO', "Retopo", ""), ('MODEL', "Model", ""),
+                              ('DRAW', "Draw", ""),
                               ('PAINT', "Paint", ""), ('RIG', "Rig", ""), ('POSE', "Pose", ""),
                               ('PHYSICS', "Physics", ""), ('TOOLS', "Tools", "")))
 

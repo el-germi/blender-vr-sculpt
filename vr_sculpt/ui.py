@@ -1,6 +1,7 @@
 import bpy
 
-from . import actions, catalog, controllers, measure, native, operators, paint, physics, pose, primitives, puppet, rig
+from . import (actions, catalog, controllers, measure, native, operators, paint, physics, pose, primitives, puppet,
+               retopo, rig)
 
 
 class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
@@ -21,7 +22,8 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
         layout.prop(settings, "enabled")
         row = layout.grid_flow(row_major=True, columns=3, even_columns=True, align=True)
         row.active = settings.enabled
-        for mode, text in (('SCULPT', "Sculpt"), ('MODEL', "Model"), ('DRAW', "Draw"), ('PAINT', "Paint"),
+        for mode, text in (('SCULPT', "Sculpt"), ('RETOPO', "Retopo"), ('MODEL', "Model"), ('DRAW', "Draw"),
+                           ('PAINT', "Paint"),
                            ('RIG', "Rig"), ('POSE', "Pose"), ('PHYSICS', "Physics"), ('TOOLS', "Tools")):
             row.operator("vrsculpt.set_mode", text=text, depress=settings.mode == mode).mode = mode
         row = layout.row(heading="Hand Panel")
@@ -32,6 +34,9 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
         sub.prop(settings, "panel_reveal")
         col = layout.column()
         col.active = settings.enabled
+        if settings.mode == 'RETOPO':
+            retopo.desktop_panel(layout, col, context)
+            return
         if settings.mode == 'DRAW':
             col.prop(settings, "draw_tool")
             col.prop(settings, "draw_style")

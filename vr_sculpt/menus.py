@@ -1,6 +1,6 @@
 """What the hand panel shows, and the mode/engine switches behind it.
 
-The panel is an icon rail (the eight modes) beside the content. The content is:
+The panel is an icon rail (the nine modes) beside the content. The content is:
   - a header: the mode's name, its context, and icon actions (undo where there is one, Settings, Pin);
   - the mode's 3-5 most used controls;
   - a More row that opens the rest (it opens upward, so the row stays under the pointer).
@@ -14,7 +14,7 @@ import math
 import bpy
 
 from . import (actions, anim, camera, catalog, desktop, generic, hardsurface, hud, kit, measure, native, paint,
-               physics, pose, presence, primitives, puppet, rest, rig, shading, strokes, symmetry, uv, vr_ui)
+               physics, pose, presence, primitives, puppet, rest, retopo, rig, shading, strokes, symmetry, uv, vr_ui)
 from .props import BRUSH_ITEMS
 
 NATIVE_SHORT = {
@@ -22,7 +22,8 @@ NATIVE_SHORT = {
     "Inflate/Deflate": "Inflate", "Crease Sharp": "Crease", "Flatten/Contrast": "Flatten",
 }
 
-MODES = (('SCULPT', "Sculpt", "sculpt"), ('MODEL', "Model", "model"), ('DRAW', "Draw", "draw"),
+MODES = (('SCULPT', "Sculpt", "sculpt"), ('RETOPO', "Retopo", "retopo"),
+         ('MODEL', "Model", "model"), ('DRAW', "Draw", "draw"),
          ('PAINT', "Paint", "paint"), ('RIG', "Rig", "rig"), ('POSE', "Pose", "pose"),
          ('PHYSICS', "Physics", "physics"), ('TOOLS', "Tools", "tools"))
 MODE_ICONS = {ident: icon for ident, _name, icon in MODES}
@@ -65,6 +66,8 @@ def set_mode(context, mode):
         pose.leave(context)
     if settings.mode == 'RIG' and mode != 'RIG':
         rig.leave(context)
+    if settings.mode == 'RETOPO' and mode != 'RETOPO':
+        retopo.leave(context)
     close_picker()
     close_sheet(context)
     settings.mode = mode
@@ -80,6 +83,8 @@ def set_mode(context, mode):
             pose.enter(context)
     elif mode == 'RIG':
         rig.enter(context)
+    elif mode == 'RETOPO':
+        retopo.enter(context)
     elif settings.engine == 'NATIVE':
         set_object_mode(context, obj, 'SCULPT')
     else:
@@ -1177,6 +1182,65 @@ def _rig_rows(context, settings):
     return _disclose('RIG_WEIGHTS', out, more, "Rig, mirror, normalize")
 
 
+# --- Retopo ---------------------------------------------------------------------
+
+RETOPO_SIZE_LABELS = {'STRIP': "Width", 'QUAD': "Size", 'RELAX': "Radius", 'TWEAK': "Radius"}
+
+
+def open_reference_picker(context):
+    current = retopo.reference(context)
+    open_picker("Reference", [Option(o.name, o.name) for o in retopo.references(context)],
+                current.name if current else "", lambda name: retopo.choose_reference(context, name))
+
+
+def open_retopo_picker(context):
+    current = retopo.result(context)
+    options = [Option(o.name, o.name) for o in retopo.results_of(context, retopo.reference(context))]
+    open_picker("Retopo mesh", options + [Option("", "New mesh")], current.name if current else "",
+                lambda name: retopo.choose_result(context, name))
+
+
+def _retopo_rows(context, settings):
+    ref, obj = retopo.reference(context), retopo.result(context)
+    said = retopo.message()
+    if ref is None:
+        return [
+            _header(context, settings, "Retopo", said),
+            [vr_ui.label("Select the mesh to draw new topology on", align='CENTER')],
+            [vr_ui.select("retopo_ref", "On", "none", lambda: open_reference_picker(context), icon="sculpt")],
+        ]
+    n = len(obj.data.polygons) if obj is not None else 0
+    tool = settings.retopo_tool
+    actions = []
+    if tool == 'QUAD' and retopo.pen_count():
+        actions.append(vr_ui.icon_button("retopo_end", "close", retopo.end_quad, "End the open quad"))
+    out = [
+        _header(context, settings, "Retopo", said or (f"{n} faces" if obj is not None else ref.name),
+                actions=actions),
+        _segments("retopo_tool_", "retopo_tool", [(i, name) for i, name, _icon in retopo.TOOLS], tool,
+                  lambda v: retopo.set_tool(context, v), icons=retopo.TOOL_ICONS),
+        [vr_ui.slider("retopo_size", RETOPO_SIZE_LABELS[tool], settings.retopo_size, 0.005, 0.1,
+                      lambda v: setattr(settings, "retopo_size", v), fmt=_meters)],
+        [vr_ui.toggle("retopo_mirror", "Mirror X", settings.retopo_mirror, _toggle(settings, "retopo_mirror"),
+                      icon="mirror"),
+         vr_ui.slider("retopo_opacity", "Faces", settings.retopo_opacity, 0.0, 1.0,
+                      lambda v: setattr(settings, "retopo_opacity", v), fmt=_percent, weight=1.3)],
+        [vr_ui.select("retopo_mesh", "Mesh", obj.name if obj is not None else "New",
+                      lambda: open_retopo_picker(context), icon="retopo", weight=1.4),
+         vr_ui.button("retopo_finish", "Finish", lambda: retopo.finish(context), icon="check", active=n > 0)],
+    ]
+    more = [
+        [vr_ui.select("retopo_ref", "On", ref.name, lambda: open_reference_picker(context), icon="sculpt",
+                      weight=1.4),
+         vr_ui.button("retopo_new", "New mesh", lambda: retopo.new_mesh(context), icon="plus")],
+        [vr_ui.toggle("retopo_wrap", "Shrinkwrap", retopo.has_shrinkwrap(obj),
+                      lambda: retopo.toggle_shrinkwrap(context), icon="wrap", tip="Shrink onto the reference")],
+        [vr_ui.slider("retopo_relax", "Relax strength", settings.retopo_relax, 0.0, 1.0,
+                      lambda v: setattr(settings, "retopo_relax", v), fmt=_percent)],
+    ]
+    return _disclose('RETOPO', out, more, "Reference, new mesh, shrinkwrap")
+
+
 # --- Pose -----------------------------------------------------------------------
 
 def open_rig_picker(context):
@@ -1576,7 +1640,8 @@ def _settings_rows(context, settings):
 
 
 _MODE_ROWS = {'SCULPT': _sculpt_rows, 'MODEL': _model_rows, 'DRAW': _draw_rows, 'PAINT': _paint_rows,
-              'RIG': _rig_rows, 'POSE': _pose_rows, 'PHYSICS': _physics_rows, 'TOOLS': _tools_rows}
+              'RIG': _rig_rows, 'RETOPO': _retopo_rows,
+              'POSE': _pose_rows, 'PHYSICS': _physics_rows, 'TOOLS': _tools_rows}
 
 
 # --- timeline strip --------------------------------------------------------------

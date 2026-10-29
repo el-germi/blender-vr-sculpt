@@ -593,6 +593,64 @@ def _rig(p):
         p.disc(x, y, 0.17)
 
 
+def _retopo(p):
+    # A quad grid hugging a curved surface.
+    def bulge(x, y):
+        return (x, y + 0.22 * (1.0 - x * x))
+    for y in (-0.7, -0.05, 0.6):
+        p.path([bulge(-0.85 + 1.7 * t / 8, y) for t in range(9)])
+    for x in (-0.85, -0.28, 0.28, 0.85):
+        p.path([bulge(x, -0.7 + 1.3 * t / 4) for t in range(5)])
+
+
+def _strip(p):
+    # A strip of quads along a curve: two rails and the rungs between them.
+    def rail(off):
+        return [(-0.85 + 1.7 * t / 10, off + 0.35 * math.sin(math.pi * t / 10) - 0.15) for t in range(11)]
+    a, b = rail(-0.35), rail(0.35)
+    p.path(a)
+    p.path(b)
+    for i in (0, 3, 7, 10):
+        p.line(*a[i], *b[i])
+
+
+def _quad(p):
+    # A quad being drawn: three corners placed, the fourth at the pen.
+    pts = [(-0.72, -0.62), (0.62, -0.72), (0.72, 0.62), (-0.62, 0.72)]
+    p.path(pts[:3])
+    p.path([pts[2], pts[3], pts[0]], w=0.07)
+    for x, y in pts[:3]:
+        p.disc(x, y, 0.15)
+    p.circle(*pts[3], 0.2, w=0.09)
+
+
+def _relax(p):
+    # An even grid of points inside a brush ring.
+    p.circle(0.0, 0.0, 0.85, w=0.08)
+    for v in (-0.42, 0.0, 0.42):
+        p.line(-0.42, v, 0.42, v, 0.06)
+        p.line(v, -0.42, v, 0.42, 0.06)
+    for x in (-0.42, 0.0, 0.42):
+        for y in (-0.42, 0.0, 0.42):
+            p.disc(x, y, 0.11)
+
+
+def _tweak(p):
+    # A vertex pulled up out of its edges, and the arrow of the pull.
+    p.path([(-0.85, -0.65), (0.0, -0.05), (0.85, -0.65)])
+    p.disc(0.0, -0.05, 0.18)
+    p.line(0.0, 0.2, 0.0, 0.85)
+    _arrow_head(p, 0.0, 0.88, math.pi / 2, 0.28)
+
+
+def _wrap(p):
+    # A mesh line pulled down onto a curved surface.
+    p.path(_arc_pts(0.0, -1.25, 1.35, math.radians(50), math.radians(130), 12))
+    for x in (-0.5, 0.0, 0.5):
+        p.line(x, 0.85, x, 0.4)
+        _arrow_head(p, x, 0.34, -math.pi / 2, 0.22)
+
+
 def _weights(p):
     # Rising bars: an amount.
     for x0, top in ((-0.8, -0.2), (-0.2, 0.25), (0.4, 0.75)):
@@ -809,6 +867,7 @@ ICONS = {
     "fk": _fk, "ik": _ik, "bones": _bones, "bind": _bind, "reset": _reset, "cursor": _cursor, "object": _object,
     "cut": _cut, "union": _union, "intersect": _intersect, "bevel": _bevel, "shell": _shell, "array": _array,
     "radial": _radial, "linear": _linear, "shading": _shading, "rig": _rig, "weights": _weights, "smooth": _smooth,
+    "retopo": _retopo, "strip": _strip, "quad": _quad, "relax": _relax, "tweak": _tweak, "wrap": _wrap,
     "kit": _kit, "kit_add": _kit_add, "stamp": _stamp, "physics": _physics, "throw": _throw, "force": _force,
     "hands": _hands, "cloth": _cloth, "soft": _soft, "spring": _spring,
     "gravity": _gravity, "seam": _seam, "fix": _fix, "islands": _islands,

@@ -48,8 +48,8 @@ Info = namedtuple("Info", "ray_on_panel ray_on_desktop picker_open cut_target ha
 
 NATIVE_LABELS = {"Draw": "Draw", "Clay Strips": "Clay", "Smooth": "Smooth", "Inflate/Deflate": "Inflate",
                  "Crease Sharp": "Crease", "Flatten/Contrast": "Flatten"}
-NEXT_MODE = {'SCULPT': "Model", 'MODEL': "Draw", 'DRAW': "Paint", 'PAINT': "Rig", 'RIG': "Pose", 'POSE': "Physics",
-             'PHYSICS': "Tools", 'TOOLS': "Sculpt"}
+NEXT_MODE = {'SCULPT': "Retopo", 'RETOPO': "Model", 'MODEL': "Draw", 'DRAW': "Paint", 'PAINT': "Rig", 'RIG': "Pose",
+             'POSE': "Physics", 'PHYSICS': "Tools", 'TOOLS': "Sculpt"}
 WEIGHT_LABELS = {'ADD': "Add weight", 'SUBTRACT': "Subtract", 'SMOOTH': "Smooth"}
 
 
@@ -78,6 +78,9 @@ def hints(s, info):
         right['top'] = ("cursor", "Right click")
     elif mode == 'SCULPT':
         right['top'] = ("chevron_right", "Next brush")
+    elif mode == 'RETOPO':
+        from .retopo import hint_top
+        right['top'] = hint_top()
     elif mode == 'MODEL':
         right['top'] = ("chevron_right", "Next shape")
     elif mode in {'DRAW', 'PAINT'} or (mode == 'RIG' and s.rig_tool == 'WEIGHTS'):
@@ -100,6 +103,8 @@ def hints(s, info):
     left['stick_click'] = ("pinned", "Unpin panel") if s.panel_pin else ("pin", "Pin panel")
     if mode == 'SCULPT':
         right['stick_click'] = ("plus", "Brush size")
+    elif mode == 'RETOPO':
+        right['stick_click'] = ("plus", "Size")
     elif mode == 'PAINT':
         right['stick_click'] = ("plus", "Paint size")
     elif mode == 'RIG' and s.rig_tool == 'WEIGHTS':
@@ -123,6 +128,9 @@ def _trigger(s, info):
         if s.engine == 'NATIVE':
             return ("sculpt", NATIVE_LABELS.get(info.native_brush, info.native_brush or "Sculpt"))
         return ("sculpt", s.brush.title())
+    if mode == 'RETOPO':
+        from .retopo import TRIGGER_HINTS
+        return TRIGGER_HINTS[s.retopo_tool]
     if mode == 'MODEL':
         if s.uv_tool == 'SEAM':
             return ("seam", "Mark seams")
@@ -170,6 +178,8 @@ def _left_trigger(s, info, right):
         inverts = s.left_inverts and (s.engine == 'NATIVE' or s.brush in {'DRAW', 'INFLATE'})
         if inverts and right is not None:
             return ("sculpt", right[1] + ", inverted")
+    if mode == 'RETOPO':
+        return ("trash", "Delete")
     if mode == 'MODEL' and s.uv_tool == 'SEAM':
         return ("seam", "Clear seams")
     if mode == 'MODEL' and s.uv_tool == 'FIX':
