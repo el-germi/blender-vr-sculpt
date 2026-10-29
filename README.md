@@ -62,6 +62,46 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     brushes from the controller tip: Draw, Clay Strips, Smooth,
     Inflate/Deflate, Crease Sharp, Flatten/Contrast. With **Dyntopo**
     (Blender's dynamic topology) on, strokes add and remove detail as they go.
+- **Retopo mode**: draw new, clean low-poly topology on the surface of a
+  sculpt (or any mesh) with your hands. Choosing Retopo takes the active mesh
+  as the reference; the result is a mesh of its own, "<name>.retopo",
+  parented to the reference and linked to it, so Retopo on the reference
+  again (later, or in the file reopened) carries on with it. Everything you
+  place lands on the reference's surface and snaps to the retopo vertices in
+  reach. In the headset the retopo mesh is drawn over the reference: faces
+  see-through (**Faces** sets how much), edges and vertices on top, open
+  border edges in orange; the tip shows where it lands and what it snaps to.
+  On the desktop it's a wire in front.
+  - **Strip**: drag along the surface and a strip of roughly square quads
+    follows, **Width** wide. Start on an open border edge (it lights up) to
+    carry that strip on; it never folds back over the face it starts from.
+  - **Quad**: click points on the surface. Four make a quad (the shortest
+    way round, so the click order doesn't matter), three and the first again
+    a triangle. The quad's last edge stays open, so two more clicks make the
+    next one, and a rubber band shows what's open. Click a border edge to
+    start from it, or drag it to pull a new quad out of it; drag a vertex to
+    slide it along the surface, onto another to merge the two. B, the
+    header's X or the left trigger in empty space ends the open quad.
+  - **Relax**: brush over vertices to even out their spacing; they stay on
+    the surface (border vertices slide along the border, corners stay).
+  - **Tweak**: grab the vertices in reach (with falloff) and slide them
+    along the surface.
+  - **Left trigger**: sweep faces (and loose vertices) away. What it would
+    delete is tinted red; it goes on release.
+  - **Mirror X** mirrors everything across the reference's local X; vertices
+    near the center line sit on it, and a strip drawn along the center line
+    is centered on it.
+  - **Finish** shows the retopo mesh as a mesh again, selected, in Model
+    mode. The **Mesh** select carries on with another of the reference's
+    retopo meshes or starts a new one; More has the reference, **New mesh**,
+    **Shrinkwrap** (a Shrinkwrap modifier onto the reference) and the Relax
+    strength.
+  - Controls: right trigger: the tool; left trigger: delete; B: end the open
+    quad, else the next tool; right stick click: next size (1, 2, 4, 8,
+    16 cm); Y: next mode (Retopo comes after Sculpt).
+
+  ![The Retopo page: Strip, Quad with a quad open, Relax with More open, the Mesh picker](docs/retopo_panels.png)
+  ![Mirrored strips, a strip down the center line and an open quad on Suzanne, with each tool's tip status](docs/retopo_scene.png)
 - **Brush cursor in the headset**: rings at each controller tip, colored per
   brush (blue when that hand inverts).
 - **Controller models** instead of Blender's gray spheres (Blender asks
@@ -373,7 +413,7 @@ offset and display options; **VR Extras** has the grid, navigation, hands
 
   ![Rigid, Rigid with More open, Cloth](docs/physics_panels.png)
 - **Passthrough** toggle (Blender's own; needs a runtime that supports it).
-- **Hand panel** above the left controller: an icon rail for the eight modes,
+- **Hand panel** above the left controller: an icon rail for the nine modes,
   each mode's 3-5 most used controls up front and a **More** row for the rest;
   the selected object's settings, Settings (grid, navigation, view, reveal,
   tracking) and pickers open as a second level with a Back button. It shows
@@ -393,7 +433,7 @@ offset and display options; **VR Extras** has the grid, navigation, hands
 | Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Bones: place the next joint; on a joint, carry on from it (click) or move it (drag). Weights: paint, or pick the touched bone | Grab a bone (FK / IK), or an object without a rig | Select an object (hold to move it) or a bone of the selected rig. Hands on: grab and throw a body or a spring bone, or Push / Pull: pull | Measure / aim the camera |
 | Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Bones: delete the touched bone; in empty space, end the chain. Weights: the opposite brush | Same as right | Same as right; Push / Pull: push | Same as right |
 | Right trigger, pointing at the hand panel | Press buttons, drag sliders, step steppers (hold to repeat) | Same | Same | Same | Same | Same | Same | Same |
-| Y (left) | Next mode (Sculpt, Model, Draw, Paint, Rig, Pose, Physics, Tools) | Same | Same | Same | Same | Same | Same | Same |
+| Y (left) | Next mode (Sculpt, Retopo, Model, Draw, Paint, Rig, Pose, Physics, Tools) | Same | Same | Same | Same | Same | Same | Same |
 | B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Bones: end the chain. Weights: undo the last weight stroke | Switch FK / IK | Simulate / stop | Remove the last measurement / next camera |
 | Left stick | Walk / fly (move) | Same | Same | Same | Same | Same | Same | Same |
 | Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same | Same | Same | Same |
@@ -464,6 +504,36 @@ With Triggers" is on. The setting applies when the VR session starts.
   10k vertices, 0.43 s at 33k. **Auto** does it 2 s after the last native
   dyntopo stroke, from the live timer, when no trigger is held. Each one adds
   the two mode switches to the undo history.
+- **Retopo mode** ([retopo.py](vr_sculpt/retopo.py)): the reference's
+  evaluated mesh goes into a BVH tree in world space (about 50 ms for 100k
+  triangles), built when the mode starts and again only when the reference
+  moves or its geometry changes (a depsgraph handler counts its updates).
+  Where the tip lands is the closest surface point within 5 cm, or, with the
+  tip inside the mesh, the first hit from the controller toward it. The
+  result is parented to the reference with an identity parent inverse, and
+  its `vrs_retopo_of` ID property points at it. Strip and Quad edit a bmesh
+  made from the mesh at the press (a KD tree of its vertices for snapping),
+  written back with `to_mesh()` when a face is made or a vertex moves, in
+  Object Mode. Each new face is turned to face out of the reference (the
+  surface normal at its center), so neighbors agree. Quad's four clicks
+  become the shortest of the three ways round that keeps the edges already
+  between them; the open quad is kept as vertex indices and positions, and
+  checked at the next press. Relax and Tweak only move vertices: positions in
+  numpy, one `foreach_set` per frame. Mirror X is a matrix from world space
+  to the mirror image across the reference's local X; new vertices get a
+  twin at the exact mirrored position, the brushes move the tip's side and
+  set the twins from it, and the off hand sweeps the mirrored path too. The
+  headset drawing is our own: positions, edges, border edges (one face),
+  triangles and face centers are read into numpy when the mesh changes (our
+  writes bump a counter; changes made elsewhere are caught by comparing
+  positions every 0.25 s) and drawn with a small shader that pulls each
+  vertex toward the eye by 0.3% of its distance: flat quads sag under a
+  curved surface, and at 0.1% the reference showed through them. Edges hidden
+  behind the reference are drawn faintly, without depth test. On the desktop
+  the mesh shows as a wire in front while it's edited (its own display type is
+  kept in an ID property and put back after). On a 100k-face reference: a
+  strip update 0.5 ms at most, a Relax step 0.1 ms, the drawn arrays and the
+  hover tests 0.2 ms.
 - **Model mode** ([interactions.py](vr_sculpt/interactions.py),
   [primitives.py](vr_sculpt/primitives.py)): the same trigger operator picks
   a handler per press: hand panel, grab, or create. Primitive settings are a
@@ -985,6 +1055,10 @@ blender --background --factory-startup --python tests/test_rest.py
 blender --background --factory-startup --python tests/test_uv.py
 ```
 
+```bash
+blender --background --factory-startup --python tests/test_retopo.py
+```
+
 `test_kit.py` registers a temporary asset library and points My Kit at a
 temporary folder, so neither your preferences nor your kit are touched.
 Rebuild the starter kit (`vr_sculpt/assets/kit`) with:
@@ -1027,6 +1101,9 @@ bones (`probe_pose.py` checked the pose API).
 with dropped, stamped and cut starter parts (`kit_scene.png`).
 `uv_preview.py` draws the UV page and a seamed sphere with the checker and
 stretch views (`uv_preview_checker.png`, `uv_preview_stretch.png`).
+`retopo_preview.py` lays mirrored strips, a center-line strip and an open
+quad on a subdivided Suzanne and draws the Retopo pages
+(`retopo_panels.png`) and the headset drawing (`retopo_scene.png`).
 `paint_preview.py`
 paints real Contact and Spray strokes with simulated controllers and checks
 color, size, undo and picking (`probe_texpaint*.py` found how).
@@ -1045,6 +1122,17 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   Custom normals aren't restored. Geometry added in Edit Mode between
   sessions sits at its rest positions, which can be degenerate (an extrude):
   start the next session from VR, which takes fresh ones.
+- Retopo mode: Mirror X expects a symmetric reference (twins go to the exact
+  mirrored positions, not onto the surface again). Work on one side: a strip
+  that crosses the center line at an angle overlaps its mirror image (one
+  along it, or starting on it, is fine), and a vertex slid onto the center
+  line isn't merged with its twin. Quads are flat and the surface curved, so
+  a quad much bigger than the surface's curvature sinks into it (the drawing
+  lifts it 3 mm at 1 m). There are no edge loop tools yet (insert, slide,
+  select), Relax pulls convex borders in a little, and the open quad ends
+  when the mesh changes under it. Sculpting the reference on the desktop
+  while in Retopo rebuilds the surface tree after each stroke (about 50 ms
+  per 100k faces); the surface is the evaluated mesh, modifiers included.
 - Creation is aligned to the world axes. Only Cube and Cylinder (our own
   versions) size non-uniformly to the drag box; other primitives keep their
   proportions. Surface snapping works when you grab, not while you drag out

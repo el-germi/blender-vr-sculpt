@@ -62,7 +62,7 @@ staying the fastest way to reach *everything*?
 
 ![Two panels at headset pixel density](ui_panel_detail.png)
 
-- **Rail** (left column): Sculpt, Model, Draw, Paint, Rig, Pose, Physics, Tools. The current
+- **Rail** (left column): Sculpt, Retopo, Model, Draw, Paint, Rig, Pose, Physics, Tools. The current
   mode has an accent pill and a bar on the edge. Hovering an icon shows its
   name to the left of the panel. Pressing the current mode's icon returns to
   its first level from any sheet or picker.
@@ -71,7 +71,7 @@ staying the fastest way to reach *everything*?
   and **Pin**.
 - **Primary controls**: 3-5 rows.
 - **More / Less**: the disclosure row, with a hint of what's inside. When the rail is taller than
-  the page (a short page, now that the rail holds eight modes), it sits at the bottom of the card,
+  the page (a short page, now that the rail holds nine modes), it sits at the bottom of the card,
   so it doesn't move when it opens.
 - **Second levels** replace the content (the rail stays): **object settings**
   (Model, from the selection chip), the **Kit** of parts (Model, from the icon
@@ -163,6 +163,27 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Show the texture mid-session (strokes leave their patches untextured), or automatically 2 s after a stroke | *More*: texture icon and **Auto** beside Edge (meshes with UVs or colors) |
 | Engine Python / Native | *More* > Engine |
 | Other hand inverts | *More* |
+
+### Retopo
+
+![Strip, Quad with a quad open, Relax with More open, the Mesh picker](retopo_panels.png)
+
+| Feature | How |
+|---|---|
+| Strip / Quad / Relax / Tweak | segmented control; **B** next tool |
+| Lay a strip of quads (from a border edge: carry it on) | right trigger, drag on the surface (Strip) |
+| Place points: four make a quad, its last edge stays open | right trigger, click (Quad); a rubber band shows the open quad |
+| Start a quad from a border edge, pull one out of it | click / drag the edge (Quad) |
+| Slide a vertex, merge it into another | drag it, drop it on the other (Quad) |
+| End the open quad | header **X**; **B**; left trigger in empty space |
+| Even out spacing, slide vertices along the surface | right trigger (Relax, Tweak) |
+| Delete faces and loose vertices | left trigger, sweep (red: what goes on release) |
+| Width / size / radius | slider; **right stick click** cycles 1-16 cm |
+| Mirror X (across the reference's local X), face opacity | toggle, **Faces** slider |
+| Retopo mesh to carry on, or a new one | **Mesh** select > picker (... **New mesh**) |
+| Done: the mesh selected, in Model mode | **Finish** |
+| Reference, new mesh | *More* > **On** select, **New mesh** |
+| Shrinkwrap modifier onto the reference, Relax strength | *More* |
 
 ### Model
 
@@ -372,6 +393,12 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
     follow? Left trigger a bone: gone, its children kept? Turn on Mirror X and build an arm. Bind,
     switch to Weights: does the heat map sit on the mesh, readable? Paint, subtract with the left
     hand, smooth; touch a bone to switch to it. Is 0.3 s of Bind acceptable on your meshes?
+11. **Retopo.** Select a sculpt, choose Retopo (Y after Sculpt). Drag a strip across the forehead: do the quads come
+    out square, on the surface, and keep up with your hand? Start a second drag on the strip's end edge: does it carry on?
+    Quad: click four points, then two more, and again: does the strip of quads grow the way you expect, and is the
+    rubber band clear? Drag a border edge out, drag a vertex onto another. Relax a messy patch, Tweak a vertex. Sweep
+    the left trigger over a few faces. Turn on Mirror X and draw down the nose: centered? Are the faces readable over
+    the sculpt at 35%, the edges sharp, nothing z-fighting? Finish: is the mesh there, selected, in Model mode?
 11. **Physics.** Select a floor, make it Static; drag out a few cubes in Model mode, make them Rigid.
     Simulate (B): do they fall and stack? Hands on (right stick click), sweep a hand through them:
     pushed? Grab one while it plays and throw it: does it fly on? Push / Pull: does the right
