@@ -1517,6 +1517,7 @@ def _draw_mesh(obj, v, settings):
     s.uniform_float("modelViewMatrix", gpu.matrix.get_model_view_matrix())
     s.uniform_float("projectionMatrix", gpu.matrix.get_projection_matrix())
     gpu.state.blend_set('ALPHA')
+    mask = gpu.state.depth_mask_get()
     gpu.state.depth_mask_set(False)
     if "faces" in batches and settings.retopo_opacity > 0.005:
         gpu.state.depth_test_set('LESS_EQUAL')
@@ -1544,7 +1545,7 @@ def _draw_mesh(obj, v, settings):
         batches["loose"].draw(s)
     gpu.state.program_point_size_set(False)
     gpu.state.depth_test_set('NONE')
-    gpu.state.depth_mask_set(True)
+    gpu.state.depth_mask_set(mask)
     gpu.matrix.pop()
 
 
@@ -1562,9 +1563,10 @@ def _draw_faces(v, faces, color):
     _use(s, color, EDGE_PULL)
     gpu.state.blend_set('ALPHA')
     gpu.state.depth_test_set('LESS_EQUAL')
+    mask = gpu.state.depth_mask_get()
     gpu.state.depth_mask_set(False)
     batch_for_shader(s, 'TRIS', {"pos": v["world"][tris.ravel()].astype(np.float32)}).draw(s)
-    gpu.state.depth_mask_set(True)
+    gpu.state.depth_mask_set(mask)
     gpu.state.depth_test_set('NONE')
 
 

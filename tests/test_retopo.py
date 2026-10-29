@@ -200,6 +200,9 @@ def test_strip(ref, truth):
     check(ok, f"every vertex on the surface (worst {worst * 1000:.3f} mm)")
     check(outward(obj) and manifold(obj), "faces face outward, edges have one or two faces")
     check(obj.display_type == 'WIRE' and obj.show_in_front, "shown as a wire while edited (the headset draws it)")
+    surf = retopo._surface["surface"]
+    ctx.view_layer.update()
+    check(retopo.surface(ctx, ref) is surf, "writing the retopo mesh isn't a reference change (the tree stays)")
     return obj
 
 
