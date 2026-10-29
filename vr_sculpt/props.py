@@ -37,6 +37,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
                            "paint its weights"),
             ('PHYSICS', "Physics", "Set up rigid bodies, cloth, soft bodies and spring bones, run the simulation "
                                    "and push, pull and throw things with your hands"),
+            ('RETOPO', "Retopo", "Draw new low-poly topology on the surface of the active mesh: strips, quads, "
+                                 "relax and tweak, with Mirror X"),
         ),
         default='SCULPT',
     )
@@ -58,6 +60,39 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     physics_force: FloatProperty(
         name="Force", description="Strength of the hand's push or pull at full trigger (a force field's strength)",
         default=300.0, min=0.0, soft_max=2000.0)
+    # Retopo mode.
+    retopo_tool: EnumProperty(
+        name="Retopo Tool",
+        items=(
+            ('STRIP', "Strip", "Drag along the surface to lay a strip of quads, the size wide. Start on a border "
+                               "edge to carry it on"),
+            ('QUAD', "Quad", "Click to place vertices: four make a quad, then two more the next one. Drag a "
+                             "border edge to pull out a quad, drag a vertex to slide it (onto another: merge)"),
+            ('RELAX', "Relax", "Brush to even out the spacing of the vertices, keeping them on the surface"),
+            ('TWEAK', "Tweak", "Grab the vertices in reach and slide them along the surface"),
+        ),
+        default='STRIP',
+    )
+    retopo_size: FloatProperty(
+        name="Retopo Size",
+        description="Strip width (and quad size), and the Relax and Tweak radius, in your hand's space (meters)",
+        default=0.02, min=0.003, soft_max=0.2, subtype='DISTANCE', unit='LENGTH')
+    retopo_mirror: BoolProperty(
+        name="Mirror Retopo",
+        description="Everything made, moved or deleted on one side of the reference's local X is mirrored to the "
+                    "other; vertices near the center line stay on it")
+    retopo_opacity: FloatProperty(
+        name="Face Opacity", description="How much the retopo mesh's faces hide the reference in VR",
+        default=0.35, min=0.0, max=1.0, subtype='FACTOR')
+    retopo_relax: FloatProperty(name="Relax Strength", default=0.5, min=0.0, max=1.0, subtype='FACTOR')
+    retopo_reference: PointerProperty(
+        type=bpy.types.Object, name="Retopo Reference",
+        description="The mesh Retopo mode draws new topology on (the active mesh when Retopo starts)",
+        poll=lambda self, obj: obj.type == 'MESH')
+    retopo_object: PointerProperty(
+        type=bpy.types.Object, name="Retopo Mesh",
+        description="The retopo mesh being edited; empty, the next stroke starts a new one",
+        poll=lambda self, obj: obj.type == 'MESH')
     # Rig mode.
     rig_tool: EnumProperty(
         name="Rig Tool",
