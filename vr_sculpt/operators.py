@@ -161,6 +161,9 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
     if settings.mode == 'TOOLS':
         if settings.tool == 'CAMERA':
             return camera.AimCamera(context, pose)
+        if settings.tool == 'LIGHT':
+            from . import lookdev
+            return lookdev.pick(context, settings, off, pose, tip_pose, scale)
         return measure.Measure(context, settings, tip_pose.translation, scale)
     return None
 
@@ -411,6 +414,9 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
         elif settings.mode == 'TOOLS':
             if settings.tool == 'CAMERA':
                 camera.next_camera(context)
+            elif settings.tool == 'LIGHT':
+                from . import lookdev
+                lookdev.next_type(settings)
             else:
                 measure.undo_last(context.scene)
         elif settings.mode == 'MODEL':

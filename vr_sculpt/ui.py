@@ -154,8 +154,12 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
                 row = col.row(align=True)
                 row.label(text=f"{len(measure.stored(context.scene))} measurements")
                 row.operator("vrsculpt.clear_measures", text="Clear", icon='TRASH')
+            elif settings.tool == 'LIGHT':
+                col.prop(settings, "light_type")
+                col.prop(settings, "light_color")
             else:
                 col.prop(context.scene, "camera")
+            col.prop(context.window_manager.xr_session_settings.shading, "type", text="VR View")
             col.prop(settings, "camera_preview")
             col.prop(settings, "tip_offset")
             box = layout.box()

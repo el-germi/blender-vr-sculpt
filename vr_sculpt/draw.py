@@ -70,6 +70,8 @@ def draw_overlay(context, ss, xr=True):
         grid.draw(settings, tips, scale)
         gpu.state.blend_set('NONE')
     measure.draw(context, ss, scale)
+    from . import lookdev
+    lookdev.draw(context, ss, tips, scale)  # The Light tool's gizmos (the headset doesn't draw lights).
     onion.draw(context)
     if settings.show_paths and xr:  # The desktop view draws Blender's own paths.
         paths.draw(context, scale)
@@ -157,7 +159,7 @@ def _draw_cursors(context, ss, settings, xr):
             color = (hud.CUT_COLORS.get(settings.model_add_as, hud.MODEL_COLOR)
                      if hardsurface.cut_target(context) is not None else hud.MODEL_COLOR)
         elif tools:
-            color = hud.CAMERA_COLOR if settings.tool == 'CAMERA' else measure.COLOR
+            color = hud.tool_color(settings, idx == off)
         elif posing:
             color = hud.POSE_COLORS[settings.pose_tool]
         elif weights:
