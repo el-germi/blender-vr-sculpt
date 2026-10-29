@@ -1218,7 +1218,7 @@ def _retopo_rows(context, settings):
         _header(context, settings, "Retopo", said or (f"{n} faces" if obj is not None else ref.name),
                 actions=actions),
         _segments("retopo_tool_", "retopo_tool", [(i, name) for i, name, _icon in retopo.TOOLS], tool,
-                  lambda v: retopo.set_tool(context, v), icons=retopo.TOOL_ICONS),
+                  lambda v: retopo.set_tool(context, v)),  # Words: four icons with their names don't fit.
         [vr_ui.slider("retopo_size", RETOPO_SIZE_LABELS[tool], settings.retopo_size, 0.005, 0.1,
                       lambda v: setattr(settings, "retopo_size", v), fmt=_meters)],
         [vr_ui.toggle("retopo_mirror", "Mirror X", settings.retopo_mirror, _toggle(settings, "retopo_mirror"),

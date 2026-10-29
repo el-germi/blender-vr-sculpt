@@ -87,11 +87,12 @@ VERT_COLOR = (0.92, 0.97, 1.0)
 DELETE_COLOR = (1.0, 0.35, 0.35)
 HOVER_COLOR = (1.0, 0.9, 0.35)
 MIRROR_COLOR = (1.0, 0.35, 0.35)
-# Pulled toward the eye by this share of their distance (view space): the same pixels, a little nearer,
-# so the retopo mesh wins over the reference surface it lies on; edges and vertices win over its faces.
-FACE_PULL = 0.0012
-EDGE_PULL = 0.0022
-VERT_PULL = 0.003
+# Pulled toward the eye by this share of their distance (view space): the same pixels, a little nearer
+# (3 mm at 1 m), so the retopo mesh wins over the reference surface it lies on. Flat quads sag under a
+# curved surface (a 2 cm quad on a 5 cm radius, by 1 mm): with less, the reference showed through them.
+FACE_PULL = 0.003
+EDGE_PULL = 0.0035
+VERT_PULL = 0.004
 
 # pen: [(vertex index, local co)] of the open quad, on the mesh named pen_key. message: (text, time).
 _state = {"pen": [], "pen_key": None, "message": ("", 0.0)}
@@ -1583,8 +1584,8 @@ def _mirror_plane(ref):
     lo, hi = lo - pad, hi + pad
     mw = ref.matrix_world
     coords = []
-    for i in range(7):
-        f = i / 6
+    for i in range(5):
+        f = i / 4
         y = lo.x + (hi.x - lo.x) * f
         z = lo.y + (hi.y - lo.y) * f
         coords += [mw @ Vector((0.0, y, lo.y)), mw @ Vector((0.0, y, hi.y)),
@@ -1644,7 +1645,7 @@ def draw(context, tips, poses, scale):
                 groups.append(('LINES', [hit[0], pen[0]], (*TOOL_COLORS['QUAD'], 0.4), 1.0))
             groups.append(('POINTS', pen, (*TOOL_COLORS['QUAD'], 1.0), 10.0))
     if settings.retopo_mirror:
-        groups.append(('LINES', _mirror_plane(ref), (*MIRROR_COLOR, 0.25), 1.0))
+        groups.append(('LINES', _mirror_plane(ref), (*MIRROR_COLOR, 0.18), 1.0))
     gpu.state.program_point_size_set(True)
     for prim, coords, col, size in groups:
         if prim == 'LINES':
