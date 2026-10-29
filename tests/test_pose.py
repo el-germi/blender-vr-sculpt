@@ -291,8 +291,8 @@ def test_rows(rig):
     ids = {w.id for w in widgets}
     check(first | later <= ids, f"Pose with More (missing {sorted((first | later) - ids)})")
     tabs = [w for w in widgets if w.id.startswith("mode_")]
-    check(len(tabs) == 8 and len({round(w.rect[0], 5) for w in tabs}) == 1 and
-          len({round(w.rect[1], 5) for w in tabs}) == 8, "eight mode icons in one column (the rail)")
+    check(len(tabs) == len(menus.MODES) and len({round(w.rect[0], 5) for w in tabs}) == 1 and
+          len({round(w.rect[1], 5) for w in tabs}) == len(menus.MODES), "every mode's icon in one column (the rail)")
     vr_ui.find(widgets, "pose_fk").on_press()
     check(settings.pose_tool == 'FK', "FK button")
     pb = rig.pose.bones["Spine"]
