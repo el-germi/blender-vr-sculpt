@@ -76,6 +76,7 @@ staying the fastest way to reach *everything*?
 - **Second levels** replace the content (the rail stays): **object settings**
   (Model, from the selection chip), the **Kit** of parts (Model, from the icon
   beside Add; it stays open while you place), **Simulation** (Physics, from its row under More),
+  **Look** (Tools, from the icon beside the view's shading; its matcap / HDRI tiles are a level below),
   **Settings** (gear, every mode), **pickers**
   (from any select, e.g. Add, Rig, Camera, Thickness, Ease).
 - **Timeline strip** (when on): beside the panel, bottom-aligned, same visual
@@ -176,7 +177,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Create, cut, drop or stamp kit parts | right trigger in the scene (never grabs) |
 | Select, and move what's selected | left trigger: touch an object (hold to move it); in empty space, select nothing |
 | Duplicate, Delete | icons beside the chip (and in the object's header) |
-| Object settings | **chip** > pages Shape / Cuts / Finish / Array / Stack / UV |
+| Object settings | **chip** > pages Shape / Cuts / Finish / Array / Stack / UV / Material (the ball icon) |
 | Size X/Y/Z, subdivisions; cylinder radius, height, segments; operator settings (paged) | **chip** > Shape |
 | Mirror X / Y / Z, center at left hand | **chip** > Shape > *More* > Mirror |
 | Solidify, thickness | **chip** > Shape > *More* |
@@ -196,6 +197,10 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Unwrap, Smart UV, Pack | **chip** > UV |
 | Unwrap method, Live unwrap, checker size | **chip** > UV > *More* |
 | Seams from sharp, Even out island scale, Clear seams | **chip** > UV > *More* |
+| The first material (a new one if none; a shared one is copied on the first change), assign another | **chip** > Material > **Material** select > picker (... **New material**) |
+| Presets: Plastic, Rubber, Clay, Ceramic, Metal, Chrome, Gold, Copper, Glass, Emissive | **chip** > Material > **Preset** select > picker |
+| Base color, roughness, metallic (the viewport display color follows) | **chip** > Material: 8 swatches, Rough / Metal sliders |
+| Hue / saturation / value, glow (emission), glass (transmission) | **chip** > Material > *More* |
 | Show grid, snap to grid | *More* > Grid |
 | Snap to surface, 15 degree steps | *More* > Grab |
 
@@ -285,11 +290,27 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 
 ### Tools
 
+![The Light page, the Look sheet, matcap and HDRI tiles](lookdev_panels.png)
+
+![The Look sheet in Material Preview and Rendered, the Material page (Model)](lookdev_panels_more.png)
+
 | Feature | How |
 |---|---|
-| Measure / Camera | segmented control |
+| Measure / Camera / Light | segmented control |
 | Show measurements, undo, clear | Measure row; **B** removes the last |
 | Scene camera, new camera here, pin preview, lens | Camera rows; **B** next camera |
+| Place a light (at the tip, aimed where you point), grab one to move and aim it | right trigger (Light); in empty space / on a light |
+| Select a light (hold to move it, keeping its aim), select nothing | left trigger (Light): on a light / in empty space |
+| Type new lights get: Point / Sun / Spot / Area | **New** segmented control; **B** next type |
+| Light to edit (the selected one, or the settings for new lights), duplicate, delete | **Edit** select > picker (lights, None); icons beside it |
+| Color, power (a sun's strength), radius / size / sun angle / spot cone | swatches; sliders (power is logarithmic) |
+| Color temperature, shadow; spot blend and radius | *More* (a light selected) |
+| The VR view's shading: Solid / Material Preview / Rendered | segmented control at the bottom of every Tools page |
+| Solid: Studio / Matcap / Flat, studio light or matcap (previewed tiles), color by material / object / random | **Look** icon > sheet; select > tiles |
+| Cavity, shadow, outline (Solid) | **Look** > *More* |
+| Material / Rendered: World HDRI or Scene, HDRI (mirror-ball tiles), turn, strength, scene lights | **Look** > sheet |
+| Build a World from the HDRI (Rendered and renders get it) | **Look** > **Use as world** |
+| HDRI as background, blur | **Look** > *More* (HDRI) |
 
 ### Timeline strip
 
