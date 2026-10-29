@@ -623,8 +623,11 @@ def _object_rows(context, settings, obj):
         out.append([vr_ui.label("No settings for this object")])
         return out
     page = settings.model_page
-    out.append(_segments("page_", "pages", [(i.lower(), n) for i, n in MODEL_PAGES], page.lower(),
-                         lambda v: _set_model_page(settings, v.upper())))
+    # Seven pages share the row: Material is its icon (a shaded ball), so the six words keep their size.
+    out.append([vr_ui.segment("page_" + i.lower(), "" if i == 'MATERIAL' else n,
+                              (lambda v=i: _set_model_page(settings, v)), page == i, "pages",
+                              icon="material" if i == 'MATERIAL' else None, weight=0.6 if i == 'MATERIAL' else 1.0)
+                for i, n in MODEL_PAGES])
     if page == 'BOOLEAN':
         rows, more, hint = _boolean_rows(context, obj)
     elif page == 'FINISH':
@@ -1634,7 +1637,8 @@ def _light_rows(context, settings):
                      fmt=lambda v: f"{v:.0f} K", weight=2.0),
     ]]
     shadow = vr_ui.toggle("light_shadow", "Shadow", lookdev.light_get(context, obj, 'shadow'),
-                          lambda: lookdev.light_set(context, obj, 'shadow', not obj.data.use_shadow), icon="shading")
+                          lambda: lookdev.light_set(context, obj, 'shadow', not obj.data.use_shadow), icon="shading",
+                          weight=0.6 if kind == 'SPOT' else 1.0)
     if kind == 'SPOT':
         more.append([shadow, vr_ui.slider("light_blend", "Blend", lookdev.light_get(context, obj, 'blend'), 0.0, 1.0,
                                           lambda v: lookdev.light_set(context, obj, 'blend', v), fmt=_percent),
