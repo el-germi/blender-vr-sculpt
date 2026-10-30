@@ -169,7 +169,9 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
                 col.prop(settings, "light_color")
             elif settings.tool == 'REFS':
                 col.prop(settings, "refs_folder")
-                col.prop(settings, "ref_image")
+                # The picture is chosen from the tiles in VR; here it's only named, not a second path.
+                from . import refs
+                col.label(text="Picture: " + (refs.label(settings.ref_image) or "choose one in VR"), icon='IMAGE_DATA')
                 col.prop(settings, "ref_size")
                 col.prop(settings, "refs_show")
             else:
