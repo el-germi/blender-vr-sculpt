@@ -294,7 +294,8 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     matcap from tiles with their previews, Color by material, object or
     random, and Cavity / Shadow / Outline. Material Preview and Rendered: the
     World is Blender's bundled **HDRI** (tiles previewed as mirror balls),
-    its Turn, Strength, Background and Blur, or the **Scene**'s world; Lights
+    its Turn, Strength, Background and Blur (switching to HDRI shows it as
+    the background, which Blender starts at 0%), or the **Scene**'s world; Lights
     shows the scene lights. **Use as world** builds a real World from the
     HDRI (an Environment Texture, packed into the file, turned and as bright
     as in Material Preview), so Rendered and final renders get the same

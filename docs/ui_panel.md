@@ -310,7 +310,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Cavity, shadow, outline (Solid) | **Look** > *More* |
 | Material / Rendered: World HDRI or Scene, HDRI (mirror-ball tiles), turn, strength, scene lights | **Look** > sheet |
 | Build a World from the HDRI (Rendered and renders get it) | **Look** > **Use as world** |
-| HDRI as background, blur | **Look** > *More* (HDRI) |
+| HDRI as background, blur | **Look** (HDRI) |
 
 ### Timeline strip
 

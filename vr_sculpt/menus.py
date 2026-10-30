@@ -1787,16 +1787,16 @@ def _look_rows(context, settings):
         if world:
             out.append([vr_ui.label("The scene's world", align='CENTER', weight=2.0), lights])
         else:
+            # Up front: at 0% background the HDRI only lights the scene and looks like it isn't there.
+            out.append([vr_ui.slider("look_background", "Background", sh.studiolight_background_alpha, 0.0, 1.0,
+                                     lambda v: setattr(sh, "studiolight_background_alpha", v), fmt=_percent),
+                        vr_ui.slider("look_blur", "Blur", sh.studiolight_background_blur, 0.0, 1.0,
+                                     lambda v: setattr(sh, "studiolight_background_blur", v), fmt=_percent)])
             matched = lookdev.in_world(context)
             out.append([vr_ui.button("look_use_world", "In world" if matched else "Use as world",
                                      lambda: lookdev.use_as_world(context), active=matched, icon="world", weight=1.6,
                                      tip="Build a World from this HDRI for Rendered and final renders"),
                         lights])
-            more = [[vr_ui.slider("look_background", "Background", sh.studiolight_background_alpha, 0.0, 1.0,
-                                  lambda v: setattr(sh, "studiolight_background_alpha", v), fmt=_percent)],
-                    [vr_ui.slider("look_blur", "Blur", sh.studiolight_background_blur, 0.0, 1.0,
-                                  lambda v: setattr(sh, "studiolight_background_blur", v), fmt=_percent)]]
-            hint = "Background, blur"
     else:
         world = context.scene.world
         out.append([vr_ui.label(f"World: {world.name}" if world else "No world", align='CENTER')])

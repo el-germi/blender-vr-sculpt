@@ -504,6 +504,9 @@ def set_scene_world(context, on):
         sh.use_scene_world_render = on
     else:
         sh.use_scene_world = on
+    if not on and sh.studiolight_background_alpha == 0.0:
+        # Blender starts the HDRI as light only (0% background); choosing it here means wanting to see it.
+        sh.studiolight_background_alpha = 1.0
 
 
 def scene_lights_on(context):
