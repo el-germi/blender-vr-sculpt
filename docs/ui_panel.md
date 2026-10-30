@@ -139,6 +139,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Walk / Fly, move speed | **gear** > Move, Speed |
 | What the grips do (Move / Turn / Free) | **gear** > Grip |
 | 3D grid, snap to grid, grid size | **gear** > Grid Show / Snap, Grid size |
+| Stroke smoothing on / off, Amount, Lag (every mode) | **gear** > the smoothing row |
 | Timeline strip on / off | **gear** > Timeline |
 | Passthrough | **gear** > Passthrough |
 | Desktop window, bring it here | **gear** > Desktop Show, Bring here |
@@ -230,12 +231,12 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Feature | How |
 |---|---|
 | Draw / Edit / Erase | segmented control |
-| Tube / Ribbon / Note | segmented control (with Draw) |
+| Tube / Ribbon / Note / Pencil (Grease Pencil, on the current frame) | segmented control, words only (with Draw) |
 | Color | 8 swatches (with Draw) |
 | Width | slider |
 | Undo stroke | header undo icon; **B** |
 | Thickness (pressure, speed, taper, fixed), taper length | *More* > Thickness picker |
-| Smoothing | *More* |
+| Smooth on / off, Amount, Lag (every stroke's; also on Settings) | *More*: icon toggle and two sliders |
 | Mirror X / Y / Z, center at left hand | *More* > Mirror |
 
 ### Paint
@@ -252,6 +253,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Undo stroke | header undo icon; **B** |
 | Contact / Spray | *More* > Reach |
 | Hue / saturation / value | *More* |
+| Smooth on / off, Amount, Lag | *More* (the same setting as Draw's) |
 
 ### Rig
 
@@ -286,6 +288,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Mirror X, show bones | toggles |
 | Reset bone, reset pose | *More* |
 | Bind L hand / R hand / Head, Unbind, Rec | *More*; they move up front while a binding or take exists |
+| Smooth takes on / off, over how many frames | beside the puppet rows |
 
 ### Physics
 
@@ -315,9 +318,11 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 
 ![The Look sheet in Material Preview and Rendered, the Material page (Model)](lookdev_panels_more.png)
 
+![Draw with Pencil and smoothing, Refs and its tiles, Settings, Pose's take smoothing](gp_refs_panels.png)
+
 | Feature | How |
 |---|---|
-| Measure / Camera / Light | segmented control |
+| Measure / Camera / Light / Refs | segmented control, words only |
 | Show measurements, undo, clear | Measure row; **B** removes the last |
 | Scene camera, new camera here, pin preview, lens | Camera rows; **B** next camera |
 | Place a light (at the tip, aimed where you point), grab one to move and aim it | right trigger (Light); in empty space / on a light |
@@ -332,6 +337,11 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Material / Rendered: World HDRI or Scene, HDRI (mirror-ball tiles), turn, strength, scene lights | **Look** > sheet |
 | Build a World from the HDRI (Rendered and renders get it) | **Look** > **Use as world** |
 | HDRI as background, blur | **Look** (HDRI) |
+| Reference picture to place (folder and the file's, as thumbnails) | **Picture** select > tiles page (Refs) |
+| Place it (at the tip, facing you), grab one (either hand) | right trigger in empty space / on a picture (Refs) |
+| Size of new pictures | **New size** slider (Refs, none selected) |
+| Selected picture: size, opacity, face me, pin beside the panel, delete | sliders, buttons (Refs); **B** face me |
+| Show pictures in VR, unpin | **Show in VR** toggle, **Unpin** (Refs) |
 
 ### Timeline strip
 
