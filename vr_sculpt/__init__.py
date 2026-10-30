@@ -5,21 +5,21 @@ Needs the bundled "VR Scene Inspection" add-on, which starts the VR session.
 
 if "bpy" in locals():
     import importlib
-    for _m in (brushes, rest, native, strokes, props, catalog, primitives, generic, kit, actions, hud, grid, symmetry,
+    for _m in (brushes, rest, native, strokes, retopo, props, catalog, primitives, generic, kit, actions, hud, grid, symmetry,
                shading, uv, hardsurface, snapping, anim, paths, onion, paint, pose, rig, puppet, physics, measure,
-               camera, desktop, tracking, navigation, gfx, vr_ui, presence, menus, interactions, drawing, operators,
-               controllers, live, draw, ui):
+               camera, lookdev, desktop, tracking, navigation, gfx, vr_ui, presence, menus, interactions, drawing,
+               operators, controllers, live, draw, ui):
         importlib.reload(_m)
 else:
-    from . import (brushes, rest, native, strokes, props, catalog, primitives, generic, kit, actions, hud, grid, symmetry,
+    from . import (brushes, rest, native, strokes, retopo, props, catalog, primitives, generic, kit, actions, hud, grid, symmetry,
                    shading, uv, hardsurface, snapping, anim, paths, onion, paint, pose, rig, puppet, physics, measure,
-                   camera, desktop, tracking, navigation, gfx, vr_ui, presence, menus, interactions, drawing, operators,
-                   controllers, live, draw, ui)
+                   camera, lookdev, desktop, tracking, navigation, gfx, vr_ui, presence, menus, interactions, drawing,
+                   operators, controllers, live, draw, ui)
 
 import bpy
 
-_modules = (props, primitives, physics, kit, uv, actions, operators, navigation, camera, desktop, onion, paint, puppet,
-            controllers, live, draw, ui)
+_modules = (props, primitives, physics, retopo, kit, uv, actions, operators, navigation, camera, lookdev, desktop, onion,
+            paint, puppet, controllers, live, draw, ui)
 
 
 def register():

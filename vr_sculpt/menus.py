@@ -1,6 +1,6 @@
 """What the hand panel shows, and the mode/engine switches behind it.
 
-The panel is an icon rail (the eight modes) beside the content. The content is:
+The panel is an icon rail (the nine modes) beside the content. The content is:
   - a header: the mode's name, its context, and icon actions (undo where there is one, Settings, Pin);
   - the mode's 3-5 most used controls;
   - a More row that opens the rest (it opens upward, so the row stays under the pointer).
@@ -14,7 +14,7 @@ import math
 import bpy
 
 from . import (actions, anim, camera, catalog, desktop, generic, hardsurface, hud, kit, measure, native, paint,
-               physics, pose, presence, primitives, puppet, rest, rig, shading, strokes, symmetry, uv, vr_ui)
+               physics, pose, presence, primitives, puppet, rest, retopo, rig, shading, strokes, symmetry, uv, vr_ui)
 from .props import BRUSH_ITEMS
 
 NATIVE_SHORT = {
@@ -22,7 +22,8 @@ NATIVE_SHORT = {
     "Inflate/Deflate": "Inflate", "Crease Sharp": "Crease", "Flatten/Contrast": "Flatten",
 }
 
-MODES = (('SCULPT', "Sculpt", "sculpt"), ('MODEL', "Model", "model"), ('DRAW', "Draw", "draw"),
+MODES = (('SCULPT', "Sculpt", "sculpt"), ('RETOPO', "Retopo", "retopo"),
+         ('MODEL', "Model", "model"), ('DRAW', "Draw", "draw"),
          ('PAINT', "Paint", "paint"), ('RIG', "Rig", "rig"), ('POSE', "Pose", "pose"),
          ('PHYSICS', "Physics", "physics"), ('TOOLS', "Tools", "tools"))
 MODE_ICONS = {ident: icon for ident, _name, icon in MODES}
@@ -65,6 +66,8 @@ def set_mode(context, mode):
         pose.leave(context)
     if settings.mode == 'RIG' and mode != 'RIG':
         rig.leave(context)
+    if settings.mode == 'RETOPO' and mode != 'RETOPO':
+        retopo.leave(context)
     close_picker()
     close_sheet(context)
     settings.mode = mode
@@ -80,6 +83,8 @@ def set_mode(context, mode):
             pose.enter(context)
     elif mode == 'RIG':
         rig.enter(context)
+    elif mode == 'RETOPO':
+        retopo.enter(context)
     elif settings.engine == 'NATIVE':
         set_object_mode(context, obj, 'SCULPT')
     else:
@@ -442,7 +447,7 @@ def _dyntopo_rows(context):
 
 ADD_AS = (('OBJECT', "Object"), ('DIFFERENCE', "Cut"), ('UNION', "Union"), ('INTERSECT', "Intersect"))
 MODEL_PAGES = (('SHAPE', "Shape"), ('BOOLEAN', "Cuts"), ('FINISH', "Finish"), ('ARRAY', "Array"),
-               ('STACK', "Stack"), ('UV', "UV"))
+               ('STACK', "Stack"), ('UV', "UV"), ('MATERIAL', "Material"))
 
 
 def _selected(context):
@@ -623,8 +628,11 @@ def _object_rows(context, settings, obj):
         out.append([vr_ui.label("No settings for this object")])
         return out
     page = settings.model_page
-    out.append(_segments("page_", "pages", [(i.lower(), n) for i, n in MODEL_PAGES], page.lower(),
-                         lambda v: _set_model_page(settings, v.upper())))
+    # Seven pages share the row: Material is its icon (a shaded ball), so the six words keep their size.
+    out.append([vr_ui.segment("page_" + i.lower(), "" if i == 'MATERIAL' else n,
+                              (lambda v=i: _set_model_page(settings, v)), page == i, "pages",
+                              icon="material" if i == 'MATERIAL' else None, weight=0.6 if i == 'MATERIAL' else 1.0)
+                for i, n in MODEL_PAGES])
     if page == 'BOOLEAN':
         rows, more, hint = _boolean_rows(context, obj)
     elif page == 'FINISH':
@@ -635,6 +643,8 @@ def _object_rows(context, settings, obj):
         rows, more, hint = _stack_rows(context, obj)
     elif page == 'UV':
         rows, more, hint = _uv_rows(context, settings, obj)
+    elif page == 'MATERIAL':
+        rows, more, hint = _material_rows(context, settings, obj)
     else:
         rows, more, hint = _shape_rows(context, obj)
     return _disclose('OBJECT_' + page, out + rows, more, hint)
@@ -842,6 +852,65 @@ def _uv_rows(context, settings, obj):
          vr_ui.icon_button("uv_clear_seams", "trash", lambda: uv.clear_seams(obj), "Clear seams", danger=True)],
     ]
     return rows, more, "Method, checker, seams"
+
+
+def _material_rows(context, settings, obj):
+    """The Material page: the first material's Principled BSDF (base color, roughness, metallic, presets). The
+    first change makes a shared material the object's own."""
+    from . import lookdev
+    mat = lookdev.material_of(obj)
+    shared = mat is not None and lookdev.is_shared(obj)
+    rows = [[vr_ui.select("mat_pick", "Shared" if shared else "Material", mat.name if mat else "none",
+                          lambda: open_material_picker(context, obj), icon="material")]]
+    if mat is not None and lookdev.principled(mat) is None:
+        rows += [[vr_ui.label("Not a Principled BSDF: edit it on the desktop", align='CENTER')],
+                 [vr_ui.button("mat_new", "New material", lambda: lookdev.assign_material(context, obj, ""),
+                               icon="plus")]]
+        return rows, [], ""
+    name = obj.name
+    rows.append([vr_ui.select("mat_preset", "Preset", lookdev.preset_name(mat) if mat else "-",
+                              lambda: open_picker("Preset", [Option(i, n) for i, n, _c, _v in lookdev.PRESETS],
+                                                  "", lambda v: lookdev.apply_preset(context, _named(name), v)))])
+    color = lookdev.material_value(obj, 'color')
+    if mat is not None and lookdev.base_linked(mat):
+        rows.append([vr_ui.label("Base color comes from a texture", align='CENTER')])
+    else:
+        rows.append([vr_ui.swatch_button("mat_color_" + ident, rgb,
+                                         (lambda rgb=rgb: lookdev.material_set(context, obj, 'color', rgb)),
+                                         all(abs(a - b) < 2e-3 for a, b in zip(color, rgb)))
+                     for ident, _name, rgb in strokes.PALETTE])
+    rows.append([
+        vr_ui.slider("mat_roughness", "Rough", lookdev.material_value(obj, 'roughness'), 0.0, 1.0,
+                     lambda v: lookdev.material_set(context, obj, 'roughness', v), fmt=_percent),
+        vr_ui.slider("mat_metallic", "Metal", lookdev.material_value(obj, 'metallic'), 0.0, 1.0,
+                     lambda v: lookdev.material_set(context, obj, 'metallic', v), fmt=_percent),
+    ])
+    import colorsys
+    h, s, v = colorsys.rgb_to_hsv(*color)
+
+    def set_hsv(h=h, s=s, v=v):
+        lookdev.material_set(context, obj, 'color', colorsys.hsv_to_rgb(h, s, v))
+    more = [] if mat is not None and lookdev.base_linked(mat) else [
+        [vr_ui.slider("mat_hue", "Hue", h, 0.0, 1.0, lambda x: set_hsv(h=x), fmt=lambda x: f"{x * 360:.0f}\u00b0")],
+        [vr_ui.slider("mat_sat", "Saturation", s, 0.0, 1.0, lambda x: set_hsv(s=x), fmt=_percent)],
+        [vr_ui.slider("mat_val", "Value", v, 0.0, 1.0, lambda x: set_hsv(v=x), fmt=_percent)],
+    ]
+    more.append([
+        vr_ui.slider("mat_glow", "Glow", lookdev.material_value(obj, 'emission'), 0.0, 20.0,
+                     lambda x: lookdev.material_set(context, obj, 'emission', x), fmt=_number),
+        vr_ui.slider("mat_glass", "Glass", lookdev.material_value(obj, 'transmission'), 0.0, 1.0,
+                     lambda x: lookdev.material_set(context, obj, 'transmission', x), fmt=_percent),
+    ])
+    return rows, more, "Hue / sat / value, glow, glass"
+
+
+def open_material_picker(context, obj):
+    from . import lookdev
+    mat = lookdev.material_of(obj)
+    name = obj.name
+    options = [Option(n, n) for n in lookdev.material_names()] + [Option("", "New material")]
+    open_picker("Material", options, mat.name if mat else "",
+                lambda v: lookdev.assign_material(context, _named(name), v))
 
 
 def _unwrap_all(context, settings):
@@ -1177,6 +1246,65 @@ def _rig_rows(context, settings):
     return _disclose('RIG_WEIGHTS', out, more, "Rig, mirror, normalize")
 
 
+# --- Retopo ---------------------------------------------------------------------
+
+RETOPO_SIZE_LABELS = {'STRIP': "Width", 'QUAD': "Size", 'RELAX': "Radius", 'TWEAK': "Radius"}
+
+
+def open_reference_picker(context):
+    current = retopo.reference(context)
+    open_picker("Reference", [Option(o.name, o.name) for o in retopo.references(context)],
+                current.name if current else "", lambda name: retopo.choose_reference(context, name))
+
+
+def open_retopo_picker(context):
+    current = retopo.result(context)
+    options = [Option(o.name, o.name) for o in retopo.results_of(context, retopo.reference(context))]
+    open_picker("Retopo mesh", options + [Option("", "New mesh")], current.name if current else "",
+                lambda name: retopo.choose_result(context, name))
+
+
+def _retopo_rows(context, settings):
+    ref, obj = retopo.reference(context), retopo.result(context)
+    said = retopo.message()
+    if ref is None:
+        return [
+            _header(context, settings, "Retopo", said),
+            [vr_ui.label("Select the mesh to draw new topology on", align='CENTER')],
+            [vr_ui.select("retopo_ref", "On", "none", lambda: open_reference_picker(context), icon="sculpt")],
+        ]
+    n = len(obj.data.polygons) if obj is not None else 0
+    tool = settings.retopo_tool
+    actions = []
+    if tool == 'QUAD' and retopo.pen_count():
+        actions.append(vr_ui.icon_button("retopo_end", "close", retopo.end_quad, "End the open quad"))
+    out = [
+        _header(context, settings, "Retopo", said or (f"{n} faces" if obj is not None else ref.name),
+                actions=actions),
+        _segments("retopo_tool_", "retopo_tool", [(i, name) for i, name, _icon in retopo.TOOLS], tool,
+                  lambda v: retopo.set_tool(context, v)),  # Words: four icons with their names don't fit.
+        [vr_ui.slider("retopo_size", RETOPO_SIZE_LABELS[tool], settings.retopo_size, 0.005, 0.1,
+                      lambda v: setattr(settings, "retopo_size", v), fmt=_meters)],
+        [vr_ui.toggle("retopo_mirror", "Mirror X", settings.retopo_mirror, _toggle(settings, "retopo_mirror"),
+                      icon="mirror"),
+         vr_ui.slider("retopo_opacity", "Faces", settings.retopo_opacity, 0.0, 1.0,
+                      lambda v: setattr(settings, "retopo_opacity", v), fmt=_percent, weight=1.3)],
+        [vr_ui.select("retopo_mesh", "Mesh", obj.name if obj is not None else "New",
+                      lambda: open_retopo_picker(context), icon="retopo", weight=1.4),
+         vr_ui.button("retopo_finish", "Finish", lambda: retopo.finish(context), icon="check", active=n > 0)],
+    ]
+    more = [
+        [vr_ui.select("retopo_ref", "On", ref.name, lambda: open_reference_picker(context), icon="sculpt",
+                      weight=1.4),
+         vr_ui.button("retopo_new", "New mesh", lambda: retopo.new_mesh(context), icon="plus")],
+        [vr_ui.toggle("retopo_wrap", "Shrinkwrap", retopo.has_shrinkwrap(obj),
+                      lambda: retopo.toggle_shrinkwrap(context), icon="wrap", tip="Shrink onto the reference")],
+        [vr_ui.slider("retopo_relax", "Relax strength", settings.retopo_relax, 0.0, 1.0,
+                      lambda v: setattr(settings, "retopo_relax", v), fmt=_percent)],
+    ]
+    return _disclose('RETOPO', out, more, "Reference, new mesh, shrinkwrap")
+
+
 # --- Pose -----------------------------------------------------------------------
 
 def open_rig_picker(context):
@@ -1469,13 +1597,20 @@ def _new_camera_here(context):
 
 
 def _tools_rows(context, settings):
+    if _sheet == 'LOOK':
+        return _look_rows(context, settings)  # Tools mode's own sheet (panel() leaves it to the mode's rows).
     scene = context.scene
     out = [
         _header(context, settings, "Tools"),
-        _segments("tool_", "tool", (('measure', "Measure"), ('camera', "Camera")), settings.tool.lower(),
-                  lambda v: setattr(settings, "tool", v.upper()), icons={'measure': "ruler", 'camera': "camera"}),
+        _segments("tool_", "tool", (('measure', "Measure"), ('camera', "Camera"), ('light', "Light")),
+                  settings.tool.lower(), lambda v: setattr(settings, "tool", v.upper()),
+                  icons={'measure': "ruler", 'camera': "camera", 'light': "light"}),
     ]
-    if settings.tool == 'MEASURE':
+    more = []
+    if settings.tool == 'LIGHT':
+        rows, more = _light_rows(context, settings)
+        out += rows
+    elif settings.tool == 'MEASURE':
         n = len(measure.stored(scene))
         out.append([
             vr_ui.toggle("measures_show", "Show", settings.show_measures, _toggle(settings, "show_measures"),
@@ -1495,7 +1630,247 @@ def _tools_rows(context, settings):
         if cam is not None and cam.data.type == 'PERSP':
             out.append([vr_ui.slider("camera_lens", "Lens", cam.data.lens, 10.0, 200.0,
                                      lambda v: setattr(cam.data, "lens", v), fmt=lambda v: f"{v:.0f} mm")])
+    out.append(_view_row(context, look=True))
+    return _disclose('TOOLS_LIGHT', out, more, "Temperature, shadow") if more else out
+
+
+# The Light tool and the Look sheet (lookdev.py does the work).
+
+def _log_slider(id, text, value, lo, hi, set_value, fmt, weight=1.0):
+    """A slider over a wide range (light power): the track is logarithmic, so every decade gets the same room."""
+    return vr_ui.slider(id, text, math.log10(min(max(value, lo), hi)), math.log10(lo), math.log10(hi),
+                        lambda x: set_value(10.0 ** x), fmt=lambda x: fmt(10.0 ** x), weight=weight)
+
+
+def open_light_picker(context):
+    from . import lookdev
+    obj = lookdev.selected_light(context)
+    options = [Option(o.name, o.name) for o in lookdev.lights(context)] + [Option("", "None: new lights")]
+    open_picker("Light", options, obj.name if obj else "", lambda name: lookdev.choose_light(context, name))
+
+
+def _light_rows(context, settings):
+    """(rows, More) of the Light tool: the type new lights get, the light being edited (the selected one, or
+    the settings for new lights), its color, power and size."""
+    from . import lookdev
+    obj = lookdev.selected_light(context)
+    kind = lookdev.kind_of(context, obj)
+    rows = [[vr_ui.label("New", fixed=LABEL_W)] + _segments(
+        "light_", "light_type", [(i.lower(), n) for i, n, _icon in lookdev.LIGHT_TYPES], settings.light_type.lower(),
+        lambda v: setattr(settings, "light_type", v.upper()))]
+    pick = vr_ui.select("light_pick", "Edit", obj.name if obj else "new lights", lambda: open_light_picker(context),
+                        icon=lookdev.LIGHT_ICONS[kind], weight=3.0)
+    if obj is None:
+        rows.append([pick])
+    else:
+        rows.append([pick,
+                     vr_ui.icon_button("light_duplicate", "duplicate", lambda: lookdev.duplicate_light(context, obj),
+                                       "Duplicate"),
+                     vr_ui.icon_button("light_delete", "trash", lambda: lookdev.delete_light(context, obj),
+                                       "Delete light", danger=True)])
+    color = lookdev.light_get(context, obj, 'color')
+    rows.append([vr_ui.swatch_button("light_color_" + ident, rgb,
+                                     (lambda rgb=rgb: lookdev.light_set(context, obj, 'color', rgb)),
+                                     all(abs(a - b) < 2e-3 for a, b in zip(color, rgb)))
+                 for ident, _name, rgb in lookdev.LIGHT_PALETTE])
+    sun = kind == 'SUN'
+    lo, hi = lookdev.SUN_RANGE if sun else lookdev.POWER_RANGE
+    power = _log_slider("light_power", "Strength" if sun else "Power", lookdev.light_get(context, obj, 'power'), lo, hi,
+                        lambda v: lookdev.light_set(context, obj, 'power', v),
+                        lookdev.strength_text if sun else lookdev.watts)
+    if kind == 'SPOT':
+        size = vr_ui.slider("light_cone", "Cone", lookdev.light_get(context, obj, 'cone'), math.radians(5.0),
+                            math.radians(180.0), lambda v: lookdev.light_set(context, obj, 'cone', v), fmt=_degrees)
+    elif sun:
+        size = vr_ui.slider("light_size", "Angle", lookdev.light_get(context, obj, 'size'), 0.0, math.radians(20.0),
+                            lambda v: lookdev.light_set(context, obj, 'size', v), fmt=_degrees)
+    else:
+        area = kind == 'AREA'
+        size = vr_ui.slider("light_size", "Size" if area else "Radius", lookdev.light_get(context, obj, 'size'),
+                            0.01 if area else 0.0, 2.0 if area else 1.0,
+                            lambda v: lookdev.light_set(context, obj, 'size', v), fmt=_meters)
+    rows.append([power, size])
+    if obj is None:
+        return rows, []
+    more = [[
+        vr_ui.toggle("light_kelvin", "Kelvin", lookdev.light_get(context, obj, 'kelvin'),
+                     lambda: lookdev.light_set(context, obj, 'kelvin', not obj.data.use_temperature),
+                     icon="light", tip="Color temperature"),
+        vr_ui.slider("light_temperature", "Temp", lookdev.light_get(context, obj, 'temperature'),
+                     *lookdev.KELVIN_RANGE, lambda v: lookdev.light_set(context, obj, 'temperature', v),
+                     fmt=lambda v: f"{v:.0f} K", weight=2.0),
+    ]]
+    shadow = vr_ui.toggle("light_shadow", "Shadow", lookdev.light_get(context, obj, 'shadow'),
+                          lambda: lookdev.light_set(context, obj, 'shadow', not obj.data.use_shadow), icon="shading",
+                          weight=0.6 if kind == 'SPOT' else 1.0)
+    if kind == 'SPOT':
+        more.append([shadow, vr_ui.slider("light_blend", "Blend", lookdev.light_get(context, obj, 'blend'), 0.0, 1.0,
+                                          lambda v: lookdev.light_set(context, obj, 'blend', v), fmt=_percent),
+                     vr_ui.slider("light_radius", "Radius", lookdev.light_get(context, obj, 'radius'), 0.0, 1.0,
+                                  lambda v: lookdev.light_set(context, obj, 'radius', v), fmt=_meters)])
+    else:
+        more.append([shadow, vr_ui.label("")])
+    return rows, more
+
+
+def _view_row(context, look=False):
+    """The VR view's shading (the session's, not the desktop's); look: with the Look sheet's button."""
+    from . import lookdev
+    row = _segments("view_", "xr_view", [(i.lower(), n) for i, n in lookdev.VIEW_TYPES],
+                    lookdev.shading(context).type.lower(), lambda v: lookdev.set_view(context, v.upper()))
+    if look:
+        row.append(vr_ui.icon_button("look", "look", lambda: open_look(), "Look: lighting, HDRI, world"))
+    return row
+
+
+# The Look sheet's state: a tiles page of studio lights, matcaps or HDRIs (None: the sheet itself), and its page.
+_look = {"choose": None, "page": 0}
+LOOK_TITLES = {'STUDIO': "Studio light", 'MATCAP': "Matcap", 'WORLD': "HDRI"}
+LOOK_ICONS = {'STUDIO': "light_sun", 'MATCAP': "material", 'WORLD': "world"}
+
+
+def open_look():
+    _look.update(choose=None, page=0)
+    open_sheet('LOOK')
+
+
+def open_look_tiles(context, kind):
+    from . import lookdev
+    names = [sl.name for sl in lookdev.studio_lights(context, kind)]
+    current = lookdev.current(context, kind) if kind != 'WORLD' else lookdev.hdri_name(context)
+    per_page = KIT_COLS * KIT_ROWS
+    page = names.index(current) // per_page if current in names else 0
+    _look.update(choose=kind, page=page)
+    lookdev.prepare(kind, names[page * per_page:(page + 1) * per_page])
+
+
+def _set_look_page(context, page):
+    from . import lookdev
+    _look["page"] = page
+    names = [sl.name for sl in lookdev.studio_lights(context, _look["choose"])]
+    per_page = KIT_COLS * KIT_ROWS
+    lookdev.prepare(_look["choose"], names[page * per_page:(page + 1) * per_page])
+
+
+def _choose_look(context, kind, name):
+    from . import lookdev
+    if kind == 'WORLD':
+        lookdev.choose_hdri(context, name)
+    else:
+        lookdev.set_studio(context, kind, name)
+
+
+def _look_tiles(context, settings, kind):
+    """A page of studio lights, matcaps or HDRIs as previews; choosing one shows it in VR right away, and the
+    page stays open to try the next."""
+    from . import lookdev
+    items = lookdev.studio_lights(context, kind)
+    current = lookdev.current(context, kind)
+    if kind == 'WORLD' and lookdev.scene_world_on(context) and lookdev.our_world(context) is not None:
+        current = lookdev.world_value(context, 'hdri')
+    cells = [vr_ui.tile("look_tile_" + sl.name, lookdev.pretty(sl.name),
+                        (lambda n=sl.name: _choose_look(context, kind, n)), image=lookdev.preview(kind, sl.name),
+                        icon=LOOK_ICONS[kind], active=sl.name == current) for sl in items]
+    shown, page, pages = _paged(cells, _look["page"], KIT_COLS * KIT_ROWS)
+    _look["page"] = page
+    out = [[vr_ui.icon_button("look_back", "back", lambda: _look.update(choose=None), "Back"),
+            vr_ui.title(LOOK_TITLES[kind], lookdev.pretty(current) if current else ""), _pin(context, settings)]]
+    for row in _grid(shown, KIT_COLS):
+        out.append(row + [vr_ui.label("") for _ in range(KIT_COLS - len(row))])
+    if not shown:
+        out.append([vr_ui.label("None found", align='CENTER')])
+    if pages > 1:
+        out.append(_pager("look", page, pages, lambda p: _set_look_page(context, p)))
     return out
+
+
+def _look_rows(context, settings):
+    """The Look sheet (Tools mode): the VR view's shading in depth. Solid: studio light or matcap, and what
+    colors objects. Material Preview / Rendered: the HDRI (rotation, strength, background) or the scene's
+    world, scene lights, and Use as world."""
+    from . import lookdev
+    kind = _look["choose"]
+    if kind is not None:
+        return _look_tiles(context, settings, kind)
+    sh = lookdev.shading(context)
+    rendered = sh.type == 'RENDERED'
+    out = [[vr_ui.icon_button("back", "back", lambda: close_sheet(context), "Back"),
+            vr_ui.title("Look", ("VR view, " + lookdev.engine_name(context)) if rendered else "VR view"),
+            _pin(context, settings)],
+           _view_row(context)]
+    more, hint = [], ""
+    if sh.type not in {'MATERIAL', 'RENDERED'}:
+        out.append([vr_ui.label("Light", fixed=LABEL_W)] + _segments(
+            "solid_light_", "solid_light", [(i.lower(), n) for i, n in lookdev.SOLID_LIGHTS], sh.light.lower(),
+            lambda v: setattr(sh, "light", v.upper())))
+        if sh.light in {'STUDIO', 'MATCAP'}:
+            name = lookdev.current(context, sh.light)
+            out.append([vr_ui.select("look_" + sh.light.lower(), LOOK_TITLES[sh.light], lookdev.pretty(name),
+                                     (lambda k=sh.light: open_look_tiles(context, k)), icon=LOOK_ICONS[sh.light])])
+        out.append([vr_ui.label("Color", fixed=LABEL_W)] + _segments(
+            "look_color_", "look_color", [(i.lower(), n) for i, n in lookdev.COLOR_TYPES], sh.color_type.lower(),
+            lambda v: setattr(sh, "color_type", v.upper())))
+        more = [[vr_ui.toggle("look_cavity", "Cavity", sh.show_cavity,
+                              lambda: setattr(sh, "show_cavity", not sh.show_cavity), icon="grid"),
+                 vr_ui.toggle("look_shadow", "Shadow", sh.show_shadows,
+                              lambda: setattr(sh, "show_shadows", not sh.show_shadows), icon="shading"),
+                 vr_ui.toggle("look_outline", "Outline", sh.show_object_outline,
+                              lambda: setattr(sh, "show_object_outline", not sh.show_object_outline), icon="object")]]
+        hint = "Cavity, shadow, outline"
+        return _disclose('LOOK_SOLID', out, more, hint)
+    scene_world = lookdev.scene_world_on(context)
+    out.append([vr_ui.label("World", fixed=LABEL_W)] + _segments(
+        "look_world_", "look_world", (('hdri', "HDRI"), ('scene', "Scene")), 'scene' if scene_world else 'hdri',
+        lambda v: lookdev.set_scene_world(context, v == 'scene')))
+    lights = vr_ui.toggle("look_lights", "Lights", lookdev.scene_lights_on(context),
+                          lambda: lookdev.set_scene_lights(context, not lookdev.scene_lights_on(context)),
+                          icon="light", tip="Scene lights")
+    ours = lookdev.our_world(context) is not None
+    if not scene_world or ours:
+        # The HDRI: the VR view's own, or the world's we built from one (they're kept matched).
+        world = scene_world and ours
+        name = lookdev.world_value(context, 'hdri') if world else lookdev.current(context, 'WORLD')
+        rotation = lookdev.world_value(context, 'rotation') if world else sh.studiolight_rotate_z
+        strength = lookdev.world_value(context, 'strength') if world else sh.studiolight_intensity
+
+        def turn(v, world=world):
+            if world:
+                lookdev.set_world_value(context, 'rotation', v)
+            else:
+                sh.studiolight_rotate_z = v
+
+        def bright(v, world=world):
+            if world:
+                lookdev.set_world_value(context, 'strength', v)
+            else:
+                sh.studiolight_intensity = v
+        out.append([vr_ui.select("look_world", "HDRI", lookdev.pretty(name or ""),
+                                 lambda: open_look_tiles(context, 'WORLD'), icon="world")])
+        out.append([vr_ui.slider("look_rotation", "Turn", rotation, -math.pi, math.pi, turn, fmt=_degrees),
+                    vr_ui.slider("look_strength", "Strength", strength, 0.0, 3.0, bright, fmt=_number)])
+        if world:
+            out.append([vr_ui.label("The scene's world", align='CENTER', weight=2.0), lights])
+        else:
+            # Up front: at 0% background the HDRI only lights the scene and looks like it isn't there.
+            out.append([vr_ui.slider("look_background", "Background", sh.studiolight_background_alpha, 0.0, 1.0,
+                                     lambda v: setattr(sh, "studiolight_background_alpha", v), fmt=_percent),
+                        vr_ui.slider("look_blur", "Blur", sh.studiolight_background_blur, 0.0, 1.0,
+                                     lambda v: setattr(sh, "studiolight_background_blur", v), fmt=_percent)])
+            matched = lookdev.in_world(context)
+            out.append([vr_ui.button("look_use_world", "In world" if matched else "Use as world",
+                                     lambda: lookdev.use_as_world(context), active=matched, icon="world", weight=1.6,
+                                     tip="Build a World from this HDRI for Rendered and final renders"),
+                        lights])
+    else:
+        world = context.scene.world
+        out.append([vr_ui.label(f"World: {world.name}" if world else "No world", align='CENTER')])
+        strength = lookdev.world_value(context, 'strength')
+        row = [vr_ui.slider("look_strength", "Strength", strength, 0.0, 3.0,
+                            lambda v: lookdev.set_world_value(context, 'strength', v), fmt=_number)] \
+            if strength is not None else []
+        out.append(row + [vr_ui.button("look_use_world", "Use HDRI", lambda: lookdev.use_as_world(context),
+                                       icon="world", tip="Build a World from the HDRI instead"), lights])
+    return _disclose('LOOK_' + sh.type, out, more, hint)
 
 
 # --- Settings (the gear, in every mode) --------------------------------------------
@@ -1576,7 +1951,8 @@ def _settings_rows(context, settings):
 
 
 _MODE_ROWS = {'SCULPT': _sculpt_rows, 'MODEL': _model_rows, 'DRAW': _draw_rows, 'PAINT': _paint_rows,
-              'RIG': _rig_rows, 'POSE': _pose_rows, 'PHYSICS': _physics_rows, 'TOOLS': _tools_rows}
+              'RIG': _rig_rows, 'RETOPO': _retopo_rows,
+              'POSE': _pose_rows, 'PHYSICS': _physics_rows, 'TOOLS': _tools_rows}
 
 
 # --- timeline strip --------------------------------------------------------------

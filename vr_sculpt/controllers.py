@@ -48,8 +48,8 @@ Info = namedtuple("Info", "ray_on_panel ray_on_desktop picker_open cut_target ha
 
 NATIVE_LABELS = {"Draw": "Draw", "Clay Strips": "Clay", "Smooth": "Smooth", "Inflate/Deflate": "Inflate",
                  "Crease Sharp": "Crease", "Flatten/Contrast": "Flatten"}
-NEXT_MODE = {'SCULPT': "Model", 'MODEL': "Draw", 'DRAW': "Paint", 'PAINT': "Rig", 'RIG': "Pose", 'POSE': "Physics",
-             'PHYSICS': "Tools", 'TOOLS': "Sculpt"}
+NEXT_MODE = {'SCULPT': "Retopo", 'RETOPO': "Model", 'MODEL': "Draw", 'DRAW': "Paint", 'PAINT': "Rig", 'RIG': "Pose",
+             'POSE': "Physics", 'PHYSICS': "Tools", 'TOOLS': "Sculpt"}
 WEIGHT_LABELS = {'ADD': "Add weight", 'SUBTRACT': "Subtract", 'SMOOTH': "Smooth"}
 
 
@@ -78,6 +78,9 @@ def hints(s, info):
         right['top'] = ("cursor", "Right click")
     elif mode == 'SCULPT':
         right['top'] = ("chevron_right", "Next brush")
+    elif mode == 'RETOPO':
+        from .retopo import hint_top
+        right['top'] = hint_top()
     elif mode == 'MODEL':
         right['top'] = ("chevron_right", "Next shape")
     elif mode in {'DRAW', 'PAINT'} or (mode == 'RIG' and s.rig_tool == 'WEIGHTS'):
@@ -88,6 +91,9 @@ def hints(s, info):
         right['top'] = ("swap", "IK" if s.pose_tool == 'FK' else "FK")
     elif mode == 'PHYSICS':
         right['top'] = ("stop", "Stop") if info.playing else ("play", "Simulate")
+    elif mode == 'TOOLS' and s.tool == 'LIGHT':
+        from .lookdev import next_type_name
+        right['top'] = ("chevron_right", "Next: " + next_type_name(s.light_type))
     elif mode == 'TOOLS':
         right['top'] = ("chevron_right", "Next camera") if s.tool == 'CAMERA' else ("undo", "Undo measure")
     left['bottom'] = right['bottom'] = ("reset", "Reset view")
@@ -100,6 +106,8 @@ def hints(s, info):
     left['stick_click'] = ("pinned", "Unpin panel") if s.panel_pin else ("pin", "Pin panel")
     if mode == 'SCULPT':
         right['stick_click'] = ("plus", "Brush size")
+    elif mode == 'RETOPO':
+        right['stick_click'] = ("plus", "Size")
     elif mode == 'PAINT':
         right['stick_click'] = ("plus", "Paint size")
     elif mode == 'RIG' and s.rig_tool == 'WEIGHTS':
@@ -123,6 +131,9 @@ def _trigger(s, info):
         if s.engine == 'NATIVE':
             return ("sculpt", NATIVE_LABELS.get(info.native_brush, info.native_brush or "Sculpt"))
         return ("sculpt", s.brush.title())
+    if mode == 'RETOPO':
+        from .retopo import TRIGGER_HINTS
+        return TRIGGER_HINTS[s.retopo_tool]
     if mode == 'MODEL':
         if s.uv_tool == 'SEAM':
             return ("seam", "Mark seams")
@@ -160,7 +171,8 @@ def _trigger(s, info):
             return ("object", "Select, move")
         return ("force", "Pull") if s.physics_tool == 'FORCE' else ("throw", "Grab, throw")
     if mode == 'TOOLS':
-        return ("camera", "Aim camera") if s.tool == 'CAMERA' else ("ruler", "Measure")
+        return {'CAMERA': ("camera", "Aim camera"), 'LIGHT': ("light", "Place, grab light")}.get(
+            s.tool, ("ruler", "Measure"))
     return None
 
 
@@ -170,6 +182,8 @@ def _left_trigger(s, info, right):
         inverts = s.left_inverts and (s.engine == 'NATIVE' or s.brush in {'DRAW', 'INFLATE'})
         if inverts and right is not None:
             return ("sculpt", right[1] + ", inverted")
+    if mode == 'RETOPO':
+        return ("trash", "Delete")
     if mode == 'MODEL' and s.uv_tool == 'SEAM':
         return ("seam", "Clear seams")
     if mode == 'MODEL' and s.uv_tool == 'FIX':
@@ -178,6 +192,8 @@ def _left_trigger(s, info, right):
         return ("edit", "Clear marks")
     if mode == 'MODEL':
         return ("object", "Select, move")
+    if mode == 'TOOLS' and s.tool == 'LIGHT':
+        return ("object", "Select, move light")
     if mode == 'PAINT' and right is not None and s.paint_tool != 'PICK':
         return (right[0], "2nd color")
     if mode == 'PAINT' and right is not None:

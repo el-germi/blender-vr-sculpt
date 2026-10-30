@@ -96,7 +96,18 @@ def physics_color(settings, main=True):
 TOOLS_INFO = {
     'MEASURE': ("Tape Measure", "Drag to measure; ends snap to vertices. B removes the last one"),
     'CAMERA': ("Scene Camera", "Hold the trigger to aim the camera. B: next camera"),
+    'LIGHT': ("Light", "Press to place a light where you point, or grab one to move and aim it. B: type"),
 }
+LIGHT_COLOR = (1.0, 0.86, 0.45)
+TOOL_COLORS = {'MEASURE': MEASURE_COLOR, 'CAMERA': CAMERA_COLOR, 'LIGHT': LIGHT_COLOR}
+TOOL_ICONS = {'MEASURE': "ruler", 'CAMERA': "camera", 'LIGHT': "light"}
+
+
+def tool_color(settings, off=False):
+    """A Tools mode tip's ring color; the Light tool's off hand selects, so it's the selection's blue."""
+    if settings.tool == 'LIGHT' and off:
+        return (0.45, 0.72, 1.0)
+    return TOOL_COLORS.get(settings.tool, MEASURE_COLOR)
 
 DRAW_INFO = {
     'TUBE': ("Draw Tube", "Round stroke mesh. B undoes the last stroke"),
@@ -165,8 +176,10 @@ def card_content(settings, sculpt_brush):
         content = (title, desc, physics_color(settings), {'GRAB': "throw", 'FORCE': "force"}.get(tool, "physics"))
     elif settings.mode == 'TOOLS':
         title, desc = TOOLS_INFO[settings.tool]
-        camera_tool = settings.tool == 'CAMERA'
-        content = (title, desc, CAMERA_COLOR if camera_tool else MEASURE_COLOR, "camera" if camera_tool else "ruler")
+        if settings.tool == 'LIGHT':
+            from . import lookdev
+            title = lookdev.TYPE_NAMES[settings.light_type] + " Light"
+        content = (title, desc, TOOL_COLORS[settings.tool], TOOL_ICONS[settings.tool])
     elif settings.mode == 'MODEL':
         from . import hardsurface, kit, primitives, shading
         op = settings.model_add_as
@@ -193,6 +206,9 @@ def card_content(settings, sculpt_brush):
         else:
             title = "Add " + primitives.label(settings.primitive)
             content = (title, "Drag to create. Other hand: touch to select and move", MODEL_COLOR, "model")
+    elif settings.mode == 'RETOPO':
+        from . import retopo
+        content = retopo.card_content(settings)
     elif settings.engine == 'NATIVE':
         name = sculpt_brush.name if sculpt_brush else "No brush"
         content = (name, NATIVE_INFO.get(name, ""), NATIVE_COLORS.get(name, (0.9, 0.9, 0.9)), "sculpt")
@@ -215,6 +231,9 @@ def status_size(context, settings):
     mode = settings.mode
     if mode == 'SCULPT':
         return _cm(settings.radius)
+    if mode == 'RETOPO':
+        from . import retopo
+        return retopo.status_size(settings)
     if mode == 'PAINT':
         return _cm(settings.paint_radius)
     if mode == 'DRAW':
@@ -232,6 +251,9 @@ def status_size(context, settings):
         cam = context.scene.camera
         if settings.tool == 'CAMERA' and cam is not None and cam.data.type == 'PERSP':
             return f"{cam.data.lens:.0f} mm"
+        if settings.tool == 'LIGHT':
+            from . import lookdev
+            return lookdev.status(context)
         return ""
     if settings.grid_snap:
         return "grid " + _cm(settings.grid_size)

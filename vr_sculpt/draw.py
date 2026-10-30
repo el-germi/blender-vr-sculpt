@@ -9,8 +9,8 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
 from . import (actions, camera, controllers, desktop, drawing, grid, hardsurface, hud, interactions, kit, measure,
-               menus, onion, operators, paint, paths, physics, presence, primitives, puppet, rig, shading, snapping,
-               strokes, symmetry, uv, vr_ui)
+               menus, onion, operators, paint, paths, physics, presence, primitives, puppet, retopo, rig, shading,
+               snapping, strokes, symmetry, uv, vr_ui)
 from . import pose as pose_mode  # "pose" is a controller pose below
 
 COLORS = hud.PYTHON_COLORS
@@ -70,6 +70,8 @@ def draw_overlay(context, ss, xr=True):
         grid.draw(settings, tips, scale)
         gpu.state.blend_set('NONE')
     measure.draw(context, ss, scale)
+    from . import lookdev
+    lookdev.draw(context, ss, tips, scale)  # The Light tool's gizmos (the headset doesn't draw lights).
     onion.draw(context)
     if settings.show_paths and xr:  # The desktop view draws Blender's own paths.
         paths.draw(context, scale)
@@ -77,6 +79,8 @@ def draw_overlay(context, ss, xr=True):
         pose_mode.draw(context, tips, scale)
     if settings.mode == 'RIG':
         rig.draw(context, actions.by_role(tips, context), scale)
+    if settings.mode == 'RETOPO':
+        retopo.draw(context, actions.by_role(tips, context), actions.by_role(poses, context), scale)
     if settings.mode == 'PHYSICS':
         physics.draw(context, tips, scale)
     puppet.draw(context, scale)
@@ -113,6 +117,8 @@ def _draw_cursors(context, ss, settings, xr):
                   shading.MARK_REACH if marking else settings.kit_spacing / 2 if stamping else
                   interactions.TOUCH_MARGIN if model or tools else
                   settings.paint_radius if painting else settings.radius) * scale
+    if settings.mode == 'RETOPO':
+        radius = retopo.ring_radius(settings) * scale
     offset = settings.tip_offset * scale
 
     native = settings.engine == 'NATIVE'
@@ -157,7 +163,7 @@ def _draw_cursors(context, ss, settings, xr):
             color = (hud.CUT_COLORS.get(settings.model_add_as, hud.MODEL_COLOR)
                      if hardsurface.cut_target(context) is not None else hud.MODEL_COLOR)
         elif tools:
-            color = hud.CAMERA_COLOR if settings.tool == 'CAMERA' else measure.COLOR
+            color = hud.tool_color(settings, idx == off)
         elif posing:
             color = hud.POSE_COLORS[settings.pose_tool]
         elif weights:
@@ -171,6 +177,8 @@ def _draw_cursors(context, ss, settings, xr):
                 touched = primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale)
                 if touched is not None:
                     _draw_bounds(shader, touched, (1.0, 0.85, 0.3, 0.9))
+        elif settings.mode == 'RETOPO':
+            color = retopo.ring_color(settings, idx == off)
         elif painting:
             color = paint.get_color(context, secondary=idx == off)
         elif idx == off and settings.left_inverts and (native or settings.brush in {'DRAW', 'INFLATE'}):

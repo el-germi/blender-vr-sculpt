@@ -37,6 +37,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
                            "paint its weights"),
             ('PHYSICS', "Physics", "Set up rigid bodies, cloth, soft bodies and spring bones, run the simulation "
                                    "and push, pull and throw things with your hands"),
+            ('RETOPO', "Retopo", "Draw new low-poly topology on the surface of the active mesh: strips, quads, "
+                                 "relax and tweak, with Mirror X"),
         ),
         default='SCULPT',
     )
@@ -58,6 +60,39 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     physics_force: FloatProperty(
         name="Force", description="Strength of the hand's push or pull at full trigger (a force field's strength)",
         default=300.0, min=0.0, soft_max=2000.0)
+    # Retopo mode.
+    retopo_tool: EnumProperty(
+        name="Retopo Tool",
+        items=(
+            ('STRIP', "Strip", "Drag along the surface to lay a strip of quads, the size wide. Start on a border "
+                               "edge to carry it on"),
+            ('QUAD', "Quad", "Click to place vertices: four make a quad, then two more the next one. Drag a "
+                             "border edge to pull out a quad, drag a vertex to slide it (onto another: merge)"),
+            ('RELAX', "Relax", "Brush to even out the spacing of the vertices, keeping them on the surface"),
+            ('TWEAK', "Tweak", "Grab the vertices in reach and slide them along the surface"),
+        ),
+        default='STRIP',
+    )
+    retopo_size: FloatProperty(
+        name="Retopo Size",
+        description="Strip width (and quad size), and the Relax and Tweak radius, in your hand's space (meters)",
+        default=0.02, min=0.003, soft_max=0.2, subtype='DISTANCE', unit='LENGTH')
+    retopo_mirror: BoolProperty(
+        name="Mirror Retopo",
+        description="Everything made, moved or deleted on one side of the reference's local X is mirrored to the "
+                    "other; vertices near the center line stay on it")
+    retopo_opacity: FloatProperty(
+        name="Face Opacity", description="How much the retopo mesh's faces hide the reference in VR",
+        default=0.35, min=0.0, max=1.0, subtype='FACTOR')
+    retopo_relax: FloatProperty(name="Relax Strength", default=0.5, min=0.0, max=1.0, subtype='FACTOR')
+    retopo_reference: PointerProperty(
+        type=bpy.types.Object, name="Retopo Reference",
+        description="The mesh Retopo mode draws new topology on (the active mesh when Retopo starts)",
+        poll=lambda self, obj: obj.type == 'MESH')
+    retopo_object: PointerProperty(
+        type=bpy.types.Object, name="Retopo Mesh",
+        description="The retopo mesh being edited; empty, the next stroke starts a new one",
+        poll=lambda self, obj: obj.type == 'MESH')
     # Rig mode.
     rig_tool: EnumProperty(
         name="Rig Tool",
@@ -144,6 +179,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         items=(
             ('MEASURE', "Measure", "Drag with the trigger to measure distances"),
             ('CAMERA', "Camera", "Hold the trigger to aim the scene camera with your controller"),
+            ('LIGHT', "Light", "Press in empty space to place a light, aimed where you point; grab a light to move and "
+                               "aim it. The other hand selects"),
         ),
         default='MEASURE',
     )
@@ -158,6 +195,39 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         description="Show what the scene camera sees next to the hand panel, in every mode",
         default=False,
     )
+    # Look dev.
+    light_type: EnumProperty(
+        name="New Light",
+        description="What the Light tool places",
+        items=(
+            ('POINT', "Point", "Shines every way from a point, like a bulb"),
+            ('SUN', "Sun", "Parallel light from far away, along where it points; its place doesn't matter"),
+            ('SPOT', "Spot", "A cone of light where it points"),
+            ('AREA', "Area", "Soft light from a panel, off its front face"),
+        ),
+        default='POINT',
+    )
+    light_color: bpy.props.FloatVectorProperty(
+        name="Light Color", description="Color of new lights", subtype='COLOR_GAMMA', size=3, min=0.0, max=1.0,
+        default=(1.0, 1.0, 1.0))
+    light_power: FloatProperty(
+        name="Light Power", description="Power of new point, spot and area lights (watts)",
+        default=20.0, min=0.0, soft_max=2000.0, unit='POWER')
+    light_sun: FloatProperty(
+        name="Sun Strength", description="Strength of new sun lights (watts per square meter)",
+        default=3.0, min=0.0, soft_max=50.0)
+    light_radius: FloatProperty(
+        name="Light Radius", description="Radius of new point and spot lights: bigger is softer shadows",
+        default=0.05, min=0.0, soft_max=1.0, subtype='DISTANCE', unit='LENGTH')
+    light_area: FloatProperty(
+        name="Area Size", description="Side of new area lights",
+        default=0.25, min=0.001, soft_max=2.0, subtype='DISTANCE', unit='LENGTH')
+    light_angle: FloatProperty(
+        name="Sun Angle", description="Angular size of new sun lights: bigger is softer shadows",
+        default=0.0174533, min=0.0, max=3.14159, subtype='ANGLE')
+    light_spot: FloatProperty(
+        name="Spot Cone", description="Cone angle of new spot lights",
+        default=0.7853982, min=0.0174533, max=3.14159, subtype='ANGLE')
     # Animation.
     show_timeline: BoolProperty(
         name="Timeline", description="Timeline, keying and playback controls at the bottom of the hand panel",
@@ -315,6 +385,7 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('ARRAY', "Array", "Linear and radial arrays"),
             ('STACK', "Stack", "Every modifier: show, apply, remove, settings"),
             ('UV', "UV", "Seams, unwrapping and the checker / stretch view"),
+            ('MATERIAL', "Material", "Base color, roughness, metallic and presets of the object's first material"),
         ),
         default='SHAPE',
     )

@@ -26,7 +26,8 @@ The zip is named after `version` in `vr_sculpt/blender_manifest.toml`; use the c
 
 Background tests, one file per area (`test_brushes`, `test_modal`, `test_model`, `test_generic`,
 `test_draw`, `test_tools`, `test_paint`, `test_anim`, `test_pose`, `test_ik_limits`,
-`test_hard_surface`, `test_ui`, `test_rig`, `test_kit`, `test_physics`, `test_rest`, `test_uv`):
+`test_hard_surface`, `test_ui`, `test_rig`, `test_kit`, `test_physics`, `test_rest`, `test_uv`,
+`test_retopo`, `test_lookdev`):
 
 ```bash
 blender --background --factory-startup --python tests/test_tools.py
@@ -144,7 +145,9 @@ Pro models; it can't run during a VR session (SteamVR would end Blender's). In M
 selects / moves (`MoveObject`, `Deselect`) and the main one only creates.
 
 **Other modes**: `strokes.py` (mesh from stored samples, rotation-minimizing frames) +
-`drawing.py` for Draw; `paint.py` paints by temporarily aiming the largest desktop 3D view at each
+`drawing.py` for Draw; `retopo.py` for Retopo (quads traced onto a reference mesh's BVH, edited with
+bmesh in Object Mode); `lookdev.py` for Tools' Light tool, the Look sheet (the XR session's own shading,
+not the desktop's) and Model's Material page; `paint.py` paints by temporarily aiming the largest desktop 3D view at each
 dab; `rig.py` for Rig (edit bones in Edit Mode, Bind via `parent_set` ARMATURE_AUTO, a numpy weight
 brush on vertex groups and a heat map drawn in VR); `pose.py` (FK/IK via CCD, limits) + `puppet.py` (bindings, recorded takes via
 `frame_change_post`); `anim.py`, `paths.py`, `onion.py` for the timeline strip, motion paths and

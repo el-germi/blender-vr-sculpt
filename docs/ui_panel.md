@@ -62,7 +62,7 @@ staying the fastest way to reach *everything*?
 
 ![Two panels at headset pixel density](ui_panel_detail.png)
 
-- **Rail** (left column): Sculpt, Model, Draw, Paint, Rig, Pose, Physics, Tools. The current
+- **Rail** (left column): Sculpt, Retopo, Model, Draw, Paint, Rig, Pose, Physics, Tools. The current
   mode has an accent pill and a bar on the edge. Hovering an icon shows its
   name to the left of the panel. Pressing the current mode's icon returns to
   its first level from any sheet or picker.
@@ -71,11 +71,12 @@ staying the fastest way to reach *everything*?
   and **Pin**.
 - **Primary controls**: 3-5 rows.
 - **More / Less**: the disclosure row, with a hint of what's inside. When the rail is taller than
-  the page (a short page, now that the rail holds eight modes), it sits at the bottom of the card,
+  the page (a short page, now that the rail holds nine modes), it sits at the bottom of the card,
   so it doesn't move when it opens.
 - **Second levels** replace the content (the rail stays): **object settings**
   (Model, from the selection chip), the **Kit** of parts (Model, from the icon
   beside Add; it stays open while you place), **Simulation** (Physics, from its row under More),
+  **Look** (Tools, from the icon beside the view's shading; its matcap / HDRI tiles are a level below),
   **Settings** (gear, every mode), **pickers**
   (from any select, e.g. Add, Rig, Camera, Thickness, Ease).
 - **Timeline strip** (when on): beside the panel, bottom-aligned, same visual
@@ -164,6 +165,27 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Engine Python / Native | *More* > Engine |
 | Other hand inverts | *More* |
 
+### Retopo
+
+![Strip, Quad with a quad open, Relax with More open, the Mesh picker](retopo_panels.png)
+
+| Feature | How |
+|---|---|
+| Strip / Quad / Relax / Tweak | segmented control; **B** next tool |
+| Lay a strip of quads (from a border edge: carry it on) | right trigger, drag on the surface (Strip) |
+| Place points: four make a quad, its last edge stays open | right trigger, click (Quad); a rubber band shows the open quad |
+| Start a quad from a border edge, pull one out of it | click / drag the edge (Quad) |
+| Slide a vertex, merge it into another | drag it, drop it on the other (Quad) |
+| End the open quad | header **X**; **B**; left trigger in empty space |
+| Even out spacing, slide vertices along the surface | right trigger (Relax, Tweak) |
+| Delete faces and loose vertices | left trigger, sweep (red: what goes on release) |
+| Width / size / radius | slider; **right stick click** cycles 1-16 cm |
+| Mirror X (across the reference's local X), face opacity | toggle, **Faces** slider |
+| Retopo mesh to carry on, or a new one | **Mesh** select > picker (... **New mesh**) |
+| Done: the mesh selected, in Model mode | **Finish** |
+| Reference, new mesh | *More* > **On** select, **New mesh** |
+| Shrinkwrap modifier onto the reference, Relax strength | *More* |
+
 ### Model
 
 | Feature | How |
@@ -176,7 +198,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Create, cut, drop or stamp kit parts | right trigger in the scene (never grabs) |
 | Select, and move what's selected | left trigger: touch an object (hold to move it); in empty space, select nothing |
 | Duplicate, Delete | icons beside the chip (and in the object's header) |
-| Object settings | **chip** > pages Shape / Cuts / Finish / Array / Stack / UV |
+| Object settings | **chip** > pages Shape / Cuts / Finish / Array / Stack / UV / Material (the ball icon) |
 | Size X/Y/Z, subdivisions; cylinder radius, height, segments; operator settings (paged) | **chip** > Shape |
 | Mirror X / Y / Z, center at left hand | **chip** > Shape > *More* > Mirror |
 | Solidify, thickness | **chip** > Shape > *More* |
@@ -196,6 +218,10 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Unwrap, Smart UV, Pack | **chip** > UV |
 | Unwrap method, Live unwrap, checker size | **chip** > UV > *More* |
 | Seams from sharp, Even out island scale, Clear seams | **chip** > UV > *More* |
+| The first material (a new one if none; a shared one is copied on the first change), assign another | **chip** > Material > **Material** select > picker (... **New material**) |
+| Presets: Plastic, Rubber, Clay, Ceramic, Metal, Chrome, Gold, Copper, Glass, Emissive | **chip** > Material > **Preset** select > picker |
+| Base color, roughness, metallic (the viewport display color follows) | **chip** > Material: 8 swatches, Rough / Metal sliders |
+| Hue / saturation / value, glow (emission), glass (transmission) | **chip** > Material > *More* |
 | Show grid, snap to grid | *More* > Grid |
 | Snap to surface, 15 degree steps | *More* > Grab |
 
@@ -285,11 +311,27 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 
 ### Tools
 
+![The Light page, the Look sheet, matcap and HDRI tiles](lookdev_panels.png)
+
+![The Look sheet in Material Preview and Rendered, the Material page (Model)](lookdev_panels_more.png)
+
 | Feature | How |
 |---|---|
-| Measure / Camera | segmented control |
+| Measure / Camera / Light | segmented control |
 | Show measurements, undo, clear | Measure row; **B** removes the last |
 | Scene camera, new camera here, pin preview, lens | Camera rows; **B** next camera |
+| Place a light (at the tip, aimed where you point), grab one to move and aim it | right trigger (Light); in empty space / on a light |
+| Select a light (hold to move it, keeping its aim), select nothing | left trigger (Light): on a light / in empty space |
+| Type new lights get: Point / Sun / Spot / Area | **New** segmented control; **B** next type |
+| Light to edit (the selected one, or the settings for new lights), duplicate, delete | **Edit** select > picker (lights, None); icons beside it |
+| Color, power (a sun's strength), radius / size / sun angle / spot cone | swatches; sliders (power is logarithmic) |
+| Color temperature, shadow; spot blend and radius | *More* (a light selected) |
+| The VR view's shading: Solid / Material Preview / Rendered | segmented control at the bottom of every Tools page |
+| Solid: Studio / Matcap / Flat, studio light or matcap (previewed tiles), color by material / object / random | **Look** icon > sheet; select > tiles |
+| Cavity, shadow, outline (Solid) | **Look** > *More* |
+| Material / Rendered: World HDRI or Scene, HDRI (mirror-ball tiles), turn, strength, scene lights | **Look** > sheet |
+| Build a World from the HDRI (Rendered and renders get it) | **Look** > **Use as world** |
+| HDRI as background, blur | **Look** (HDRI) |
 
 ### Timeline strip
 
@@ -372,6 +414,12 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
     follow? Left trigger a bone: gone, its children kept? Turn on Mirror X and build an arm. Bind,
     switch to Weights: does the heat map sit on the mesh, readable? Paint, subtract with the left
     hand, smooth; touch a bone to switch to it. Is 0.3 s of Bind acceptable on your meshes?
+11. **Retopo.** Select a sculpt, choose Retopo (Y after Sculpt). Drag a strip across the forehead: do the quads come
+    out square, on the surface, and keep up with your hand? Start a second drag on the strip's end edge: does it carry on?
+    Quad: click four points, then two more, and again: does the strip of quads grow the way you expect, and is the
+    rubber band clear? Drag a border edge out, drag a vertex onto another. Relax a messy patch, Tweak a vertex. Sweep
+    the left trigger over a few faces. Turn on Mirror X and draw down the nose: centered? Are the faces readable over
+    the sculpt at 35%, the edges sharp, nothing z-fighting? Finish: is the mesh there, selected, in Model mode?
 11. **Physics.** Select a floor, make it Static; drag out a few cubes in Model mode, make them Rigid.
     Simulate (B): do they fall and stack? Hands on (right stick click), sweep a hand through them:
     pushed? Grab one while it plays and throw it: does it fly on? Push / Pull: does the right
