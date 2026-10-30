@@ -523,6 +523,76 @@ def _camera(p):
     p.circle(0, -0.04, 0.3)
 
 
+def _light(p):
+    # A light bulb: the glass, its neck and the screw base.
+    p.path(_arc_pts(0.0, 0.25, 0.55, math.radians(-50), math.radians(230), 18))
+    p.line(-0.35, -0.17, -0.25, -0.45)
+    p.line(0.35, -0.17, 0.25, -0.45)
+    p.line(-0.27, -0.58, 0.27, -0.58)
+    p.line(-0.18, -0.8, 0.18, -0.8)
+
+
+def _rays(p, r0, r1, n=8, a0=0.0):
+    for k in range(n):
+        a = a0 + 2 * math.pi * k / n
+        p.line(r0 * math.cos(a), r0 * math.sin(a), r1 * math.cos(a), r1 * math.sin(a))
+
+
+def _light_point(p):
+    p.disc(0.0, 0.0, 0.3)
+    _rays(p, 0.5, 0.85, 8, math.pi / 8)
+
+
+def _light_sun(p):
+    p.circle(0.0, 0.0, 0.36)
+    _rays(p, 0.58, 0.88)
+
+
+def _light_spot(p):
+    # A lamp head throwing a cone of light down.
+    p.box(-0.22, 0.45, 0.22, 0.8, 0.06, fill=True)
+    p.line(-0.22, 0.45, -0.75, -0.65)
+    p.line(0.22, 0.45, 0.75, -0.65)
+    p.path(_arc_pts(0.0, -0.65, 0.75, math.radians(200), math.radians(340), 8))
+
+
+def _light_area(p):
+    # A panel, and the light coming off its face.
+    p.box(-0.75, 0.4, 0.75, 0.75, 0.05, fill=True)
+    for x in (-0.5, 0.0, 0.5):
+        p.line(x, 0.12, x, -0.8)
+
+
+def _material(p):
+    # A shaded ball: its outline, a highlight, the shadow side.
+    p.circle(0.0, 0.0, 0.8)
+    p.disc(-0.3, 0.3, 0.17)
+    p.path(_arc_pts(0.0, 0.0, 0.5, math.radians(-80), math.radians(10), 8))
+
+
+def _look(p):
+    # A ball in the light of a small sun.
+    p.circle(-0.22, -0.22, 0.58)
+    p.fill(_arc_pts(-0.22, -0.22, 0.58, math.radians(225), math.radians(405), 12))
+    p.disc(0.62, 0.62, 0.15)
+    _rays_at(p, 0.62, 0.62, 0.24, 0.36)
+
+
+def _rays_at(p, cx, cy, r0, r1, n=6):
+    for k in range(n):
+        a = 2 * math.pi * k / n
+        p.line(cx + r0 * math.cos(a), cy + r0 * math.sin(a), cx + r1 * math.cos(a), cy + r1 * math.sin(a), 0.09)
+
+
+def _world(p):
+    # A globe.
+    p.circle(0.0, 0.0, 0.8)
+    p.path([(0.38 * math.cos(a), 0.8 * math.sin(a)) for a in (math.pi * k / 12 - math.pi / 2 for k in range(13))])
+    p.line(-0.8, 0.0, 0.8, 0.0)
+    p.line(-0.68, 0.42, 0.68, 0.42, 0.1)
+    p.line(-0.68, -0.42, 0.68, -0.42, 0.1)
+
+
 def _walk(p):
     p.fill([(-0.55, -0.15), (-0.2, -0.15), (-0.15, 0.55), (-0.38, 0.8), (-0.6, 0.55)])
     p.disc(-0.38, -0.42, 0.17)
@@ -862,7 +932,9 @@ ICONS = {
     "eyedropper": _eyedropper, "swap": _swap, "spray": _spray, "contact": _contact, "record": _record,
     "play": _play, "stop": _stop, "frame_prev": _frame_prev, "frame_next": _frame_next, "key_prev": _key_prev,
     "key_next": _key_next, "key": _key, "key_delete": _key_delete, "range_start": _range_start,
-    "range_end": _range_end, "paths": _paths, "onion": _onion, "ruler": _ruler, "camera": _camera, "walk": _walk,
+    "range_end": _range_end, "paths": _paths, "onion": _onion, "ruler": _ruler, "camera": _camera,
+    "light": _light, "light_point": _light_point, "light_sun": _light_sun, "light_spot": _light_spot,
+    "light_area": _light_area, "material": _material, "look": _look, "world": _world, "walk": _walk,
     "fly": _fly, "desktop": _desktop, "passthrough": _passthrough, "timeline": _timeline, "tracking": _tracking,
     "fk": _fk, "ik": _ik, "bones": _bones, "bind": _bind, "reset": _reset, "cursor": _cursor, "object": _object,
     "cut": _cut, "union": _union, "intersect": _intersect, "bevel": _bevel, "shell": _shell, "array": _array,

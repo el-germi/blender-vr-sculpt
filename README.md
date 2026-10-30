@@ -196,6 +196,22 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     under More: **From sharp** (seams on edges that shade sharp, marked soft
     ones left out), **Even out** (islands scaled to their share, packed) and
     Clear seams. Seams and our UVs survive resizing a primitive.
+- **Materials** (Model mode, the **Material** page of the selected object,
+  the shaded-ball tab): the first material's Principled BSDF. 8 base colors
+  (Hue / Saturation / Value under More), Rough and Metal, Glow (emission in
+  the base color) and Glass (transmission, with EEVEE refraction), and
+  presets: Plastic, Rubber, Clay, Ceramic, Metal, Chrome, Gold, Copper,
+  Glass, Emissive (a preset resets what it doesn't set, so glass and glow
+  don't linger). An object without one gets a new material on the first
+  change; a shared material is copied first, so only this object changes
+  (on a mesh other objects share, the copy goes in an object-linked slot
+  and the mesh stays shared). The material's viewport display color,
+  metallic and roughness follow, so Solid shading (the headset's default)
+  shows it too; glass shows see-through there. The picker assigns any
+  material in the file, or a new one. A painted base color (a texture) keeps
+  its texture: the swatches give way.
+
+  ![The Look sheet in Material Preview and Rendered, the Material page](docs/lookdev_panels_more.png)
 - **Kit parts (kitbashing)**, in Model mode: the **Kit** button beside Add
   opens your asset libraries on the hand panel, as thumbnails by catalog.
   Choose a part and the trigger places it:
@@ -296,6 +312,37 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     landmark is the scene camera (the stock add-on's default), you stay
     where you are: the first aim or switch pins the base pose there, and
     it's put back when the session ends.
+  - **Light**: press in empty space and a light of the **New** type (Point,
+    Sun, Spot, Area; B steps through them) appears at the tip, aimed where
+    the controller points; keep holding to place and aim it. Press on a
+    light to grab it: past the grab threshold it moves with your hand and
+    aims where you point, like the camera. The left trigger selects a light
+    (hold to move it, keeping its aim) or, in empty space, nothing. The panel
+    edits the selected light, or with none selected what new lights get (and
+    new lights carry on from the last one you set): 8 colors from candle to
+    cool white plus a few gels, Power (logarithmic, 0.1 W to 5 kW; a sun's
+    Strength), Radius / Size / Angle / Cone by type, and under More color
+    Temperature, Shadow and a spot's Blend. Edit picks any light by name;
+    Duplicate, Delete. The headset doesn't draw light objects, so the Light
+    tool draws gizmos: a disc with the type's icon in the light's color, the
+    aim line, a spot's cone and an area light's panel (blue when selected,
+    yellow in reach). Placing a light turns on Scene Lights for Material
+    Preview in VR, so it shows.
+  - **Look** (the VR view's own shading, not the desktop's): every Tools page
+    has Solid / Material / Render, and the **Look** sheet beside them goes
+    deeper. Solid: Studio, Matcap or Flat lighting, the studio light or
+    matcap from tiles with their previews, Color by material, object or
+    random, and Cavity / Shadow / Outline. Material Preview and Rendered: the
+    World is Blender's bundled **HDRI** (tiles previewed as mirror balls),
+    its Turn, Strength, Background and Blur (switching to HDRI shows it as
+    the background, which Blender starts at 0%), or the **Scene**'s world; Lights
+    shows the scene lights. **Use as world** builds a real World from the
+    HDRI (an Environment Texture, packed into the file, turned and as bright
+    as in Material Preview), so Rendered and final renders get the same
+    light; with the view on Scene, the sliders then edit that world.
+
+  ![The Light page, the Look sheet, matcap and HDRI tiles](docs/lookdev_panels.png)
+  ![Lights and their gizmos around a gold ball in Material Preview](docs/lookdev_scene.png)
 - **3D grid and snapping**: a lattice of points around the controller tips,
   in scene units. Snap to Grid snaps new primitives, grabbed objects and tape
   ends. In Model mode, **Surface** makes a grabbed object sit on the mesh
@@ -430,11 +477,11 @@ offset and display options; **VR Extras** has the grid, navigation, hands
 
 | Input | Sculpt mode | Model mode | Draw mode | Paint mode | Rig mode | Pose mode | Physics mode | Tools mode |
 |---|---|---|---|---|---|---|---|---|
-| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Bones: place the next joint; on a joint, carry on from it (click) or move it (drag). Weights: paint, or pick the touched bone | Grab a bone (FK / IK), or an object without a rig | Select an object (hold to move it) or a bone of the selected rig. Hands on: grab and throw a body or a spring bone, or Push / Pull: pull | Measure / aim the camera |
-| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Bones: delete the touched bone; in empty space, end the chain. Weights: the opposite brush | Same as right | Same as right; Push / Pull: push | Same as right |
+| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Bones: place the next joint; on a joint, carry on from it (click) or move it (drag). Weights: paint, or pick the touched bone | Grab a bone (FK / IK), or an object without a rig | Select an object (hold to move it) or a bone of the selected rig. Hands on: grab and throw a body or a spring bone, or Push / Pull: pull | Measure / aim the camera / Light: place a light, or grab one to move and aim it |
+| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Bones: delete the touched bone; in empty space, end the chain. Weights: the opposite brush | Same as right | Same as right; Push / Pull: push | Same as right; Light: select a light (hold to move it), in empty space nothing |
 | Right trigger, pointing at the hand panel | Press buttons, drag sliders, step steppers (hold to repeat) | Same | Same | Same | Same | Same | Same | Same |
 | Y (left) | Next mode (Sculpt, Retopo, Model, Draw, Paint, Rig, Pose, Physics, Tools) | Same | Same | Same | Same | Same | Same | Same |
-| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Bones: end the chain. Weights: undo the last weight stroke | Switch FK / IK | Simulate / stop | Remove the last measurement / next camera |
+| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Bones: end the chain. Weights: undo the last weight stroke | Switch FK / IK | Simulate / stop | Remove the last measurement / next camera / next light type |
 | Left stick | Walk / fly (move) | Same | Same | Same | Same | Same | Same | Same |
 | Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same | Same | Same | Same |
 | Left stick click | Pin / unpin the hand panel | Same | Same | Same | Same | Same | Same | Same |
@@ -766,6 +813,30 @@ With Triggers" is on. The setting applies when the VR session starts.
   draw callback: it renders while the largest desktop 3D view redraws (a
   timer asks for 20 redraws a second while a preview is shown), and only the
   headset displays it.
+- **Look dev** ([lookdev.py](vr_sculpt/lookdev.py)): lights are Blender's
+  light objects. A light is placed with the controller's rotation (aim poses
+  and lights both point down -Z); a grab is a `DragGate` (the grab
+  threshold) and then the tip plus the offset it was grabbed at, turned like
+  the controller; the left hand's is Model mode's `MoveObject` without
+  surface snapping. The values the page shows come from the selected light
+  or from the settings for new lights, and editing a light writes both. The
+  gizmos are drawn from `draw.py` with `gpu` every frame from the scene's
+  lights (nothing cached, so undo can't leave them stale). The look is
+  `window_manager.xr_session_settings.shading`, a `View3DShading` of its own
+  that the headset uses. Its `studio_light` is one dynamic enum that means
+  the studio light, the matcap or the HDRI by the shading type and light,
+  so choosing one switches the type for that moment and back. Previews are
+  read with the OpenImageIO module bundled with Blender (no image
+  datablock): a matcap is its diffuse plus specular layer, cut to its disc;
+  an HDRI is drawn as a mirror ball by reflecting the view off a sphere into
+  the equirectangular image (tone mapped); a studio light is a gray ball lit
+  by its four solid lights. 64 px, 2-15 ms each, worked out for a page when
+  it opens and uploaded as textures two a frame. Use as world builds
+  Texture Coordinate (Generated) > Mapping (rotation Z) > Environment
+  Texture > Background, which matches Material Preview exactly (see below).
+  The Material page finds the Principled BSDF that feeds the output, copies
+  a shared material first and writes `diffuse_color` / `metallic` /
+  `roughness` along with the shader inputs.
 - **Navigation** ([navigation.py](vr_sculpt/navigation.py)): the stock fly
   actions keep their bindings but run `vrsculpt.navigate`, which moves
   `XrSessionState.navigation_location` / `navigation_rotation` itself, so
@@ -858,6 +929,47 @@ the way to get one without linking anything):
   `matrix_world` can be stale, so instance bounds use its own transforms.
 - `gpu.init()` makes `gpu` work in `--background`, so tests and the starter
   kit's build can render previews.
+
+### What we learned about look dev (5.4.0 Alpha)
+
+Found with [tests/probe_lookdev.py](tests/probe_lookdev.py) and
+[tests/probe_lookdev_world.py](tests/probe_lookdev_world.py):
+
+- The VR view has its own shading, `XrSessionSettings.shading` (a whole
+  `View3DShading`), saved with the file. It starts Solid / Studio with
+  Color by Material, and Material Preview starts without scene lights and
+  without the scene's world (`use_scene_lights` / `use_scene_world` off;
+  Rendered has both on). `show_object_extras` is off, so the headset draws
+  no light objects at all.
+- `studio_light` is one dynamic enum whose meaning follows the type and the
+  light: the studio light (Solid, Studio), the matcap (Solid, Matcap) or the
+  HDRI (Material Preview and Rendered share one). Each is kept on its own, so
+  setting a matcap needs Solid / Matcap at that moment, an HDRI needs
+  Material Preview or Rendered. Its `enum_items` lists only `DEFAULT` from
+  Python; `preferences.studio_lights` (with `type` and `path`) is the list.
+  A wrong name's error lists the valid ones.
+- A World of Texture Coordinate (Generated) > Mapping (Point, rotation Z) >
+  Environment Texture > Background matches Material Preview with the same
+  HDRI to within rounding (mean difference 0.0003 on a mirror ball) when the
+  Mapping's rotation equals `studiolight_rotate_z` and the Background's
+  strength equals `studiolight_intensity`. No offset, no sign flip.
+- The bundled matcaps are multilayer EXRs (`diffuse.RGBA`, `specular.RGBA`).
+  `bpy.data.images.load` gives them a size of 0 x 0 and no pixels;
+  OpenImageIO (bundled: `import OpenImageIO`) reads every layer, and HDRIs
+  too, in a few milliseconds without making a datablock (the first file of a
+  session takes ~0.25 s). The bundled HDRIs are 1024 x 512 and reach
+  thousands in their brightest pixels.
+- New lights (`bpy.data.lights.new`) are 10 W (a sun 10 W/m^2) with a radius
+  of 0, `normalize` on, and color temperature (`use_temperature`,
+  `temperature`, 800-20000 K) off. `temperature_color` is the blackbody
+  color it multiplies in, not normalized. Changing `Light.type` in place turns
+  the datablock into the other class (`PointLight` to `SpotLight`).
+- New materials and worlds already have a node tree (Principled BSDF /
+  Background); `use_nodes` is deprecated, to go in 6.0. Principled inputs are
+  named `Transmission Weight`, `Emission Color`, `Emission Strength`, `Coat
+  Weight`. `Material.users` counts meshes, not objects: a material on a mesh
+  two objects share has one user, so sharing is the material's users or its
+  mesh's. A slot switched to `link = 'OBJECT'` starts empty.
 
 ### What we learned about `paint.image_paint` (5.4.0 Alpha)
 
@@ -1016,6 +1128,10 @@ blender --background --factory-startup --python tests/test_tools.py
 ```
 
 ```bash
+blender --background --factory-startup --python tests/test_lookdev.py
+```
+
+```bash
 blender --background --factory-startup --python tests/test_paint.py
 ```
 
@@ -1104,6 +1220,10 @@ stretch views (`uv_preview_checker.png`, `uv_preview_stretch.png`).
 `retopo_preview.py` lays mirrored strips, a center-line strip and an open
 quad on a subdivided Suzanne and draws the Retopo pages
 (`retopo_panels.png`) and the headset drawing (`retopo_scene.png`).
+`lookdev_preview.py` draws the Light page, the Look sheet with its matcap
+and HDRI tiles and the Material page (`lookdev_panels*.png`), and lights
+with their gizmos around the sculpt ball in Material Preview
+(`lookdev_scene.png`).
 `paint_preview.py`
 paints real Contact and Spray strokes with simulated controllers and checks
 color, size, undo and picking (`probe_texpaint*.py` found how).
@@ -1166,6 +1286,20 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   onto each other (the surfaces are the ones there when the sweep starts).
   Assets without a stored preview show an icon. A library of thousands of
   files is listed in part (the first 2000).
+- Look dev: Rendered in the headset renders with the scene's engine (Cycles
+  would be slow in VR; the Look sheet names the engine). Light gizmos show
+  only with the Light tool on; lights are picked within 3 cm of their
+  center, so a big area light is grabbed at its middle. The Light page edits
+  power, size, color, temperature, shadow and spot blend; a light's type,
+  an area's shape and the rest are set on the desktop. New lights are placed
+  in the scene collection. HDRI and matcap choices are Blender's studio
+  lights (bundled plus any added in Preferences); your own HDRI files need a
+  World made on the desktop. Use as world replaces the scene's world (the
+  old one is kept with a fake user) and copies the HDRI's settings once;
+  re-press it after changing them, unless the view shows the scene's world,
+  where the sliders edit it. The Material page edits the first material's
+  Principled BSDF only (other shaders show a New material button); textures,
+  normal maps and the other slots are a desktop job.
 - Using the desktop window from VR needs Windows; elsewhere it's view only,
   without menus and popups (they are temporary regions). It moves your real
   mouse while you point at it. The Blender window must be on screen and not
