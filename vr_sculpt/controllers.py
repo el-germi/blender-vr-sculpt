@@ -94,6 +94,8 @@ def hints(s, info):
     elif mode == 'TOOLS' and s.tool == 'LIGHT':
         from .lookdev import next_type_name
         right['top'] = ("chevron_right", "Next: " + next_type_name(s.light_type))
+    elif mode == 'TOOLS' and s.tool == 'REFS':
+        right['top'] = ("here", "Face me")
     elif mode == 'TOOLS':
         right['top'] = ("chevron_right", "Next camera") if s.tool == 'CAMERA' else ("undo", "Undo measure")
     left['bottom'] = right['bottom'] = ("reset", "Reset view")
@@ -171,7 +173,8 @@ def _trigger(s, info):
             return ("object", "Select, move")
         return ("force", "Pull") if s.physics_tool == 'FORCE' else ("throw", "Grab, throw")
     if mode == 'TOOLS':
-        return {'CAMERA': ("camera", "Aim camera"), 'LIGHT': ("light", "Place, grab light")}.get(
+        return {'CAMERA': ("camera", "Aim camera"), 'LIGHT': ("light", "Place, grab light"),
+                'REFS': ("image", "Place, grab picture")}.get(
             s.tool, ("ruler", "Measure"))
     return None
 
@@ -194,6 +197,8 @@ def _left_trigger(s, info, right):
         return ("object", "Select, move")
     if mode == 'TOOLS' and s.tool == 'LIGHT':
         return ("object", "Select, move light")
+    if mode == 'TOOLS' and s.tool == 'REFS':
+        return ("object", "Move picture")
     if mode == 'PAINT' and right is not None and s.paint_tool != 'PICK':
         return (right[0], "2nd color")
     if mode == 'PAINT' and right is not None:

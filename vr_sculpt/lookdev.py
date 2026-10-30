@@ -846,6 +846,9 @@ def _studio_pixels(sl):
 
 def preview_pixels(kind, name):
     """(PREVIEW_PX, PREVIEW_PX, 4) float32 RGBA, bottom row first, as shown; None without one."""
+    if kind == 'REF':
+        from . import refs
+        return refs.thumbnail(name)  # A reference picture's file (Tools > Refs).
     sl = _studio(kind, name)
     if sl is None:
         return None

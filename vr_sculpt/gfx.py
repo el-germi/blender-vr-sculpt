@@ -420,6 +420,14 @@ def _note(p):
     p.line(-0.38, -0.34, 0.05, -0.34, 0.1)
 
 
+def _image(p):
+    """A framed picture (mountains and a sun): reference images."""
+    p.path([(-0.85, -0.65), (0.85, -0.65), (0.85, 0.65), (-0.85, 0.65)], closed=True)
+    p.fill([(-0.7, -0.5), (-0.2, 0.2), (0.25, -0.5)])
+    p.fill([(0.0, -0.5), (0.35, -0.05), (0.7, -0.5)])
+    p.disc(0.45, 0.32, 0.14)
+
+
 def _pencil(p):
     """A loose scribble with a pencil at its end: Grease Pencil."""
     pts = [(-0.85 + 1.1 * t, -0.45 + 0.28 * math.sin(t * 2.6 * math.pi) * (1 - 0.5 * t)) for t in
@@ -942,8 +950,8 @@ ICONS = {
     "trash": _trash, "duplicate": _duplicate, "plus": _plus, "minus": _minus, "close": _close, "check": _check,
     "eye": _eye, "grid": _grid, "magnet": _magnet, "surface": _surface, "angle": _angle, "mirror": _mirror,
     "here": _here, "pen": _pen, "edit": _edit, "eraser": _eraser, "tube": _tube, "ribbon": _ribbon, "note": _note,
-    "pencil": _pencil, "eyedropper": _eyedropper, "swap": _swap, "spray": _spray, "contact": _contact,
-    "record": _record,
+    "pencil": _pencil, "image": _image, "eyedropper": _eyedropper, "swap": _swap, "spray": _spray,
+    "contact": _contact, "record": _record,
     "play": _play, "stop": _stop, "frame_prev": _frame_prev, "frame_next": _frame_next, "key_prev": _key_prev,
     "key_next": _key_next, "key": _key, "key_delete": _key_delete, "range_start": _range_start,
     "range_end": _range_end, "paths": _paths, "onion": _onion, "ruler": _ruler, "camera": _camera,

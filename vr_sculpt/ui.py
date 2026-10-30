@@ -167,6 +167,11 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
             elif settings.tool == 'LIGHT':
                 col.prop(settings, "light_type")
                 col.prop(settings, "light_color")
+            elif settings.tool == 'REFS':
+                col.prop(settings, "refs_folder")
+                col.prop(settings, "ref_image")
+                col.prop(settings, "ref_size")
+                col.prop(settings, "refs_show")
             else:
                 col.prop(context.scene, "camera")
             col.prop(context.window_manager.xr_session_settings.shading, "type", text="VR View")

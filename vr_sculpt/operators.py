@@ -5,8 +5,8 @@ from bpy.props import BoolProperty, EnumProperty
 from mathutils import Quaternion, Vector
 
 from . import (actions, brushes, camera, catalog, desktop, drawing, interactions, kit, measure, menus,
-               native, paint, paths, physics, presence, primitives, retopo, rig, shading, smoothing, snapping, strokes,
-               symmetry, uv, vr_ui)
+               native, paint, paths, physics, presence, primitives, refs, retopo, rig, shading, smoothing, snapping,
+               strokes, symmetry, uv, vr_ui)
 from . import pose as pose_mode  # "pose" is the controller pose in the handlers below
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
@@ -39,6 +39,7 @@ def _on_data_swap(*_args):
     rig.forget_caches()
     physics.forget_caches()
     uv.forget_caches()
+    refs.forget_caches()
 
 
 def get_state(obj):
@@ -169,6 +170,8 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         if settings.tool == 'LIGHT':
             from . import lookdev
             return lookdev.pick(context, settings, off, pose, tip_pose, scale)
+        if settings.tool == 'REFS':
+            return refs.pick(context, settings, off, pose, tip_pose, scale)
         return measure.Measure(context, settings, tip_pose.translation, scale)
     return None
 
@@ -428,6 +431,8 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
             elif settings.tool == 'LIGHT':
                 from . import lookdev
                 lookdev.next_type(settings)
+            elif settings.tool == 'REFS':
+                refs.face_me(context, refs.selected_ref(context))
             else:
                 measure.undo_last(context.scene)
         elif settings.mode == 'MODEL':

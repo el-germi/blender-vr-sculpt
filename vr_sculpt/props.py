@@ -181,6 +181,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('CAMERA', "Camera", "Hold the trigger to aim the scene camera with your controller"),
             ('LIGHT', "Light", "Press in empty space to place a light, aimed where you point; grab a light to move and "
                                "aim it. The other hand selects"),
+            ('REFS', "Refs", "Reference images: press in empty space to place the chosen picture facing you; grab one "
+                             "to move it"),
         ),
         default='MEASURE',
     )
@@ -228,6 +230,21 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     light_spot: FloatProperty(
         name="Spot Cone", description="Cone angle of new spot lights",
         default=0.7853982, min=0.0174533, max=3.14159, subtype='ANGLE')
+    # Reference images (Tools > Refs).
+    refs_folder: StringProperty(
+        name="Refs Folder",
+        description="Folder of reference images the Refs tool lists. Empty: the .blend file's folder",
+        subtype='DIR_PATH',
+    )
+    ref_image: StringProperty(
+        name="Reference Image", description="The picture the Refs tool places", subtype='FILE_PATH')
+    ref_size: FloatProperty(
+        name="Reference Size", description="Longer side of new reference pictures",
+        default=0.5, min=0.02, soft_max=5.0, subtype='DISTANCE', unit='LENGTH')
+    refs_show: BoolProperty(
+        name="Show References", description="Draw reference pictures in the headset (the desktop draws them anyway)",
+        default=True)
+    ref_pin: StringProperty(name="Pinned Reference", description="The reference shown beside the hand panel")
     # Animation.
     show_timeline: BoolProperty(
         name="Timeline", description="Timeline, keying and playback controls at the bottom of the hand panel",

@@ -223,7 +223,8 @@ def test_pencil():
     check(r == {'FINISHED'} and obj is not None and obj.get(pencil.OBJECT_PROP), "a drag makes a VR Pencil object")
     check(obj.users_collection[0].name == strokes.COLLECTION, "it goes to the VR Strokes collection")
     st = gp_strokes(obj)
-    check(len(st) == 1 and len(st[0].points) > 10, f"one Grease Pencil stroke ({len(st[0].points) if st else 0} points)")
+    check(len(st) == 1 and len(st[0].points) > 10,
+          f"one Grease Pencil stroke ({len(st[0].points) if st else 0} points)")
     pts = pencil.stroke_positions(obj, st[0])
     check(np.allclose(pts[0], (0, 0, 1), atol=1e-4) and np.linalg.norm(pts[-1] - (0.3, 0.1, 1.1)) < 0.03,
           "its points follow the controller")

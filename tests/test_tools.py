@@ -689,7 +689,7 @@ def test_tools_page():
             "tracking_record", "nav_walk", "nav_fly", "nav_speed", "grab_off", "grab_turn", "grab_free",
             "reveal_wrist", "reveal_look", "reveal_always"}
     check(need <= ids, f"Settings has the rest (missing {sorted(need - ids)})")
-    check(height < 0.3, f"Settings: panel height {height:.3f} m")
+    check(height < 0.32, f"Settings: panel height {height:.3f} m (the tallest page's limit, as Sculpt's)")
     vr_ui.find(widgets, "nav_fly").on_press()
     check(settings.nav_mode == 'FLY', "Fly button")
     vr_ui.find(widgets, "grab_free").on_press()

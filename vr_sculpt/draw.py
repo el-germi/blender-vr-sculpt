@@ -9,8 +9,8 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
 from . import (actions, camera, controllers, desktop, drawing, grid, hardsurface, hud, interactions, kit, measure,
-               menus, onion, operators, paint, paths, physics, presence, primitives, puppet, retopo, rig, shading,
-               snapping, strokes, symmetry, uv, vr_ui)
+               menus, onion, operators, paint, paths, physics, presence, primitives, puppet, refs, retopo, rig,
+               shading, snapping, strokes, symmetry, uv, vr_ui)
 from . import pose as pose_mode  # "pose" is a controller pose below
 
 COLORS = hud.PYTHON_COLORS
@@ -72,6 +72,7 @@ def draw_overlay(context, ss, xr=True):
     measure.draw(context, ss, scale)
     from . import lookdev
     lookdev.draw(context, ss, tips, scale)  # The Light tool's gizmos (the headset doesn't draw lights).
+    refs.draw(context, ss, tips, scale, xr)  # Reference pictures (the headset doesn't draw empties).
     onion.draw(context)
     if settings.show_paths and xr:  # The desktop view draws Blender's own paths.
         paths.draw(context, scale)
@@ -292,6 +293,8 @@ def _draw_panel(context, ss, settings, xr):
         # Pinned to the left of the hand panel.
         width = camera.PREVIEW_WIDTH
         camera.draw_preview(frames[0][0], context.scene, width, x=-vr_ui.WIDTH / 2 - 0.006 - width)
+    if xr and settings.ref_pin and faded > 0.5:
+        refs.draw_pin(context, frames[0][0])  # Right of the hand panel.
 
 
 def _draw_paint_cursors(context, ss, settings):

@@ -10,6 +10,7 @@ settings (Model), the Kit of parts (Model), Settings (from the gear, in every mo
 """
 
 import math
+import os
 
 import bpy
 
@@ -1067,8 +1068,7 @@ def _draw_rows(context, settings):
     ]
     if settings.draw_tool == 'DRAW':
         out.append(_segments("style_", "draw_style", DRAW_STYLES, settings.draw_style,
-                             lambda v: setattr(settings, "draw_style", v),
-                             icons={'TUBE': "tube", 'RIBBON': "ribbon", 'NOTE': "note", 'PENCIL': "pencil"}))
+                             lambda v: setattr(settings, "draw_style", v)))  # Four: words only, as "New as".
         out.append([vr_ui.swatch_button("color_" + ident, rgb, (lambda i=ident: setattr(settings, "draw_color", i)),
                                         settings.draw_color == ident) for ident, _name, rgb in strokes.PALETTE])
     out.append([vr_ui.slider("draw_width", "Width", settings.draw_width, 0.001, 0.05,
@@ -1623,18 +1623,22 @@ def _new_camera_here(context):
 
 def _tools_rows(context, settings):
     if _sheet == 'LOOK':
-        return _look_rows(context, settings)  # Tools mode's own sheet (panel() leaves it to the mode's rows).
+        return _look_rows(context, settings)  # Tools mode's own sheets (panel() leaves them to the mode's rows).
+    if _sheet == 'REFS':
+        return _ref_tiles(context, settings)
     scene = context.scene
     out = [
         _header(context, settings, "Tools"),
-        _segments("tool_", "tool", (('measure', "Measure"), ('camera', "Camera"), ('light', "Light")),
-                  settings.tool.lower(), lambda v: setattr(settings, "tool", v.upper()),
-                  icons={'measure': "ruler", 'camera': "camera", 'light': "light"}),
+        _segments("tool_", "tool", (('measure', "Measure"), ('camera', "Camera"), ('light', "Light"),
+                                    ('refs', "Refs")),
+                  settings.tool.lower(), lambda v: setattr(settings, "tool", v.upper())),  # Four: words only.
     ]
     more = []
     if settings.tool == 'LIGHT':
         rows, more = _light_rows(context, settings)
         out += rows
+    elif settings.tool == 'REFS':
+        out += _ref_rows(context, settings)
     elif settings.tool == 'MEASURE':
         n = len(measure.stored(scene))
         out.append([
@@ -1657,6 +1661,83 @@ def _tools_rows(context, settings):
                                      lambda v: setattr(cam.data, "lens", v), fmt=lambda v: f"{v:.0f} mm")])
     out.append(_view_row(context, look=True))
     return _disclose('TOOLS_LIGHT', out, more, "Temperature, shadow") if more else out
+
+
+# The Refs tool (refs.py does the work): the chosen picture and its size, then the selected one's.
+
+_refs = {"page": 0}
+
+
+def open_ref_tiles(context):
+    from . import lookdev, refs
+    paths = refs.choices(context)
+    current = context.scene.vr_sculpt.ref_image
+    per_page = KIT_COLS * KIT_ROWS
+    page = paths.index(current) // per_page if current in paths else 0
+    _refs["page"] = page
+    open_sheet('REFS')
+    lookdev.prepare('REF', paths[page * per_page:(page + 1) * per_page])
+
+
+def _set_ref_page(context, page):
+    from . import lookdev, refs
+    _refs["page"] = page
+    per_page = KIT_COLS * KIT_ROWS
+    lookdev.prepare('REF', refs.choices(context)[page * per_page:(page + 1) * per_page])
+
+
+def _choose_ref(context, path):
+    context.scene.vr_sculpt.ref_image = path
+    close_sheet(context)
+
+
+def _ref_tiles(context, settings):
+    """A page of the pictures in the references folder (and the file), as thumbnails; choosing one makes it
+    the one the trigger places."""
+    from . import lookdev, refs
+    paths = refs.choices(context)
+    cells = [vr_ui.tile("ref_tile_" + str(i), refs.label(p), (lambda p=p: _choose_ref(context, p)),
+                        image=lookdev.preview('REF', p), icon="image", active=p == settings.ref_image)
+             for i, p in enumerate(paths)]
+    shown, page, pages = _paged(cells, _refs["page"], KIT_COLS * KIT_ROWS)
+    _refs["page"] = page
+    where = refs.folder(context)
+    out = [[vr_ui.icon_button("refs_back", "back", lambda: close_sheet(context), "Back"),
+            vr_ui.title("References", os.path.basename(where.rstrip("\\/")) if where else ""),
+            _pin(context, settings)]]
+    for row in _grid(shown, KIT_COLS):
+        out.append(row + [vr_ui.label("") for _ in range(KIT_COLS - len(row))])
+    if not shown:
+        hint = "No pictures in the folder" if where else "Save the file, or set a Refs folder on the desktop"
+        out.append([vr_ui.label(hint, align='CENTER')])
+    if pages > 1:
+        out.append(_pager("refs", page, pages, lambda p: _set_ref_page(context, p)))
+    return out
+
+
+def _ref_rows(context, settings):
+    from . import refs
+    obj = refs.selected_ref(context)
+    out = [[vr_ui.select("ref_image", "Picture", refs.label(settings.ref_image) or "choose",
+                         lambda: open_ref_tiles(context), icon="image")]]
+    if obj is None:
+        out.append([vr_ui.slider("ref_size", "New size", settings.ref_size, 0.05, 3.0,
+                                 lambda v: setattr(settings, "ref_size", v), fmt=_meters)])
+    else:
+        out.append([vr_ui.slider("ref_obj_size", "Size", obj.empty_display_size, 0.05, 3.0,
+                                 lambda v: setattr(obj, "empty_display_size", v), fmt=_meters),
+                    vr_ui.slider("ref_opacity", "Opacity", refs.opacity(obj), 0.05, 1.0,
+                                 lambda v: refs.set_opacity(obj, v), fmt=_percent)])
+        out.append([vr_ui.button("ref_face", "Face me", lambda: refs.face_me(context, obj), icon="here", weight=1.3),
+                    vr_ui.toggle("ref_pin", "Pin", settings.ref_pin == obj.name, lambda: refs.toggle_pin(context, obj),
+                                 icon="pin", weight=0.8, tip="Show it beside the panel"),
+                    vr_ui.button("ref_delete", "Delete", lambda: refs.delete_ref(context, obj), danger=True,
+                                 icon="trash", weight=1.1)])
+    out.append([vr_ui.toggle("refs_show", "Show in VR", settings.refs_show, _toggle(settings, "refs_show"),
+                             icon="eye"),
+                vr_ui.button("ref_unpin", "Unpin", lambda: setattr(settings, "ref_pin", ""), icon="close")
+                if settings.ref_pin else vr_ui.label("")])
+    return out
 
 
 # The Light tool and the Look sheet (lookdev.py does the work).
