@@ -341,9 +341,25 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     draw_width: FloatProperty(
         name="Width", description="Stroke width in your hand's space (meters)",
         default=0.008, min=0.0005, soft_max=0.1, subtype='DISTANCE', unit='LENGTH')
-    draw_smoothing: FloatProperty(
-        name="Smoothing", description="Stabilizer: how much hand jitter is filtered out",
-        default=0.5, min=0.0, max=0.95, subtype='FACTOR')
+    # Smoothing (every trigger stroke: Draw, Paint, Sculpt, weights, seams, retopo strips).
+    smooth_strokes: BoolProperty(
+        name="Smooth Strokes",
+        description="Filter hand jitter out of strokes. Off, strokes follow the controller exactly, shake and all",
+        default=True,
+    )
+    smooth_amount: FloatProperty(
+        name="Amount", description="How much jitter is smoothed away; more also lags a little behind fast moves",
+        default=0.5, min=0.0, max=1.0, subtype='FACTOR')
+    smooth_lag: FloatProperty(
+        name="Lag",
+        description="Lazy string: the stroke only follows once the tip is this far from it (hand-space meters), "
+                    "for straighter lines and cleaner corners. 0 is off",
+        default=0.0, min=0.0, max=0.05, subtype='DISTANCE', unit='LENGTH')
+    take_smooth: BoolProperty(
+        name="Smooth Takes", description="Smooth the keys of a puppet take when it ends", default=True)
+    take_smooth_frames: FloatProperty(
+        name="Take Smoothing", description="How widely a take's keys are smoothed, in frames",
+        default=1.5, min=0.25, max=8.0)
     draw_thickness: EnumProperty(
         name="Thickness",
         description="What varies the stroke's width along its length",

@@ -63,19 +63,9 @@ def stroke_width(settings, scale, value, speed):
     return width * (MIN_WIDTH + (1.0 - MIN_WIDTH) * f)
 
 
-class _Stabilizer:
-    """Exponential smoothing of the tip, so hand jitter doesn't end up in the stroke."""
-
-    def __init__(self, start, amount):
-        self.pos = Vector(start)
-        self.keep = min(max(amount, 0.0), 0.95)
-
-    def __call__(self, tip):
-        self.pos = self.pos.lerp(Vector(tip), 1.0 - self.keep)
-        return self.pos
-
-
 class DrawStroke:
+    smooth = True  # The operator stabilizes the tip (smoothing.py).
+
     def __init__(self, context, settings, tip_pose, value, scale):
         self.settings = settings
         self.scale = scale
@@ -89,7 +79,6 @@ class DrawStroke:
             "taper": settings.draw_taper if settings.draw_thickness == 'TAPER' else 0.0,
         }
         self.spacing = max(settings.draw_width * scale * 0.25, MIN_SPACING * scale)
-        self.stab = _Stabilizer(tip, settings.draw_smoothing)
         self.ribbon = settings.draw_style == 'RIBBON'
         self.speed = 0.0
         self.last_point = tip.copy()
@@ -146,7 +135,7 @@ class DrawStroke:
         self.last_point, self.last_time = point.copy(), now
 
     def update(self, context, pose, tip_pose, value):
-        point = self.stab(tip_pose.translation)
+        point = tip_pose.translation
         self._track_speed(point)
         last = Vector(self.samples["p"][-1]) + self.origin
         if (point - last).length >= self.spacing:
@@ -157,7 +146,7 @@ class DrawStroke:
         if len(self.samples["p"]) < 2:
             strokes.delete(self.obj)  # A click, not a stroke.
             return
-        # End exactly where the stabilizer was heading, then keep the samples for editing.
+        # Build it in full, then keep the samples for editing.
         strokes.rebuild(self.obj, self.samples)
         strokes.save(self.obj, self.samples)
         strokes.push(("mesh", self.obj.name))
@@ -168,6 +157,7 @@ class DrawStroke:
 
 class NoteStroke:
     """A 3D annotation stroke (plus mirrored copies), shown in the headset and on the desktop."""
+    smooth = True
 
     def __init__(self, context, settings, tip_pose, value, scale):
         self.layer, self.frame = strokes.notes_frame(context, settings.draw_color)
@@ -179,7 +169,6 @@ class NoteStroke:
             stroke.display_mode = '3DSPACE'
             self.items.append(stroke)
         self.spacing = MIN_SPACING * scale
-        self.stab = _Stabilizer(tip_pose.translation, settings.draw_smoothing)
         self.last = None
         self.count = 0
         self.changed = False
@@ -195,7 +184,7 @@ class NoteStroke:
         self.count += 1
 
     def update(self, context, pose, tip_pose, value):
-        point = self.stab(tip_pose.translation)
+        point = tip_pose.translation
         if (point - self.last).length >= self.spacing:
             self._add(point)
 

@@ -1082,8 +1082,7 @@ def _draw_rows(context, settings):
     if settings.draw_thickness == 'TAPER':
         more.append([vr_ui.slider("draw_taper", "Taper length", settings.draw_taper, 0.05, 0.5,
                                   lambda v: setattr(settings, "draw_taper", v), fmt=_percent)])
-    more.append([vr_ui.slider("draw_smoothing", "Smoothing", settings.draw_smoothing, 0.0, 0.95,
-                              lambda v: setattr(settings, "draw_smoothing", v), fmt=_percent)])
+    more += _smooth_rows(settings)
     more.append([vr_ui.label("Mirror", fixed=LABEL_W)] + [
         vr_ui.toggle("mirror_" + a, a.upper(), getattr(settings, "mirror_" + a), _toggle(settings, "mirror_" + a))
         for a in "xyz"] + [vr_ui.icon_button("mirror_here", "here", lambda: _cursor_to_off_hand(context),
@@ -1094,6 +1093,26 @@ def _draw_rows(context, settings):
 def _undo_stroke(context):
     from . import operators
     operators.undo_last_stroke(context)
+
+
+def _lag(v):
+    return "Off" if v < 0.0005 else _meters(v)
+
+
+def _smooth_rows(settings):
+    """Stroke smoothing, shared by every mode with strokes (it's one setting), in one row: on / off, and
+    while on, how much jitter goes (Amount) and the lazy string (Lag). Off, strokes follow the controller
+    exactly."""
+    on = settings.smooth_strokes
+    toggle = vr_ui.toggle("smooth_strokes", "Smooth", on, _toggle(settings, "smooth_strokes"), icon="smooth",
+                          weight=0.6 if on else 1.0, tip="Smooth strokes")
+    if not on:
+        return [[toggle, vr_ui.label("Strokes follow your hand", weight=1.6)]]
+    return [[toggle,
+             vr_ui.slider("smooth_amount", "Amount", settings.smooth_amount, 0.0, 1.0,
+                          lambda v: setattr(settings, "smooth_amount", v), fmt=_percent),
+             vr_ui.slider("smooth_lag", "Lag", settings.smooth_lag, 0.0, 0.05,
+                          lambda v: setattr(settings, "smooth_lag", v), fmt=_lag)]]
 
 
 # --- Paint ----------------------------------------------------------------------
@@ -1156,8 +1175,8 @@ def _paint_rows(context, settings):
                       fmt=lambda x: f"{x * 360:.0f}\u00b0")],
         [vr_ui.slider("paint_sat", "Saturation", s, 0.0, 1.0, lambda x: paint.set_hsv(context, s=x), fmt=_percent)],
         [vr_ui.slider("paint_val", "Value", v, 0.0, 1.0, lambda x: paint.set_hsv(context, v=x), fmt=_percent)],
-    ]
-    return _disclose('PAINT', out, more, "Spray, hue / sat / value")
+    ] + _smooth_rows(settings)
+    return _disclose('PAINT', out, more, "Spray, hue / sat / value, smoothing")
 
 
 # --- Rig ------------------------------------------------------------------------
@@ -1318,6 +1337,7 @@ def _bind(context, source):
 
 
 def _puppet_rows(context):
+    settings = context.scene.vr_sculpt
     n = puppet.binding_count()
     take = puppet.state()
     recording = take in {'RECORDING', 'ENDING'}
@@ -1331,6 +1351,11 @@ def _puppet_rows(context):
             vr_ui.button("puppet_rec", puppet.status(), lambda: puppet.toggle_record(context),
                          active=take is not None, danger=recording, icon="stop" if take else "record"),
         ],
+        [vr_ui.toggle("take_smooth", "Smooth", settings.take_smooth, _toggle(settings, "take_smooth"), icon="smooth",
+                      tip="Smooth takes when they end"),
+         vr_ui.slider("take_smooth_frames", "Over", settings.take_smooth_frames, 0.25, 8.0,
+                      lambda v: setattr(settings, "take_smooth_frames", v), fmt=lambda v: f"{v:.1f} fr", weight=2.0)
+         if settings.take_smooth else vr_ui.label("Takes keep every wobble", weight=2.0)],
     ]
 
 
@@ -1914,7 +1939,7 @@ def _settings_rows(context, settings):
         [vr_ui.label("Grid", fixed=LABEL_W),
          vr_ui.toggle("grid_show", "Show", settings.grid_show, _toggle(settings, "grid_show"), icon="grid"),
          vr_ui.toggle("grid_snap", "Snap", settings.grid_snap, _toggle(settings, "grid_snap"), icon="magnet")],
-    ]
+    ] + _smooth_rows(settings)  # Every stroke's smoothing (Sculpt's only place; Draw and Paint have it too).
     if settings.grid_show or settings.grid_snap:
         out.append([vr_ui.slider("grid_size", "Grid size", settings.grid_size, 0.005, 0.5,
                                  lambda v: setattr(settings, "grid_size", v), fmt=_meters)])

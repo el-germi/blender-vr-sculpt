@@ -5,8 +5,8 @@ from bpy.props import BoolProperty, EnumProperty
 from mathutils import Quaternion, Vector
 
 from . import (actions, brushes, camera, catalog, desktop, drawing, interactions, kit, measure, menus,
-               native, paint, paths, physics, presence, primitives, retopo, rig, shading, snapping, strokes, symmetry,
-               uv, vr_ui)
+               native, paint, paths, physics, presence, primitives, retopo, rig, shading, smoothing, snapping, strokes,
+               symmetry, uv, vr_ui)
 from . import pose as pose_mode  # "pose" is the controller pose in the handlers below
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
@@ -208,6 +208,7 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
             traceback.print_exc()
             self.report({'WARNING'}, f"VR Sculpt: {ex}")
             return {'CANCELLED'}
+        self.smoother = smoothing.for_stroke(settings, self.handler, tip_pose.translation, scale)
         if self.handler is not None:
             haptic(context, self.hand, 0.5, 0.03)
             return self._start_modal(context)
@@ -255,6 +256,8 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
     def _apply(self, context, loc, rot, pressure):
         pose = controller_pose(loc, rot)
         tip = brush_tip(pose, self.offset)
+        if self.smoother is not None:
+            tip = self.smoother(tip)
         if self.handler is not None:
             tip_pose = pose.copy()
             tip_pose.translation = tip

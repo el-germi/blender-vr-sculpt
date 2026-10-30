@@ -16,7 +16,7 @@ import time
 import bpy
 from mathutils import Matrix, Quaternion, Vector
 
-from . import anim, pose
+from . import anim, pose, smoothing
 
 SOURCES = (('LEFT', "Left hand"), ('RIGHT', "Right hand"), ('HEAD', "Headset"))
 SOURCE_COLORS = {'LEFT': (1.0, 0.5, 0.35), 'RIGHT': (0.4, 0.9, 0.5), 'HEAD': (0.75, 0.6, 1.0)}
@@ -136,7 +136,7 @@ def start_take(context):
     """Countdown over: from the first frame, play and record."""
     scene = context.scene
     scene.frame_set(scene.frame_start)
-    _take.update(state='RECORDING', last_frame=None, frames=0)
+    _take.update(state='RECORDING', last_frame=None, frames=0, first=None, targets=set())
     if not anim.is_playing(context):
         anim.toggle_play(context)
 
@@ -145,11 +145,15 @@ def stop(context, push_undo=False):
     """End the take. push_undo: make it one undo step (when the timer ends it; a panel press is
     an undo step of its own)."""
     recorded = _take["state"] in {'RECORDING', 'ENDING'}
+    span = (_take.get("first"), _take["last_frame"])
     _take.update(state=None, last_frame=None)
     if recorded and anim.is_playing(context):
         anim.toggle_play(context)
     if recorded:
         print(f"VR Sculpt puppet take: {_take['frames']} frames recorded", flush=True)
+        settings = context.scene.vr_sculpt
+        if settings.take_smooth and None not in span:
+            smooth_take(context, span[0], span[1], settings.take_smooth_frames)
         anim.changed(context)
         if push_undo:
             _undo_push(context, "VR Puppet Take")
@@ -178,16 +182,44 @@ def record_frame(context, ss):
         _take["state"] = 'ENDING'
         return False
     _take["last_frame"] = frame
+    if _take.get("first") is None:
+        _take["first"] = frame
     written = apply(context, ss) if ss is not None else {}
     for follow in _grabs:
         written.update(follow.apply())  # The latest trigger pose, after the frame's own evaluation.
+    targets = _take.setdefault("targets", set())
     for target, location in written.items():
         if isinstance(target, bpy.types.Object):
             anim.insert_key(target, frame)
+            targets.add((target.name, ""))
         else:
             anim.insert_bone_key(target, frame, location)
+            targets.add((target.id_data.name, target.name))
     _take["frames"] += 1
     return True
+
+
+def smooth_take(context, first, last, frames):
+    """Smooth the keys this take wrote (its targets' transform curves, frames first..last). Returns how
+    many F-curves changed."""
+    changed = 0
+    for obj_name, bone in _take.get("targets", ()):
+        obj = bpy.data.objects.get(obj_name)
+        if obj is None:
+            continue
+        if bone:
+            pb = obj.pose.bones.get(bone) if obj.pose else None
+            if pb is None:
+                continue
+            prefix = anim.bone_prefix(bone)
+            paths = {prefix + p for p in anim.bone_paths(pb)}
+        else:
+            paths = set(anim.transform_paths(obj))
+        curves = [fc for fc in anim.fcurves(obj) if fc.data_path in paths]
+        changed += smoothing.smooth_curves(curves, first, last, frames)
+    if changed:
+        print(f"VR Sculpt puppet take: smoothed {changed} curves over {frames:.1f} frames", flush=True)
+    return changed
 
 
 def tick(context, ss):

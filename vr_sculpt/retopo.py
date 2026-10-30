@@ -757,6 +757,7 @@ def pen_push(ed, v):
 class Strip:
     """Strip tool: drag along the surface, laying roughly square quads, the size wide. Starting on a
     border edge carries on from it (its length is the width), never back over its own face."""
+    smooth = True  # The trigger operator stabilizes the tip (smoothing.py).
 
     def __init__(self, context, settings, obj, ref, surf, pose, tip_pose, scale):
         self.ed = Editor(context, settings, obj, ref, surf, scale)
@@ -1127,6 +1128,7 @@ class Relax:
     """Relax tool: while held, the vertices in reach move toward their neighbors' mean, along the
     surface and back onto it. Border vertices follow their border neighbors (so strips even out along
     their sides); corners (two neighbors) stay."""
+    smooth = True  # The trigger operator stabilizes the tip (smoothing.py).
 
     def __init__(self, context, settings, obj, ref, surf, scale):
         self.pts = Points(settings, obj, ref, scale)

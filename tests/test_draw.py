@@ -109,7 +109,7 @@ def setup_trigger():
     s = bpy.context.scene.vr_sculpt
     s.mode, s.tip_offset, s.show_panel = 'DRAW', 0.0, False
     s.draw_tool, s.draw_style, s.draw_color = 'DRAW', 'TUBE', 'RED'
-    s.draw_width, s.draw_smoothing, s.draw_thickness = 0.02, 0.0, 'PRESSURE'
+    s.draw_width, s.smooth_strokes, s.draw_thickness = 0.02, False, 'PRESSURE'
     s.mirror_x = s.mirror_y = s.mirror_z = False
     bpy.context.scene.cursor.location = (0, 0, 0)
     return ss, ctx, s
@@ -270,7 +270,7 @@ def test_orientation():
     print("== stroke orientation: sideways strokes, rolling wrist")
     clear()
     ss, ctx, s = setup_trigger()
-    s.draw_thickness, s.draw_smoothing = 'FIXED', 0.0
+    s.draw_thickness, s.smooth_strokes = 'FIXED', False
     # Sideways stroke along the controller's own X axis (identity aim pose): the old degenerate case.
     rng = np.random.default_rng(7)
     pts = path((0, 0, 1), (0.4, 0, 1), 81)
@@ -445,7 +445,8 @@ def test_sculpt_forgets_and_panel():
     menus.set_more('DRAW', True)
     widgets, _ = menus.layout(bpy.context)
     ids = {w.id for w in widgets}
-    check({"mirror_x", "draw_thickness", "draw_smoothing", "mirror_here"} <= ids, "More: thickness, smoothing, mirror")
+    check({"mirror_x", "draw_thickness", "smooth_strokes", "mirror_here"} <= ids,
+          "More: thickness, smoothing, mirror")
     vr_ui.find(widgets, "draw_thickness").on_press()
     widgets, _ = menus.layout(bpy.context)
     vr_ui.find(widgets, "opt_SPEED_THIN").on_press()

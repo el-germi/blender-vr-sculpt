@@ -382,6 +382,7 @@ def pressure_from(value):
 
 class PaintStroke:
     """Trigger handler: paint while the trigger is held. Same interface as interactions' handlers."""
+    smooth = True  # The trigger operator stabilizes the tip (smoothing.py).
 
     def __init__(self, context, settings, obj, hand_left, scale):
         self.obj = obj

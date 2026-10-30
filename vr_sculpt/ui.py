@@ -42,7 +42,12 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
             col.prop(settings, "draw_style")
             col.prop(settings, "draw_color")
             col.prop(settings, "draw_width")
-            col.prop(settings, "draw_smoothing")
+            row = col.row(heading="Smooth")
+            row.prop(settings, "smooth_strokes", text="")
+            sub = row.row(align=True)
+            sub.active = settings.smooth_strokes
+            sub.prop(settings, "smooth_amount")
+            sub.prop(settings, "smooth_lag")
             col.prop(settings, "draw_thickness")
             if settings.draw_thickness == 'TAPER':
                 col.prop(settings, "draw_taper")
