@@ -444,7 +444,8 @@ def note_strokes(context):
 
 # --- quick undo ---------------------------------------------------------------
 
-# Most recent last: ("mesh", object name) or ("note", [(layer name, frame number, stroke count)]).
+# Most recent last: ("mesh", object name), ("note", [(layer name, frame number, stroke count)]) or
+# ("pencil", (object name, layer name, frame number, stroke count)).
 history = []
 
 
@@ -475,4 +476,8 @@ def undo_last(context):
                     removed += 1
             if removed:
                 return "note"
+        elif kind == "pencil":
+            from . import pencil
+            if pencil.undo(ref):
+                return "pencil stroke"
     return None

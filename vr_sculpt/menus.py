@@ -1055,7 +1055,7 @@ def _array_center_here(context, obj):
 # --- Draw -----------------------------------------------------------------------
 
 DRAW_TOOLS = (('DRAW', "Draw"), ('EDIT', "Edit"), ('ERASE', "Erase"))
-DRAW_STYLES = (('TUBE', "Tube"), ('RIBBON', "Ribbon"), ('NOTE', "Note"))
+DRAW_STYLES = (('TUBE', "Tube"), ('RIBBON', "Ribbon"), ('NOTE', "Note"), ('PENCIL', "Pencil"))
 
 
 def _draw_rows(context, settings):
@@ -1068,7 +1068,7 @@ def _draw_rows(context, settings):
     if settings.draw_tool == 'DRAW':
         out.append(_segments("style_", "draw_style", DRAW_STYLES, settings.draw_style,
                              lambda v: setattr(settings, "draw_style", v),
-                             icons={'TUBE': "tube", 'RIBBON': "ribbon", 'NOTE': "note"}))
+                             icons={'TUBE': "tube", 'RIBBON': "ribbon", 'NOTE': "note", 'PENCIL': "pencil"}))
         out.append([vr_ui.swatch_button("color_" + ident, rgb, (lambda i=ident: setattr(settings, "draw_color", i)),
                                         settings.draw_color == ident) for ident, _name, rgb in strokes.PALETTE])
     out.append([vr_ui.slider("draw_width", "Width", settings.draw_width, 0.001, 0.05,

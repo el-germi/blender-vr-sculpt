@@ -113,8 +113,9 @@ DRAW_INFO = {
     'TUBE': ("Draw Tube", "Round stroke mesh. B undoes the last stroke"),
     'RIBBON': ("Draw Ribbon", "Roll your wrist to twist the band. B undoes the last stroke"),
     'NOTE': ("Draw Note", "Annotation line, not geometry. B undoes the last note"),
-    'EDIT': ("Edit Strokes", "Grab part of a stroke and pull it into shape"),
-    'ERASE': ("Erase", "Sweep through strokes and notes to erase them"),
+    'PENCIL': ("Draw Pencil", "Grease Pencil, on the current frame. B undoes the last stroke"),
+    'EDIT': ("Edit Strokes", "Grab part of a stroke and pull it into shape (not Pencil strokes)"),
+    'ERASE': ("Erase", "Sweep through strokes, notes and pencil lines to erase them"),
 }
 
 PYTHON_INFO = {

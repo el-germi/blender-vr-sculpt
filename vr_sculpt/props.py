@@ -330,6 +330,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('TUBE', "Tube", "Round tube mesh; trigger pressure sets the thickness"),
             ('RIBBON', "Ribbon", "Flat band mesh that follows your wrist's roll"),
             ('NOTE', "Note", "Annotation line (not geometry), shown in the headset and on the desktop"),
+            ('PENCIL', "Pencil", "Grease Pencil stroke: renders, and animates frame by frame (with Auto Keying, "
+                                 "drawing on an unkeyed frame keys a new one)"),
         ),
         default='TUBE',
     )
