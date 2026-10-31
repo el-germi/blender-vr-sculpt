@@ -4,9 +4,9 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty
 from mathutils import Quaternion, Vector
 
-from . import (actions, brushes, camera, catalog, desktop, drawing, interactions, kit, measure, menus,
-               native, paint, paths, physics, presence, primitives, retopo, rig, shading, snapping, strokes, symmetry,
-               uv, vr_ui)
+from . import (actions, brushes, camera, catalog, desktop, drawing, gizmo, interactions, kit, measure, menus,
+               native, paint, paths, physics, presence, primitives, refs, retopo, rig, shading, smoothing, snapping,
+               strokes, symmetry, uv, vr_ui)
 from . import pose as pose_mode  # "pose" is the controller pose in the handlers below
 from .props import BRUSH_ITEMS, RADIUS_STEPS
 
@@ -39,6 +39,8 @@ def _on_data_swap(*_args):
     rig.forget_caches()
     physics.forget_caches()
     uv.forget_caches()
+    refs.forget_caches()
+    gizmo.forget_caches()
 
 
 def get_state(obj):
@@ -125,6 +127,10 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         if hit is not None:
             # A press anywhere on the panel belongs to the panel, even between widgets.
             return interactions.UIPress(context, ss, vr_ui.hit_test(widgets, *hit), hit)
+    # A gizmo handle on the selected object, with either hand (before the desktop screen behind it).
+    handler = gizmo.pick(context, hand, tip_pose, scale)
+    if handler is not None:
+        return handler
     if settings.show_desktop and ss is not None and not _tip_engaged(context, settings, tip_pose.translation, scale):
         handler = desktop.pick(context, ss, hand, pose)
         if handler is not None:
@@ -169,6 +175,8 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         if settings.tool == 'LIGHT':
             from . import lookdev
             return lookdev.pick(context, settings, off, pose, tip_pose, scale)
+        if settings.tool == 'REFS':
+            return refs.pick(context, settings, off, pose, tip_pose, scale)
         return measure.Measure(context, settings, tip_pose.translation, scale)
     return None
 
@@ -208,6 +216,7 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
             traceback.print_exc()
             self.report({'WARNING'}, f"VR Sculpt: {ex}")
             return {'CANCELLED'}
+        self.smoother = smoothing.for_stroke(settings, self.handler, tip_pose.translation, scale)
         if self.handler is not None:
             haptic(context, self.hand, 0.5, 0.03)
             return self._start_modal(context)
@@ -255,6 +264,8 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
     def _apply(self, context, loc, rot, pressure):
         pose = controller_pose(loc, rot)
         tip = brush_tip(pose, self.offset)
+        if self.smoother is not None:
+            tip = self.smoother(tip)
         if self.handler is not None:
             tip_pose = pose.copy()
             tip_pose.translation = tip
@@ -425,6 +436,8 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
             elif settings.tool == 'LIGHT':
                 from . import lookdev
                 lookdev.next_type(settings)
+            elif settings.tool == 'REFS':
+                refs.face_me(context, refs.selected_ref(context))
             else:
                 measure.undo_last(context.scene)
         elif settings.mode == 'MODEL':

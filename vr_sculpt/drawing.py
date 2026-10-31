@@ -63,19 +63,29 @@ def stroke_width(settings, scale, value, speed):
     return width * (MIN_WIDTH + (1.0 - MIN_WIDTH) * f)
 
 
-class _Stabilizer:
-    """Exponential smoothing of the tip, so hand jitter doesn't end up in the stroke."""
+class HandSpeed:
+    """Hand speed in hand-space m/s, averaged over about SPEED_TAU seconds (the same at any frame rate)."""
 
-    def __init__(self, start, amount):
-        self.pos = Vector(start)
-        self.keep = min(max(amount, 0.0), 0.95)
+    def __init__(self, point, scale):
+        self.scale = scale
+        self.speed = 0.0
+        self.last_point = Vector(point)
+        self.last_time = time.perf_counter()
 
-    def __call__(self, tip):
-        self.pos = self.pos.lerp(Vector(tip), 1.0 - self.keep)
-        return self.pos
+    def __call__(self, point):
+        now = time.perf_counter()
+        dt = now - self.last_time
+        if dt > 1e-4:
+            v = (point - self.last_point).length / dt / self.scale
+            alpha = 1.0 - math.exp(-dt / SPEED_TAU)
+            self.speed += (v - self.speed) * alpha
+        self.last_point, self.last_time = Vector(point), now
+        return self.speed
 
 
 class DrawStroke:
+    smooth = True  # The operator stabilizes the tip (smoothing.py).
+
     def __init__(self, context, settings, tip_pose, value, scale):
         self.settings = settings
         self.scale = scale
@@ -89,11 +99,9 @@ class DrawStroke:
             "taper": settings.draw_taper if settings.draw_thickness == 'TAPER' else 0.0,
         }
         self.spacing = max(settings.draw_width * scale * 0.25, MIN_SPACING * scale)
-        self.stab = _Stabilizer(tip, settings.draw_smoothing)
         self.ribbon = settings.draw_style == 'RIBBON'
+        self.hand_speed = HandSpeed(tip, scale)
         self.speed = 0.0
-        self.last_point = tip.copy()
-        self.last_time = time.perf_counter()
         self.changed = False
         self._add(tip, side_vector(tip_pose), value)
 
@@ -135,19 +143,9 @@ class DrawStroke:
                 return d / length if length > 1e-9 else None
         return None
 
-    def _track_speed(self, point):
-        """Hand speed averaged over about SPEED_TAU seconds (the same at any frame rate)."""
-        now = time.perf_counter()
-        dt = now - self.last_time
-        if dt > 1e-4:
-            v = (point - self.last_point).length / dt / self.scale
-            alpha = 1.0 - math.exp(-dt / SPEED_TAU)
-            self.speed += (v - self.speed) * alpha
-        self.last_point, self.last_time = point.copy(), now
-
     def update(self, context, pose, tip_pose, value):
-        point = self.stab(tip_pose.translation)
-        self._track_speed(point)
+        point = tip_pose.translation
+        self.speed = self.hand_speed(point)
         last = Vector(self.samples["p"][-1]) + self.origin
         if (point - last).length >= self.spacing:
             self._add(point, side_vector(tip_pose), value)
@@ -157,7 +155,7 @@ class DrawStroke:
         if len(self.samples["p"]) < 2:
             strokes.delete(self.obj)  # A click, not a stroke.
             return
-        # End exactly where the stabilizer was heading, then keep the samples for editing.
+        # Build it in full, then keep the samples for editing.
         strokes.rebuild(self.obj, self.samples)
         strokes.save(self.obj, self.samples)
         strokes.push(("mesh", self.obj.name))
@@ -168,6 +166,7 @@ class DrawStroke:
 
 class NoteStroke:
     """A 3D annotation stroke (plus mirrored copies), shown in the headset and on the desktop."""
+    smooth = True
 
     def __init__(self, context, settings, tip_pose, value, scale):
         self.layer, self.frame = strokes.notes_frame(context, settings.draw_color)
@@ -179,7 +178,6 @@ class NoteStroke:
             stroke.display_mode = '3DSPACE'
             self.items.append(stroke)
         self.spacing = MIN_SPACING * scale
-        self.stab = _Stabilizer(tip_pose.translation, settings.draw_smoothing)
         self.last = None
         self.count = 0
         self.changed = False
@@ -195,7 +193,7 @@ class NoteStroke:
         self.count += 1
 
     def update(self, context, pose, tip_pose, value):
-        point = self.stab(tip_pose.translation)
+        point = tip_pose.translation
         if (point - self.last).length >= self.spacing:
             self._add(point)
 
@@ -256,7 +254,8 @@ class ReshapeStroke:
 
 
 class EraseStrokes:
-    """Everything the tip touches while the trigger is held is erased: strokes and notes."""
+    """Everything the tip touches while the trigger is held is erased: strokes, notes and the Pencil
+    strokes showing at this frame."""
 
     def __init__(self, context, settings, tip_pose, scale):
         self.margin = ERASE_MARGIN * scale
@@ -291,6 +290,9 @@ class EraseStrokes:
             if d.min() <= self.margin:
                 frame.strokes.remove(stroke)
                 self.changed = True
+        from . import pencil
+        if pencil.erase(context, sweep, self.margin):
+            self.changed = True
 
     def finish(self, context):
         pass
@@ -305,4 +307,7 @@ def pick(context, settings, tip_pose, value, scale):
         return ReshapeStroke(context, obj, tip_pose, scale) if obj is not None else None
     if settings.draw_style == 'NOTE':
         return NoteStroke(context, settings, tip_pose, value, scale)
+    if settings.draw_style == 'PENCIL':
+        from . import pencil
+        return pencil.PencilStroke(context, settings, tip_pose, value, scale)
     return DrawStroke(context, settings, tip_pose, value, scale)

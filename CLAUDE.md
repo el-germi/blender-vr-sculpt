@@ -27,7 +27,7 @@ The zip is named after `version` in `vr_sculpt/blender_manifest.toml`; use the c
 Background tests, one file per area (`test_brushes`, `test_modal`, `test_model`, `test_generic`,
 `test_draw`, `test_tools`, `test_paint`, `test_anim`, `test_pose`, `test_ik_limits`,
 `test_hard_surface`, `test_ui`, `test_rig`, `test_kit`, `test_physics`, `test_rest`, `test_uv`,
-`test_retopo`, `test_lookdev`):
+`test_retopo`, `test_lookdev`, `test_smoothing`, `test_refs`, `test_gizmo`):
 
 ```bash
 blender --background --factory-startup --python tests/test_tools.py
@@ -79,14 +79,16 @@ add-on's, patches the stock `blender_default` action map: trigger bindings becom
 `vrsculpt.navigate`. Changes to bindings only apply at the next session start.
 
 **The trigger operator** (`operators.py`, `VRSCULPT_OT_stroke`). One modal undo operator per hand
-press. `_pick_handler()` is the central dispatch: in priority order it picks hand panel press, desktop
-screen, motion path key, edge marking, then a per-mode handler (`interactions.MoveObject` /
+press. `_pick_handler()` is the central dispatch: in priority order it picks hand panel press, a gizmo
+handle (`gizmo.Drag`, either hand, on the selected object in Model / Light / Refs), desktop screen, motion path key, edge marking, then a per-mode handler (`interactions.MoveObject` /
 `CreatePrimitive`, `drawing.pick`, `paint.pick`, `rig.pick`, `pose.pick`, `physics.pick`,
 `measure.Measure`, `camera.AimCamera`). `None` means sculpt with the active engine (`brushes.py` numpy engine in Object
 Mode, or `native.py` driving `sculpt.brush_stroke` in Sculpt Mode). A handler is a plain class with
 `update(context, pose, tip_pose, value)`, `finish(context)` and a `changed` flag; `changed` decides
 whether the operator returns FINISHED (one undo step) or CANCELLED. New trigger behavior = a new
-handler class plus a branch in `_pick_handler`.
+handler class plus a branch in `_pick_handler`. A stroke-like handler sets the class attribute
+`smooth = True` so the operator runs its tip through `smoothing.Stabilizer` first (when Smooth is on);
+grabs and presses leave it unset.
 
 - Native dabs aim the largest desktop 3D view at the tip and put it back (`native.AimedView`, shared
   with Paint): Blender drops a dab whose mouse isn't over the mesh in that view.
@@ -145,7 +147,8 @@ Pro models; it can't run during a VR session (SteamVR would end Blender's). In M
 selects / moves (`MoveObject`, `Deselect`) and the main one only creates.
 
 **Other modes**: `strokes.py` (mesh from stored samples, rotation-minimizing frames) +
-`drawing.py` for Draw; `retopo.py` for Retopo (quads traced onto a reference mesh's BVH, edited with
+`drawing.py` for Draw, `pencil.py` for its Pencil style (Grease Pencil v3 strokes); `refs.py` for Tools' Refs
+(image empties, drawn in VR since the headset skips empties); `retopo.py` for Retopo (quads traced onto a reference mesh's BVH, edited with
 bmesh in Object Mode); `lookdev.py` for Tools' Light tool, the Look sheet (the XR session's own shading,
 not the desktop's) and Model's Material page; `paint.py` paints by temporarily aiming the largest desktop 3D view at each
 dab; `rig.py` for Rig (edit bones in Edit Mode, Bind via `parent_set` ARMATURE_AUTO, a numpy weight

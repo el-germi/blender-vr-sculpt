@@ -599,6 +599,7 @@ class SeamMark:
 class FixUV:
     """Trigger handler for the Fix tool: the faces the tip brushes over unwrap again on release, stitched
     to the rest of the layout."""
+    smooth = True  # The trigger operator stabilizes the tip (smoothing.py).
 
     def __init__(self, context, obj, scale):
         settings = context.scene.vr_sculpt

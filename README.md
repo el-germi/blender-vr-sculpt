@@ -128,6 +128,26 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   what it starts in. The selection has bright blue corner brackets and its
   name above it; the left hand's ring is the same blue, and what it would
   select gets a yellow box.
+- **Gizmo: one axis at a time.** Grabbing moves and turns an object freely;
+  for exact work the selected object also has handles, taken with either
+  trigger, in Model mode and on the Light and Refs tools: **arrows** move it
+  along X, Y or Z, **rings** turn it around one through its origin, **cubes**
+  on its own axes stretch it along one, and the white **outer ring** (facing
+  you) sizes it evenly. The handles are a fixed size around the origin (9 cm
+  at 1:1 scale), drawn over everything and faint until a tip comes near; the
+  one under a tip turns yellow, ticks that hand, and the controller's legend
+  names it ("Turn around Z"). While you hold one the others go, a guide
+  shows instead (the axis line, the ring with where you started), and the
+  tip status says how far: "+12.0 cm", "+45°", "×1.50 (24.0 cm)" (the new
+  length along that axis). Snap to Grid moves in grid steps (onto the grid
+  with world axes) and sizes in tenths; 15° steps turns in 15 degree steps.
+  The row under the selection picks the handles: **Move**, **Turn**,
+  **Size** (lights have no size) and **Local** (arrows and rings on the
+  object's own axes instead of the world's; the size cubes always are).
+
+  ![The gizmo row in Model, Light and Refs](docs/gizmo_panels.png)
+  ![A box's gizmo, the tip on its X arrow](docs/gizmo_scene.png)
+  ![A turn handle held at +40°, the amount in the tip status](docs/gizmo_drag.png)
 - **Hard surface modeling** (Model mode). It's all modifiers, so primitives
   stay editable and nothing is final until you apply it:
   - **Live booleans**: set New to **Cut**, **Union** or **Intersect** and drag
@@ -255,14 +275,31 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   the operators' own properties.
 - **Draw mode**: freehand 3D strokes that become real meshes, like Gravity
   Sketch. Tube (round, never twists) and Ribbon (flat, follows your wrist's
-  roll) strokes, plus Note strokes that are Blender annotations. Thickness
+  roll) strokes, Note strokes that are Blender annotations, and **Pencil**
+  strokes that are real Grease Pencil: they render, take Grease Pencil
+  modifiers, and go on the current frame, so with Auto Keying on (each
+  unkeyed frame gets a key of its own) you can animate frame by frame from
+  the timeline. They go to the active Grease Pencil object if there is one,
+  else a "VR Pencil" object, one Grease Pencil material per color. Thickness
   from trigger pressure, from hand speed (fast = thin or fast = thick;
   averaged over ~0.3 s, eased up to 2 m/s, changing gradually along the
   stroke), Taper (thin tips ramping to full width over a share of the
-  stroke's length), or fixed. Edit pulls part of a stroke into a new shape; Erase sweeps
-  strokes and notes away. Mirror on X / Y / Z around the 3D cursor (editing
-  one side updates the other), a stabilizer, 8 colors, and B to undo the last
-  stroke.
+  stroke's length), or fixed. Edit pulls part of a stroke into a new shape
+  (not Pencil strokes); Erase sweeps strokes, notes and the Pencil strokes
+  showing at this frame away. Mirror on X / Y / Z around the 3D cursor
+  (editing one side updates the other), smoothing (below), 8 colors, and B
+  to undo the last stroke.
+- **Smoothing, or none**: every stroke (Draw, Paint, Sculpt, weight painting,
+  UV Fix, Retopo Strip and Relax) goes through one stabilizer. **Smooth**
+  turns it on or off: off, strokes follow the controller exactly, shake and
+  all (the headset's tracking already smooths a little). **Amount** takes the
+  jitter out (measured in time, so it feels the same at any frame rate;
+  more also lags a little behind fast moves) and **Lag** is a lazy string:
+  the stroke only follows once the tip is that far from it, for straight
+  lines and clean corners. It's under More in Draw and Paint, and on the
+  Settings sheet for every mode. Seams aren't smoothed (they snap to edges).
+
+  ![Draw with Pencil and smoothing, the Refs page and its tiles, Settings, take smoothing](docs/gp_refs_panels.png)
 - **Paint mode**: texture painting with Blender's own texture paint
   brushes (Hard, Soft, Airbrush, Blur, Smear, Erase), pressure-sensitive.
   **Contact** paints where the tip touches the surface, like a brush;
@@ -341,8 +378,21 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     as in Material Preview), so Rendered and final renders get the same
     light; with the view on Scene, the sliders then edit that world.
 
+  - **Refs** (reference pictures): pictures to look at while you work,
+    placed around you. Choose one from the tiles (the **Refs folder** set in
+    the add-on's sidebar, or the .blend file's folder, plus pictures already
+    used in the file), then press in empty space: it appears at the tip,
+    upright and facing you, and follows the tip while held. Press on a
+    picture (either hand) to grab it; it follows your hand and turns with it.
+    The selected one has Size, Opacity, **Face me** (also B), Delete and
+    **Pin**, which shows it beside the hand panel in every mode. They're
+    Blender's own image empties (Add > Image > Reference does the same on
+    the desktop, and those show too); the headset doesn't draw empties, so
+    VR Sculpt draws them (Show in VR turns that off).
+
   ![The Light page, the Look sheet, matcap and HDRI tiles](docs/lookdev_panels.png)
   ![Lights and their gizmos around a gold ball in Material Preview](docs/lookdev_scene.png)
+  ![Reference pictures around the scene, one pinned beside the panel, and Pencil strokes](docs/gp_refs_scene.png)
 - **3D grid and snapping**: a lattice of points around the controller tips,
   in scene units. Snap to Grid snaps new primitives, grabbed objects and tape
   ends. In Model mode, **Surface** makes a grabbed object sit on the mesh
@@ -423,7 +473,9 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   timeline from the start and keys every bound bone, its IK chain and
   whatever the triggers are posing, on each frame, until Stop or the end of
   the range. A take only replaces what it records, so takes layer: the head
-  first, then each hand.
+  first, then each hand. **Smooth** (on by default) smooths the take's keys
+  when it ends, over the frames you set (1.5 by default); off, takes keep
+  every wobble.
 - **Physics mode**: set up Blender's own simulations and spring bones, run
   them, and play with them using your hands.
   - **Objects**: touch a mesh to select it (hold to move it), then make it
@@ -477,16 +529,17 @@ offset and display options; **VR Extras** has the grid, navigation, hands
 
 | Input | Sculpt mode | Model mode | Draw mode | Paint mode | Rig mode | Pose mode | Physics mode | Tools mode |
 |---|---|---|---|---|---|---|---|---|
-| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Bones: place the next joint; on a joint, carry on from it (click) or move it (drag). Weights: paint, or pick the touched bone | Grab a bone (FK / IK), or an object without a rig | Select an object (hold to move it) or a bone of the selected rig. Hands on: grab and throw a body or a spring bone, or Push / Pull: pull | Measure / aim the camera / Light: place a light, or grab one to move and aim it |
-| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Bones: delete the touched bone; in empty space, end the chain. Weights: the opposite brush | Same as right | Same as right; Push / Pull: push | Same as right; Light: select a light (hold to move it), in empty space nothing |
+| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Bones: place the next joint; on a joint, carry on from it (click) or move it (drag). Weights: paint, or pick the touched bone | Grab a bone (FK / IK), or an object without a rig | Select an object (hold to move it) or a bone of the selected rig. Hands on: grab and throw a body or a spring bone, or Push / Pull: pull | Measure / aim the camera / Light: place a light, or grab one to move and aim it / Refs: place the chosen picture, or grab one |
+| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Bones: delete the touched bone; in empty space, end the chain. Weights: the opposite brush | Same as right | Same as right; Push / Pull: push | Same as right; Light: select a light (hold to move it), in empty space nothing; Refs: grab a picture |
 | Right trigger, pointing at the hand panel | Press buttons, drag sliders, step steppers (hold to repeat) | Same | Same | Same | Same | Same | Same | Same |
 | Y (left) | Next mode (Sculpt, Retopo, Model, Draw, Paint, Rig, Pose, Physics, Tools) | Same | Same | Same | Same | Same | Same | Same |
-| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Bones: end the chain. Weights: undo the last weight stroke | Switch FK / IK | Simulate / stop | Remove the last measurement / next camera / next light type |
+| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Bones: end the chain. Weights: undo the last weight stroke | Switch FK / IK | Simulate / stop | Remove the last measurement / next camera / next light type / turn the picture to face you |
 | Left stick | Walk / fly (move) | Same | Same | Same | Same | Same | Same | Same |
 | Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same | Same | Same | Same |
 | Left stick click | Pin / unpin the hand panel | Same | Same | Same | Same | Same | Same | Same |
 | Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Weights: next brush radius | Next IK chain length (1-4) | Hands on / off | Same |
 | Right trigger on a motion path key | Drag the key | Same | Same | Same | Same | Same | Same | Same |
+| Either trigger on a gizmo handle | | Move along / turn around / size along that axis; the outer ring sizes evenly | | | | | | Light, Refs: same as Model |
 | Grip | Hold the world: move, turn (Grip setting); both grips also zoom | Same | Same | Same | Same | Same | Same | Same |
 | A / X | Blender's stock VR navigation reset (unchanged) | Same | Same | Same | Same | Same | Same | Same |
 
@@ -612,7 +665,38 @@ With Triggers" is on. The setting applies when the VR session starts.
   mirroring stay live. Long strokes rebuild a lighter preview while the
   trigger is held (under 8 ms per frame for a 1200-sample mirrored tube) and
   the full mesh on release. Notes are 3D annotation strokes, one layer per
-  color.
+  color. Pencil strokes ([pencil.py](vr_sculpt/pencil.py)) are Grease
+  Pencil v3 strokes grown a point at a time (`add_points`, about 0.01 ms
+  each) in the object's space; each stroke is fetched again before it's
+  written, since growing one moves the points of the strokes after it.
+- **Smoothing** ([smoothing.py](vr_sculpt/smoothing.py)): the trigger
+  operator passes the tip through a `Stabilizer` before a handler with
+  `smooth = True` (or the sculpt stroke) sees it: a lazy string of the Lag
+  length, then exponential smoothing with a time constant of up to a
+  quarter second (Amount^4, so 50% is about 16 ms). Grabs, presses and
+  placing things aren't smoothed. Takes: when one ends, the keys it wrote
+  on its targets' transform curves get a Gaussian over its frames, ends
+  held; quaternion curves are made sign-continuous, smoothed as one and
+  normalized.
+- **Reference pictures** ([refs.py](vr_sculpt/refs.py)): an image empty's
+  picture is `empty_display_size` on its longer side, offset by
+  `empty_image_offset`; VR draws it as a quad with the image's GPU texture
+  (`gpu.texture.from_image`, cached per image and dropped on undo) at the
+  empty's alpha, depth tested. Thumbnails go through look dev's preview
+  cache (OpenImageIO, no image data made), fitted into the square tile.
+- **Gizmo** ([gizmo.py](vr_sculpt/gizmo.py)): the trigger operator asks it
+  first, after the hand panel: a tip within 1.2 cm of a handle takes it,
+  either hand. Handles are measured in a frame taken at the press (origin,
+  axes, the outer ring's normal toward the headset), so the axis doesn't
+  move under the hand. Move projects the tip's travel on the axis, Turn adds
+  up the signed angle between successive spokes around it (so it goes past
+  half a turn, and holds while the tip is near the axis), Size divides the
+  tip's distance along the object's own axis (or from the origin) by where
+  it took the handle. The result is set on `matrix_world`: a turn and a move
+  around the origin, a size as `start @ Diagonal`, so a turned object keeps
+  its turn. It waits for `DragGate` like a grab, and keys with Auto Keying
+  when let go. Drawn with one smooth-color batch of lines and one of
+  triangles, without depth test.
 - **Stroke orientation**: each sample's frame normal is carried along the
   path (a rotation-minimizing frame), never taken straight from the
   controller. Projecting the controller's side axis across the stroke breaks
@@ -1132,6 +1216,18 @@ blender --background --factory-startup --python tests/test_lookdev.py
 ```
 
 ```bash
+blender --background --factory-startup --python tests/test_smoothing.py
+```
+
+```bash
+blender --background --factory-startup --python tests/test_refs.py
+```
+
+```bash
+blender --background --factory-startup --python tests/test_gizmo.py
+```
+
+```bash
 blender --background --factory-startup --python tests/test_paint.py
 ```
 
@@ -1224,6 +1320,13 @@ quad on a subdivided Suzanne and draws the Retopo pages
 and HDRI tiles and the Material page (`lookdev_panels*.png`), and lights
 with their gizmos around the sculpt ball in Material Preview
 (`lookdev_scene.png`).
+`gp_refs_preview.py` draws Draw with Pencil and smoothing, the Refs page and
+tiles, Settings and Pose's take smoothing (`gp_refs_panels.png`), and
+reference pictures, a pinned one and Pencil strokes as the headset shows
+them (`gp_refs_scene.png`); `probe_pencil.py` checked the Grease Pencil API.
+`gizmo_preview.py` draws the gizmo row in Model, Light and Refs
+(`gizmo_panels.png`), a box's gizmo with the tip on its X arrow
+(`gizmo_scene.png`) and a turn handle held mid-turn (`gizmo_drag.png`).
 `paint_preview.py`
 paints real Contact and Spray strokes with simulated controllers and checks
 color, size, undo and picking (`probe_texpaint*.py` found how).
@@ -1321,7 +1424,17 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   the bone, swing as X / Z), and IK stretch and stiffness are ignored.
   Mirror X needs .L/.R names with mirrored rest poses (as Symmetrize makes).
   Bindings last until Unbind or the end of the VR session. Takes key every
-  frame (dense keys), with no smoothing yet.
+  frame (dense keys); smoothing assumes one key per frame.
+- Pencil strokes: Edit doesn't reshape them, the layer's own transform is
+  ignored when drawing (identity unless set on the desktop), and whether the
+  headset shows Grease Pencil objects is up to Blender's VR view.
+- Smoothing is one setting for every mode. With a lot of Amount or Lag, a
+  stroke ends a little short of where the tip let go.
+- Gizmo: on objects only (not bones, vertices or Physics bodies); handles
+  are around the origin, so an object whose origin is far from its mesh has
+  its gizmo there; no plane handles (two axes at once).
+- Refs: pictures from a folder are listed when it changes or every few
+  seconds; a picture is one image empty (no movie or sequence references).
 - Rig mode: bones are made with roll 0 (fix rolls on the desktop if a
   rig needs them) and all deform. Bind runs Blender's bone heat while you
   wait, which can take seconds on a heavy mesh, and it fails silently on

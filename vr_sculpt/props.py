@@ -181,6 +181,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('CAMERA', "Camera", "Hold the trigger to aim the scene camera with your controller"),
             ('LIGHT', "Light", "Press in empty space to place a light, aimed where you point; grab a light to move and "
                                "aim it. The other hand selects"),
+            ('REFS', "Refs", "Reference images: press in empty space to place the chosen picture facing you; grab one "
+                             "to move it"),
         ),
         default='MEASURE',
     )
@@ -228,6 +230,21 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     light_spot: FloatProperty(
         name="Spot Cone", description="Cone angle of new spot lights",
         default=0.7853982, min=0.0174533, max=3.14159, subtype='ANGLE')
+    # Reference images (Tools > Refs).
+    refs_folder: StringProperty(
+        name="Refs Folder",
+        description="Folder of reference images the Refs tool lists. Empty: the .blend file's folder",
+        subtype='DIR_PATH',
+    )
+    ref_image: StringProperty(
+        name="Reference Image", description="The picture the Refs tool places", subtype='FILE_PATH')
+    ref_size: FloatProperty(
+        name="Reference Size", description="Longer side of new reference pictures",
+        default=0.5, min=0.02, soft_max=5.0, subtype='DISTANCE', unit='LENGTH')
+    refs_show: BoolProperty(
+        name="Show References", description="Draw reference pictures in the headset (the desktop draws them anyway)",
+        default=True)
+    ref_pin: StringProperty(name="Pinned Reference", description="The reference shown beside the hand panel")
     # Animation.
     show_timeline: BoolProperty(
         name="Timeline", description="Timeline, keying and playback controls at the bottom of the hand panel",
@@ -330,6 +347,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('TUBE', "Tube", "Round tube mesh; trigger pressure sets the thickness"),
             ('RIBBON', "Ribbon", "Flat band mesh that follows your wrist's roll"),
             ('NOTE', "Note", "Annotation line (not geometry), shown in the headset and on the desktop"),
+            ('PENCIL', "Pencil", "Grease Pencil stroke: renders, and animates frame by frame (with Auto Keying, "
+                                 "drawing on an unkeyed frame keys a new one)"),
         ),
         default='TUBE',
     )
@@ -341,9 +360,25 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     draw_width: FloatProperty(
         name="Width", description="Stroke width in your hand's space (meters)",
         default=0.008, min=0.0005, soft_max=0.1, subtype='DISTANCE', unit='LENGTH')
-    draw_smoothing: FloatProperty(
-        name="Smoothing", description="Stabilizer: how much hand jitter is filtered out",
-        default=0.5, min=0.0, max=0.95, subtype='FACTOR')
+    # Smoothing (every trigger stroke: Draw, Paint, Sculpt, weights, seams, retopo strips).
+    smooth_strokes: BoolProperty(
+        name="Smooth Strokes",
+        description="Filter hand jitter out of strokes. Off, strokes follow the controller exactly, shake and all",
+        default=True,
+    )
+    smooth_amount: FloatProperty(
+        name="Amount", description="How much jitter is smoothed away; more also lags a little behind fast moves",
+        default=0.5, min=0.0, max=1.0, subtype='FACTOR')
+    smooth_lag: FloatProperty(
+        name="Lag",
+        description="Lazy string: the stroke only follows once the tip is this far from it (hand-space meters), "
+                    "for straighter lines and cleaner corners. 0 is off",
+        default=0.0, min=0.0, max=0.05, subtype='DISTANCE', unit='LENGTH')
+    take_smooth: BoolProperty(
+        name="Smooth Takes", description="Smooth the keys of a puppet take when it ends", default=True)
+    take_smooth_frames: FloatProperty(
+        name="Take Smoothing", description="How widely a take's keys are smoothed, in frames",
+        default=1.5, min=0.25, max=8.0)
     draw_thickness: EnumProperty(
         name="Thickness",
         description="What varies the stroke's width along its length",
@@ -447,6 +482,19 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     )
     snap_angle: BoolProperty(
         name="Snap Rotation", description="Grabbed objects turn in 15 degree steps")
+    # The gizmo on the selected object (Model, Tools > Light and Refs; gizmo.py).
+    gizmo_move: BoolProperty(
+        name="Move Handles", default=True,
+        description="Arrows on the selected object: drag one to move it along that axis")
+    gizmo_rotate: BoolProperty(
+        name="Turn Handles", default=True,
+        description="Rings around the selected object: drag one to turn it around that axis")
+    gizmo_scale: BoolProperty(
+        name="Size Handles", default=True,
+        description="Cubes on the selected object's own axes size it along one; the outer ring sizes it evenly")
+    gizmo_local: BoolProperty(
+        name="Local Axes",
+        description="Arrows and rings follow the object's own axes instead of the world's (size cubes always do)")
     primitive: StringProperty(
         name="Add",
         default="mesh.primitive_cube_add",

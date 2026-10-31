@@ -42,7 +42,12 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
             col.prop(settings, "draw_style")
             col.prop(settings, "draw_color")
             col.prop(settings, "draw_width")
-            col.prop(settings, "draw_smoothing")
+            row = col.row(heading="Smooth")
+            row.prop(settings, "smooth_strokes", text="")
+            sub = row.row(align=True)
+            sub.active = settings.smooth_strokes
+            sub.prop(settings, "smooth_amount")
+            sub.prop(settings, "smooth_lag")
             col.prop(settings, "draw_thickness")
             if settings.draw_thickness == 'TAPER':
                 col.prop(settings, "draw_taper")
@@ -162,6 +167,13 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
             elif settings.tool == 'LIGHT':
                 col.prop(settings, "light_type")
                 col.prop(settings, "light_color")
+            elif settings.tool == 'REFS':
+                col.prop(settings, "refs_folder")
+                # The picture is chosen from the tiles in VR; here it's only named, not a second path.
+                from . import refs
+                col.label(text="Picture: " + (refs.label(settings.ref_image) or "choose one in VR"), icon='IMAGE_DATA')
+                col.prop(settings, "ref_size")
+                col.prop(settings, "refs_show")
             else:
                 col.prop(context.scene, "camera")
             col.prop(context.window_manager.xr_session_settings.shading, "type", text="VR View")
@@ -251,6 +263,12 @@ class VIEW3D_PT_vr_extras(bpy.types.Panel):
         col = layout.column(heading="Grabbing")
         col.prop(settings, "grab_deadzone", text="Threshold")
         col.prop(settings, "grab_delay", text="Delay")
+
+        col = layout.column(heading="Gizmo")
+        col.prop(settings, "gizmo_move", text="Move")
+        col.prop(settings, "gizmo_rotate", text="Turn")
+        col.prop(settings, "gizmo_scale", text="Size")
+        col.prop(settings, "gizmo_local")
 
         col = layout.column(heading="Grid")
         col.prop(settings, "grid_show", text="Show")

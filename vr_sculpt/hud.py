@@ -97,10 +97,13 @@ TOOLS_INFO = {
     'MEASURE': ("Tape Measure", "Drag to measure; ends snap to vertices. B removes the last one"),
     'CAMERA': ("Scene Camera", "Hold the trigger to aim the camera. B: next camera"),
     'LIGHT': ("Light", "Press to place a light where you point, or grab one to move and aim it. B: type"),
+    'REFS': ("Reference", "Press to place the chosen picture facing you, or grab one to move it. B: face me"),
 }
 LIGHT_COLOR = (1.0, 0.86, 0.45)
-TOOL_COLORS = {'MEASURE': MEASURE_COLOR, 'CAMERA': CAMERA_COLOR, 'LIGHT': LIGHT_COLOR}
-TOOL_ICONS = {'MEASURE': "ruler", 'CAMERA': "camera", 'LIGHT': "light"}
+REFS_COLOR = (0.75, 0.85, 0.95)
+TOOL_COLORS = {'MEASURE': MEASURE_COLOR, 'CAMERA': CAMERA_COLOR, 'LIGHT': LIGHT_COLOR,
+               'REFS': REFS_COLOR}
+TOOL_ICONS = {'MEASURE': "ruler", 'CAMERA': "camera", 'LIGHT': "light", 'REFS': "image"}
 
 
 def tool_color(settings, off=False):
@@ -113,8 +116,9 @@ DRAW_INFO = {
     'TUBE': ("Draw Tube", "Round stroke mesh. B undoes the last stroke"),
     'RIBBON': ("Draw Ribbon", "Roll your wrist to twist the band. B undoes the last stroke"),
     'NOTE': ("Draw Note", "Annotation line, not geometry. B undoes the last note"),
-    'EDIT': ("Edit Strokes", "Grab part of a stroke and pull it into shape"),
-    'ERASE': ("Erase", "Sweep through strokes and notes to erase them"),
+    'PENCIL': ("Draw Pencil", "Grease Pencil, on the current frame. B undoes the last stroke"),
+    'EDIT': ("Edit Strokes", "Grab part of a stroke and pull it into shape (not Pencil strokes)"),
+    'ERASE': ("Erase", "Sweep through strokes, notes and pencil lines to erase them"),
 }
 
 PYTHON_INFO = {
@@ -254,6 +258,9 @@ def status_size(context, settings):
         if settings.tool == 'LIGHT':
             from . import lookdev
             return lookdev.status(context)
+        if settings.tool == 'REFS':
+            from . import refs
+            return refs.status(context)
         return ""
     if settings.grid_snap:
         return "grid " + _cm(settings.grid_size)

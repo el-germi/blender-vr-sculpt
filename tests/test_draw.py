@@ -17,7 +17,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 import vr_sculpt  # noqa: E402
-from vr_sculpt import drawing, menus, operators, strokes, vr_ui  # noqa: E402
+from vr_sculpt import drawing, menus, operators, pencil, strokes, vr_ui  # noqa: E402
 import test_model as tm  # noqa: E402
 
 failures = []
@@ -109,7 +109,7 @@ def setup_trigger():
     s = bpy.context.scene.vr_sculpt
     s.mode, s.tip_offset, s.show_panel = 'DRAW', 0.0, False
     s.draw_tool, s.draw_style, s.draw_color = 'DRAW', 'TUBE', 'RED'
-    s.draw_width, s.draw_smoothing, s.draw_thickness = 0.02, 0.0, 'PRESSURE'
+    s.draw_width, s.smooth_strokes, s.draw_thickness = 0.02, False, 'PRESSURE'
     s.mirror_x = s.mirror_y = s.mirror_z = False
     bpy.context.scene.cursor.location = (0, 0, 0)
     return ss, ctx, s
@@ -200,6 +200,90 @@ def test_mirror_and_notes():
     check(not any(strokes.is_stroke(o) for o in bpy.data.objects), "...then the mirrored stroke")
 
 
+def gp_strokes(obj, frame_number=None):
+    out = []
+    for layer in obj.data.layers:
+        for frame in layer.frames:
+            if frame_number is None or frame.frame_number == frame_number:
+                out += list(frame.drawing.strokes)
+    return out
+
+
+def test_pencil():
+    print("== pencil (Grease Pencil) strokes")
+    clear()
+    ss, ctx, s = setup_trigger()
+    scene = bpy.context.scene
+    scene.frame_set(1)
+    scene.tool_settings.use_keyframe_insert_auto = False
+    s.draw_style, s.draw_color = 'PENCIL', 'GREEN'
+    values = list(np.linspace(0.35, 1.0, 25))
+    op, r = hold(ctx, ss, 1, path((0, 0, 1), (0.3, 0.1, 1.1)), values)
+    obj = next((o for o in bpy.data.objects if o.type == 'GREASEPENCIL'), None)
+    check(r == {'FINISHED'} and obj is not None and obj.get(pencil.OBJECT_PROP), "a drag makes a VR Pencil object")
+    check(obj.users_collection[0].name == strokes.COLLECTION, "it goes to the VR Strokes collection")
+    st = gp_strokes(obj)
+    check(len(st) == 1 and len(st[0].points) > 10,
+          f"one Grease Pencil stroke ({len(st[0].points) if st else 0} points)")
+    pts = pencil.stroke_positions(obj, st[0])
+    check(np.allclose(pts[0], (0, 0, 1), atol=1e-4) and np.linalg.norm(pts[-1] - (0.3, 0.1, 1.1)) < 0.03,
+          "its points follow the controller")
+    radii = [p.radius for p in st[0].points]
+    check(radii[-1] > radii[0] * 2 and abs(radii[-1] - 0.01) < 0.002, "pressure sets the radius (half the width)")
+    mat = obj.data.materials[st[0].material_index]
+    check(mat.name == "VR Pencil Green" and mat.is_grease_pencil, "the color's Grease Pencil material")
+
+    s.mirror_x = True
+    scene.cursor.location = (0.1, 0, 0)
+    hold(ctx, ss, 1, path((0.3, 0, 1), (0.4, 0.2, 1.1)))
+    st = gp_strokes(obj)
+    check(len(st) == 3, f"a mirrored pencil stroke is two more strokes ({len(st)})")
+    a, b = pencil.stroke_positions(obj, st[1]), pencil.stroke_positions(obj, st[2])
+    check(np.allclose(a[:, 0] + b[:, 0], 0.2, atol=1e-4), "the mirror is reflected across the cursor")
+    s.mirror_x = False
+    scene.cursor.location = (0, 0, 0)
+    operators.undo_last_stroke(bpy.context)
+    check(len(gp_strokes(obj)) == 1, "quick undo removes the pencil stroke and its mirror")
+
+    # Frame by frame: with Auto Keying, an unkeyed frame gets a key of its own; without, it draws on the held one.
+    scene.frame_set(5)
+    hold(ctx, ss, 1, path((0, 0.3, 1), (0.2, 0.3, 1)))
+    check([f.frame_number for f in obj.data.layers.active.frames] == [1] and len(gp_strokes(obj, 1)) == 2,
+          "without Auto Keying, frame 5 draws on the frame held from 1")
+    scene.tool_settings.use_keyframe_insert_auto = True
+    scene.frame_set(9)
+    hold(ctx, ss, 1, path((0, 0.5, 1), (0.2, 0.5, 1)))
+    check([f.frame_number for f in obj.data.layers.active.frames] == [1, 9] and len(gp_strokes(obj, 9)) == 1,
+          "with Auto Keying, frame 9 gets a new key with just the new stroke")
+    scene.tool_settings.use_keyframe_insert_auto = False
+
+    s.draw_tool = 'ERASE'
+    hold(ctx, ss, 1, path((0.1, 0.5, 0.95), (0.1, 0.5, 1.05), 5))
+    check(len(gp_strokes(obj, 9)) == 0, "Erase sweeps a pencil stroke away")
+    scene.frame_set(1)
+    n = len(gp_strokes(obj, 1))
+    hold(ctx, ss, 1, path((0.1, 0.5, 0.95), (0.1, 0.5, 1.05), 5))
+    check(len(gp_strokes(obj, 1)) == n, "...only the frame showing (frame 1's strokes are elsewhere)")
+    s.draw_tool = 'DRAW'
+
+    # Drawing into your own Grease Pencil object: it's used when active.
+    own = bpy.data.objects.new("Mine", bpy.data.grease_pencils.new("Mine"))
+    scene.collection.objects.link(own)
+    own.location = (1, 0, 0)
+    bpy.context.view_layer.objects.active = own
+    hold(ctx, ss, 1, path((1, 0, 1), (1.2, 0, 1)))
+    st = gp_strokes(own)
+    check(len(st) == 1 and np.allclose(pencil.stroke_positions(own, st[0])[0], (1, 0, 1), atol=1e-4),
+          "the active Grease Pencil object gets the stroke, in its own space")
+    check(len(own.data.layers) == 1 and own.data.layers.active is not None, "a layer is made when it has none")
+    bpy.context.view_layer.objects.active = None
+    hold(ctx, ss, 1, [(0.5, 0.5, 0.5), (0.5005, 0.5, 0.5)])
+    check(all(len(x.points) > 1 for x in gp_strokes(obj)), "a click leaves no one-point stroke")
+    s.draw_style = 'TUBE'
+    for o in (obj, own):
+        bpy.data.objects.remove(o)
+
+
 def test_edit_and_erase():
     print("== edit and erase")
     clear()
@@ -270,7 +354,7 @@ def test_orientation():
     print("== stroke orientation: sideways strokes, rolling wrist")
     clear()
     ss, ctx, s = setup_trigger()
-    s.draw_thickness, s.draw_smoothing = 'FIXED', 0.0
+    s.draw_thickness, s.smooth_strokes = 'FIXED', False
     # Sideways stroke along the controller's own X axis (identity aim pose): the old degenerate case.
     rng = np.random.default_rng(7)
     pts = path((0, 0, 1), (0.4, 0, 1), 81)
@@ -445,7 +529,8 @@ def test_sculpt_forgets_and_panel():
     menus.set_more('DRAW', True)
     widgets, _ = menus.layout(bpy.context)
     ids = {w.id for w in widgets}
-    check({"mirror_x", "draw_thickness", "draw_smoothing", "mirror_here"} <= ids, "More: thickness, smoothing, mirror")
+    check({"mirror_x", "draw_thickness", "smooth_strokes", "mirror_here"} <= ids,
+          "More: thickness, smoothing, mirror")
     vr_ui.find(widgets, "draw_thickness").on_press()
     widgets, _ = menus.layout(bpy.context)
     vr_ui.find(widgets, "opt_SPEED_THIN").on_press()
@@ -464,6 +549,7 @@ def main():
         test_geometry()
         test_draw_and_undo()
         test_mirror_and_notes()
+        test_pencil()
         test_edit_and_erase()
         test_orientation()
         test_speed_thickness()

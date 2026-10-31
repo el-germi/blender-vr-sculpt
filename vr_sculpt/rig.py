@@ -744,6 +744,7 @@ class PaintWeights:
     """Trigger near the mesh (Weights tool): paint the active bone's vertex group while held. With
     Mirror X, the mirrored side of the mesh gets the same on the .L / .R counterpart's group (a bone
     on the mirror plane: its own group)."""
+    smooth = True  # The trigger operator stabilizes the tip (smoothing.py).
 
     def __init__(self, context, settings, obj, bone, left, scale, geometry=None):
         self.obj_name, self.bone = obj.name, bone
