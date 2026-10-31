@@ -43,8 +43,8 @@ KEY_NAMES = {
 
 # What hints() needs besides the settings. Gathered by context_info() in VR; tests build it by hand.
 Info = namedtuple("Info", "ray_on_panel ray_on_desktop picker_open cut_target has_rig paint_ready native_brush "
-                          "primitive rig_bound kit_part playing",
-                  defaults=(False, False, False, False, False, True, "", "Cube", True, False, False))
+                          "primitive rig_bound kit_part playing gizmo_main gizmo_off",
+                  defaults=(False, False, False, False, False, True, "", "Cube", True, False, False, None, None))
 
 NATIVE_LABELS = {"Draw": "Draw", "Clay Strips": "Clay", "Smooth": "Smooth", "Inflate/Deflate": "Inflate",
                  "Crease Sharp": "Crease", "Flatten/Contrast": "Flatten"}
@@ -64,6 +64,11 @@ def hints(s, info):
     trigger = _trigger(s, info)
     right['trigger'] = trigger
     left['trigger'] = _left_trigger(s, info, trigger)
+    # A tip on a gizmo handle: the trigger takes it, whichever hand (gizmo.py).
+    if info.gizmo_main:
+        right['trigger'] = info.gizmo_main
+    if info.gizmo_off:
+        left['trigger'] = info.gizmo_off
     if info.picker_open and info.ray_on_panel:
         right['trigger'] = ("check", "Choose")
     elif info.ray_on_panel:
@@ -215,8 +220,8 @@ def _left_trigger(s, info, right):
 
 def context_info(context, ss):
     """Info for hints() from the scene and the session."""
-    from . import (anim, desktop, hardsurface, interactions, kit, menus, native, operators, paint, pose, presence,
-                   primitives, rig)
+    from . import (anim, desktop, gizmo, hardsurface, interactions, kit, menus, native, operators, paint, pose,
+                   presence, primitives, rig)
     settings = context.scene.vr_sculpt
     main = actions.main_index(context)
     pointer = operators.controller_pose(ss.controller_aim_location_get(context, main),
@@ -226,6 +231,11 @@ def context_info(context, ss):
         on_panel = interactions.panel_pointer(context, ss, pointer)[1] is not None
     brush = native.sculpt_brush(context) if settings.engine == 'NATIVE' else None
     obj = paint.target(context) if settings.mode == 'PAINT' else None
+    scale = ss.viewer_scale
+    offset = settings.tip_offset * scale
+    off = actions.off_index(context)
+    off_pose = operators.controller_pose(ss.controller_aim_location_get(context, off),
+                                         ss.controller_aim_rotation_get(context, off))
     return Info(
         ray_on_panel=on_panel,
         ray_on_desktop=not on_panel and desktop.pointing_at_content(context, ss),
@@ -238,6 +248,8 @@ def context_info(context, ss):
         rig_bound=settings.mode == 'RIG' and rig.bound(rig.mesh(context), rig.target(context)),
         kit_part=kit.is_key(settings.primitive),
         playing=settings.mode == 'PHYSICS' and anim.is_playing(context),
+        gizmo_main=gizmo.hint(context, operators.brush_tip(pointer, offset), scale),
+        gizmo_off=gizmo.hint(context, operators.brush_tip(off_pose, offset), scale),
     )
 
 

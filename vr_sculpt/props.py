@@ -482,6 +482,19 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     )
     snap_angle: BoolProperty(
         name="Snap Rotation", description="Grabbed objects turn in 15 degree steps")
+    # The gizmo on the selected object (Model, Tools > Light and Refs; gizmo.py).
+    gizmo_move: BoolProperty(
+        name="Move Handles", default=True,
+        description="Arrows on the selected object: drag one to move it along that axis")
+    gizmo_rotate: BoolProperty(
+        name="Turn Handles", default=True,
+        description="Rings around the selected object: drag one to turn it around that axis")
+    gizmo_scale: BoolProperty(
+        name="Size Handles", default=True,
+        description="Cubes on the selected object's own axes size it along one; the outer ring sizes it evenly")
+    gizmo_local: BoolProperty(
+        name="Local Axes",
+        description="Arrows and rings follow the object's own axes instead of the world's (size cubes always do)")
     primitive: StringProperty(
         name="Add",
         default="mesh.primitive_cube_add",

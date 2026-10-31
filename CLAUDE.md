@@ -27,7 +27,7 @@ The zip is named after `version` in `vr_sculpt/blender_manifest.toml`; use the c
 Background tests, one file per area (`test_brushes`, `test_modal`, `test_model`, `test_generic`,
 `test_draw`, `test_tools`, `test_paint`, `test_anim`, `test_pose`, `test_ik_limits`,
 `test_hard_surface`, `test_ui`, `test_rig`, `test_kit`, `test_physics`, `test_rest`, `test_uv`,
-`test_retopo`, `test_lookdev`, `test_smoothing`, `test_refs`):
+`test_retopo`, `test_lookdev`, `test_smoothing`, `test_refs`, `test_gizmo`):
 
 ```bash
 blender --background --factory-startup --python tests/test_tools.py
@@ -79,8 +79,8 @@ add-on's, patches the stock `blender_default` action map: trigger bindings becom
 `vrsculpt.navigate`. Changes to bindings only apply at the next session start.
 
 **The trigger operator** (`operators.py`, `VRSCULPT_OT_stroke`). One modal undo operator per hand
-press. `_pick_handler()` is the central dispatch: in priority order it picks hand panel press, desktop
-screen, motion path key, edge marking, then a per-mode handler (`interactions.MoveObject` /
+press. `_pick_handler()` is the central dispatch: in priority order it picks hand panel press, a gizmo
+handle (`gizmo.Drag`, either hand, on the selected object in Model / Light / Refs), desktop screen, motion path key, edge marking, then a per-mode handler (`interactions.MoveObject` /
 `CreatePrimitive`, `drawing.pick`, `paint.pick`, `rig.pick`, `pose.pick`, `physics.pick`,
 `measure.Measure`, `camera.AimCamera`). `None` means sculpt with the active engine (`brushes.py` numpy engine in Object
 Mode, or `native.py` driving `sculpt.brush_stroke` in Sculpt Mode). A handler is a plain class with

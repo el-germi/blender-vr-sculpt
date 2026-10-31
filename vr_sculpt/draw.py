@@ -8,9 +8,9 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-from . import (actions, camera, controllers, desktop, drawing, grid, hardsurface, hud, interactions, kit, measure,
-               menus, onion, operators, paint, paths, physics, presence, primitives, puppet, refs, retopo, rig,
-               shading, snapping, strokes, symmetry, uv, vr_ui)
+from . import (actions, camera, controllers, desktop, drawing, gizmo, grid, hardsurface, hud, interactions, kit,
+               measure, menus, onion, operators, paint, paths, physics, presence, primitives, puppet, refs, retopo,
+               rig, shading, snapping, strokes, symmetry, uv, vr_ui)
 from . import pose as pose_mode  # "pose" is a controller pose below
 
 COLORS = hud.PYTHON_COLORS
@@ -85,6 +85,7 @@ def draw_overlay(context, ss, xr=True):
     if settings.mode == 'PHYSICS':
         physics.draw(context, tips, scale)
     puppet.draw(context, scale)
+    gizmo.draw(context, ss, tips, scale, xr)  # The selected object's handles (under the panel).
     if xr and settings.show_desktop:
         desktop.draw(context, ss, poses[1])
     if settings.show_cursor:
@@ -247,8 +248,9 @@ def _draw_cursors(context, ss, settings, xr):
     if settings.show_brush_card:
         # The tip status: a slim line above the main hand, facing the headset.
         anchor = Vector(ss.controller_grip_location_get(context, actions.main_index(context))) + Vector((0.0, 0.0, 0.05 * scale))
-        content = hud.card_content(settings, sculpt_brush)
-        hud.draw_status(anchor, viewer, scale, content, hud.status_size(context, settings))
+        held = gizmo.status(context)  # Holding a gizmo handle: what it does and how far, instead of the tool.
+        content, size = held if held is not None else             (hud.card_content(settings, sculpt_brush), hud.status_size(context, settings))
+        hud.draw_status(anchor, viewer, scale, content, size)
     if xr and camera_tool and context.scene.camera is not None:
         # A viewfinder above the status: the controller is the camera.
         anchor = Vector(ss.controller_grip_location_get(context, actions.main_index(context))) + \

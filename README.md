@@ -128,6 +128,26 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   what it starts in. The selection has bright blue corner brackets and its
   name above it; the left hand's ring is the same blue, and what it would
   select gets a yellow box.
+- **Gizmo: one axis at a time.** Grabbing moves and turns an object freely;
+  for exact work the selected object also has handles, taken with either
+  trigger, in Model mode and on the Light and Refs tools: **arrows** move it
+  along X, Y or Z, **rings** turn it around one through its origin, **cubes**
+  on its own axes stretch it along one, and the white **outer ring** (facing
+  you) sizes it evenly. The handles are a fixed size around the origin (9 cm
+  at 1:1 scale), drawn over everything and faint until a tip comes near; the
+  one under a tip turns yellow, ticks that hand, and the controller's legend
+  names it ("Turn around Z"). While you hold one the others go, a guide
+  shows instead (the axis line, the ring with where you started), and the
+  tip status says how far: "+12.0 cm", "+45°", "×1.50 (24.0 cm)" (the new
+  length along that axis). Snap to Grid moves in grid steps (onto the grid
+  with world axes) and sizes in tenths; 15° steps turns in 15 degree steps.
+  The row under the selection picks the handles: **Move**, **Turn**,
+  **Size** (lights have no size) and **Local** (arrows and rings on the
+  object's own axes instead of the world's; the size cubes always are).
+
+  ![The gizmo row in Model, Light and Refs](docs/gizmo_panels.png)
+  ![A box's gizmo, the tip on its X arrow](docs/gizmo_scene.png)
+  ![A turn handle held at +40°, the amount in the tip status](docs/gizmo_drag.png)
 - **Hard surface modeling** (Model mode). It's all modifiers, so primitives
   stay editable and nothing is final until you apply it:
   - **Live booleans**: set New to **Cut**, **Union** or **Intersect** and drag
@@ -519,6 +539,7 @@ offset and display options; **VR Extras** has the grid, navigation, hands
 | Left stick click | Pin / unpin the hand panel | Same | Same | Same | Same | Same | Same | Same |
 | Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Weights: next brush radius | Next IK chain length (1-4) | Hands on / off | Same |
 | Right trigger on a motion path key | Drag the key | Same | Same | Same | Same | Same | Same | Same |
+| Either trigger on a gizmo handle | | Move along / turn around / size along that axis; the outer ring sizes evenly | | | | | | Light, Refs: same as Model |
 | Grip | Hold the world: move, turn (Grip setting); both grips also zoom | Same | Same | Same | Same | Same | Same | Same |
 | A / X | Blender's stock VR navigation reset (unchanged) | Same | Same | Same | Same | Same | Same | Same |
 
@@ -663,6 +684,19 @@ With Triggers" is on. The setting applies when the VR session starts.
   (`gpu.texture.from_image`, cached per image and dropped on undo) at the
   empty's alpha, depth tested. Thumbnails go through look dev's preview
   cache (OpenImageIO, no image data made), fitted into the square tile.
+- **Gizmo** ([gizmo.py](vr_sculpt/gizmo.py)): the trigger operator asks it
+  first, after the hand panel: a tip within 1.2 cm of a handle takes it,
+  either hand. Handles are measured in a frame taken at the press (origin,
+  axes, the outer ring's normal toward the headset), so the axis doesn't
+  move under the hand. Move projects the tip's travel on the axis, Turn adds
+  up the signed angle between successive spokes around it (so it goes past
+  half a turn, and holds while the tip is near the axis), Size divides the
+  tip's distance along the object's own axis (or from the origin) by where
+  it took the handle. The result is set on `matrix_world`: a turn and a move
+  around the origin, a size as `start @ Diagonal`, so a turned object keeps
+  its turn. It waits for `DragGate` like a grab, and keys with Auto Keying
+  when let go. Drawn with one smooth-color batch of lines and one of
+  triangles, without depth test.
 - **Stroke orientation**: each sample's frame normal is carried along the
   path (a rotation-minimizing frame), never taken straight from the
   controller. Projecting the controller's side axis across the stroke breaks
@@ -1190,6 +1224,10 @@ blender --background --factory-startup --python tests/test_refs.py
 ```
 
 ```bash
+blender --background --factory-startup --python tests/test_gizmo.py
+```
+
+```bash
 blender --background --factory-startup --python tests/test_paint.py
 ```
 
@@ -1286,6 +1324,9 @@ with their gizmos around the sculpt ball in Material Preview
 tiles, Settings and Pose's take smoothing (`gp_refs_panels.png`), and
 reference pictures, a pinned one and Pencil strokes as the headset shows
 them (`gp_refs_scene.png`); `probe_pencil.py` checked the Grease Pencil API.
+`gizmo_preview.py` draws the gizmo row in Model, Light and Refs
+(`gizmo_panels.png`), a box's gizmo with the tip on its X arrow
+(`gizmo_scene.png`) and a turn handle held mid-turn (`gizmo_drag.png`).
 `paint_preview.py`
 paints real Contact and Spray strokes with simulated controllers and checks
 color, size, undo and picking (`probe_texpaint*.py` found how).
@@ -1389,6 +1430,9 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   headset shows Grease Pencil objects is up to Blender's VR view.
 - Smoothing is one setting for every mode. With a lot of Amount or Lag, a
   stroke ends a little short of where the tip let go.
+- Gizmo: on objects only (not bones, vertices or Physics bodies); handles
+  are around the origin, so an object whose origin is far from its mesh has
+  its gizmo there; no plane handles (two axes at once).
 - Refs: pictures from a folder are listed when it changes or every few
   seconds; a picture is one image empty (no movie or sequence references).
 - Rig mode: bones are made with roll 0 (fix rolls on the desktop if a

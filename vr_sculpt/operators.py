@@ -4,7 +4,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty
 from mathutils import Quaternion, Vector
 
-from . import (actions, brushes, camera, catalog, desktop, drawing, interactions, kit, measure, menus,
+from . import (actions, brushes, camera, catalog, desktop, drawing, gizmo, interactions, kit, measure, menus,
                native, paint, paths, physics, presence, primitives, refs, retopo, rig, shading, smoothing, snapping,
                strokes, symmetry, uv, vr_ui)
 from . import pose as pose_mode  # "pose" is the controller pose in the handlers below
@@ -40,6 +40,7 @@ def _on_data_swap(*_args):
     physics.forget_caches()
     uv.forget_caches()
     refs.forget_caches()
+    gizmo.forget_caches()
 
 
 def get_state(obj):
@@ -126,6 +127,10 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         if hit is not None:
             # A press anywhere on the panel belongs to the panel, even between widgets.
             return interactions.UIPress(context, ss, vr_ui.hit_test(widgets, *hit), hit)
+    # A gizmo handle on the selected object, with either hand (before the desktop screen behind it).
+    handler = gizmo.pick(context, hand, tip_pose, scale)
+    if handler is not None:
+        return handler
     if settings.show_desktop and ss is not None and not _tip_engaged(context, settings, tip_pose.translation, scale):
         handler = desktop.pick(context, ss, hand, pose)
         if handler is not None:

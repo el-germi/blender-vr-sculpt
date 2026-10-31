@@ -340,6 +340,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Reference picture to place (folder and the file's, as thumbnails) | **Picture** select > tiles page (Refs) |
 | Place it (at the tip, facing you), grab one (either hand) | right trigger in empty space / on a picture (Refs) |
 | Size of new pictures | **New size** slider (Refs, none selected) |
+| Gizmo handles: Move, Turn, Size, Local axes | toggles and an icon under the selection (Model, Light, Refs; Light has no Size) |
 | Selected picture: size, opacity, face me, pin beside the panel, delete | sliders, buttons (Refs); **B** face me |
 | Show pictures in VR, unpin | **Show in VR** toggle, **Unpin** (Refs) |
 

@@ -441,6 +441,45 @@ def _pencil(p):
     p.fill([rot(-0.15, 0.13), rot(-0.15, -0.13), rot(-0.45, 0.0)])
 
 
+def _gizmo_move(p):
+    """Arrows out four ways: the gizmo's move handles."""
+    p.line(-0.82, 0.0, 0.82, 0.0)
+    p.line(0.0, -0.82, 0.0, 0.82)
+    for k in range(4):
+        a = k * math.pi / 2
+        _arrow_head(p, 0.82 * math.cos(a), 0.82 * math.sin(a), a, 0.3)
+
+
+def _gizmo_turn(p):
+    """Most of a ring with an arrow at its end: the turn handles."""
+    a0, a1 = math.radians(110), math.radians(410)
+    p.path(_arc_pts(0.0, 0.0, 0.66, a0, a1, 20))
+    x, y = 0.66 * math.cos(a1), 0.66 * math.sin(a1)
+    _arrow_head(p, x, y, a1 + math.pi / 2, 0.32)
+
+
+def _gizmo_size(p):
+    """A small box pulled out by its corner: the size handles."""
+    p.box(-0.8, -0.8, 0.0, 0.0, 0.08)
+    p.path([(0.0, 0.32), (0.32, 0.32), (0.32, 0.0)], w=0.09)
+    p.line(0.1, 0.1, 0.78, 0.78)
+    _arrow_head(p, 0.78, 0.78, math.pi / 4, 0.3)
+
+
+def _gizmo_local(p):
+    """A tilted box with its own axes out of it: the object's own axes."""
+    c, s = math.cos(math.radians(25)), math.sin(math.radians(25))
+
+    def rot(x, y):
+        return (x * c - y * s, x * s + y * c)
+    p.path([rot(-0.42, -0.42), rot(0.42, -0.42), rot(0.42, 0.42), rot(-0.42, 0.42)], closed=True)
+    for x, y, a in ((0.42, 0.0, 0.0), (0.0, 0.42, math.pi / 2)):
+        x0, y0 = rot(x, y)
+        x1, y1 = rot(x * 2.05, y * 2.05)
+        p.line(x0, y0, x1, y1)
+        _arrow_head(p, x1, y1, a + math.radians(25), 0.24)
+
+
 def _eyedropper(p):
     c, s = math.cos(math.radians(-45)), math.sin(math.radians(-45))
 
@@ -950,7 +989,8 @@ ICONS = {
     "trash": _trash, "duplicate": _duplicate, "plus": _plus, "minus": _minus, "close": _close, "check": _check,
     "eye": _eye, "grid": _grid, "magnet": _magnet, "surface": _surface, "angle": _angle, "mirror": _mirror,
     "here": _here, "pen": _pen, "edit": _edit, "eraser": _eraser, "tube": _tube, "ribbon": _ribbon, "note": _note,
-    "pencil": _pencil, "image": _image, "eyedropper": _eyedropper, "swap": _swap, "spray": _spray,
+    "pencil": _pencil, "image": _image, "gizmo_move": _gizmo_move, "gizmo_turn": _gizmo_turn,
+    "gizmo_size": _gizmo_size, "gizmo_local": _gizmo_local, "eyedropper": _eyedropper, "swap": _swap, "spray": _spray,
     "contact": _contact, "record": _record,
     "play": _play, "stop": _stop, "frame_prev": _frame_prev, "frame_next": _frame_next, "key_prev": _key_prev,
     "key_next": _key_next, "key": _key, "key_delete": _key_delete, "range_start": _range_start,

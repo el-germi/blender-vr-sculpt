@@ -264,6 +264,12 @@ class VIEW3D_PT_vr_extras(bpy.types.Panel):
         col.prop(settings, "grab_deadzone", text="Threshold")
         col.prop(settings, "grab_delay", text="Delay")
 
+        col = layout.column(heading="Gizmo")
+        col.prop(settings, "gizmo_move", text="Move")
+        col.prop(settings, "gizmo_rotate", text="Turn")
+        col.prop(settings, "gizmo_scale", text="Size")
+        col.prop(settings, "gizmo_local")
+
         col = layout.column(heading="Grid")
         col.prop(settings, "grid_show", text="Show")
         col.prop(settings, "grid_snap", text="Snap")

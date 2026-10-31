@@ -482,6 +482,7 @@ def _model_rows(context, settings):
             vr_ui.icon_button("duplicate", "duplicate", lambda: hardsurface.duplicate(context, obj), "Duplicate"),
             vr_ui.icon_button("delete", "trash", lambda: hardsurface.delete(context, obj), "Delete", danger=True),
         ])
+        out.append(gizmo_row(settings))
     return _disclose('MODEL', out, _snap_rows(settings), "Snapping")
 
 
@@ -596,6 +597,23 @@ def _kit_rows(context, settings):
                       lambda v: setattr(settings, "kit_spacing", v), fmt=_meters)],
     ]
     return _disclose('KIT', out, more, "Size, spacing")
+
+
+def gizmo_row(settings, sizes=True):
+    """Which of the gizmo's handles the selected object shows, and on whose axes (gizmo.py). sizes: False for
+    lights, which have none."""
+    row = [vr_ui.toggle("gizmo_move", "Move", settings.gizmo_move, _toggle(settings, "gizmo_move"),
+                        icon="gizmo_move", tip="Move handles"),
+           vr_ui.toggle("gizmo_rotate", "Turn", settings.gizmo_rotate, _toggle(settings, "gizmo_rotate"),
+                        icon="gizmo_turn", tip="Turn handles")]
+    if sizes:
+        row.append(vr_ui.toggle("gizmo_scale", "Size", settings.gizmo_scale, _toggle(settings, "gizmo_scale"),
+                                icon="gizmo_size", tip="Size handles"))
+    # An icon, so the three above keep their words.
+    row.append(vr_ui.icon_button("gizmo_local", "gizmo_local", _toggle(settings, "gizmo_local"),
+                                 "Local: the object's own axes" if settings.gizmo_local else "World axes",
+                                 active=settings.gizmo_local))
+    return row
 
 
 def _snap_rows(settings):
@@ -1733,6 +1751,7 @@ def _ref_rows(context, settings):
                                  icon="pin", weight=0.8, tip="Show it beside the panel"),
                     vr_ui.button("ref_delete", "Delete", lambda: refs.delete_ref(context, obj), danger=True,
                                  icon="trash", weight=1.1)])
+        out.append(gizmo_row(settings))
     out.append([vr_ui.toggle("refs_show", "Show in VR", settings.refs_show, _toggle(settings, "refs_show"),
                              icon="eye"),
                 vr_ui.button("ref_unpin", "Unpin", lambda: setattr(settings, "ref_pin", ""), icon="close")
@@ -1774,6 +1793,7 @@ def _light_rows(context, settings):
                                        "Duplicate"),
                      vr_ui.icon_button("light_delete", "trash", lambda: lookdev.delete_light(context, obj),
                                        "Delete light", danger=True)])
+        rows.append(gizmo_row(settings, sizes=False))
     color = lookdev.light_get(context, obj, 'color')
     rows.append([vr_ui.swatch_button("light_color_" + ident, rgb,
                                      (lambda rgb=rgb: lookdev.light_set(context, obj, 'color', rgb)),
