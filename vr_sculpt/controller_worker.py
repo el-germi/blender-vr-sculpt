@@ -28,6 +28,7 @@ import ctypes as C
 import json
 import math
 import os
+import platform
 import re
 import struct
 import sys
@@ -466,7 +467,13 @@ POSE_INPUT = 4
 LOCATION_VALID = 0x3  # orientation and position
 
 EXTENSIONS = ("XR_MND_headless", "XR_EXT_uuid", "XR_EXT_render_model", "XR_EXT_interaction_render_model")
-TIME_EXTENSION = "XR_KHR_win32_convert_performance_counter_time"
+if sys.platform == "win32":
+    TIME_EXTENSION, TIME_FUNCTION = "XR_KHR_win32_convert_performance_counter_time", \
+        "xrConvertWin32PerformanceCounterToTimeKHR"
+    Stamp = C.c_int64  # LARGE_INTEGER
+else:
+    TIME_EXTENSION, TIME_FUNCTION = "XR_KHR_convert_timespec_time", "xrConvertTimespecTimeToTimeKHR"
+    Stamp = _struct("Timespec", [("tv_sec", C.c_long), ("tv_nsec", C.c_long)])
 PROFILES = ("/interaction_profiles/oculus/touch_controller", "/interaction_profiles/meta/touch_plus_controller",
             "/interaction_profiles/meta/touch_pro_controller", "/interaction_profiles/valve/index_controller",
             "/interaction_profiles/htc/vive_controller", "/interaction_profiles/microsoft/motion_controller",
@@ -479,20 +486,44 @@ class Unavailable(Exception):
 
 
 def active_runtime():
-    import winreg
-    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Khronos\OpenXR\1") as key:
-        return winreg.QueryValueEx(key, "ActiveRuntime")[0]
+    """The active runtime's manifest, looked up as the OpenXR loader does (XR_RUNTIME_JSON first, then the
+    registry on Windows, the XDG config folders elsewhere)."""
+    path = os.environ.get("XR_RUNTIME_JSON")
+    if path:
+        return path
+    if sys.platform == "win32":
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Khronos\OpenXR\1") as key:
+                return winreg.QueryValueEx(key, "ActiveRuntime")[0]
+        except OSError:
+            raise Unavailable("no active OpenXR runtime: make SteamVR the active one") from None
+    home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    dirs = [home] + (os.environ.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":") + ["/etc"]
+    names = (f"active_runtime.{platform.machine().lower()}.json", "active_runtime.json")
+    for folder in dirs:
+        for name in names:
+            path = os.path.join(folder, "openxr", "1", name)
+            if os.path.isfile(path):
+                return path
+    raise Unavailable("no active OpenXR runtime: make SteamVR the active one")
 
 
 class Runtime:
-    """The runtime DLL from its manifest, negotiated with as the loader does."""
+    """The runtime library from its manifest, negotiated with as the loader does."""
 
     def __init__(self, manifest):
+        # The manifest is often a symlink into the runtime's folder (SteamVR on Linux), and its library path
+        # is relative to where it really is.
+        manifest = os.path.realpath(manifest)
         with open(manifest) as f:
             info = json.load(f)["runtime"]
-        path = os.path.normpath(os.path.join(os.path.dirname(manifest), info["library_path"]))
+        path = info["library_path"]
+        if "/" in path or "\\" in path:  # a bare name is left to the system's library search
+            path = os.path.normpath(os.path.join(os.path.dirname(manifest), path))
         self.name = info.get("name", os.path.basename(path))
-        os.add_dll_directory(os.path.dirname(path))
+        if hasattr(os, "add_dll_directory"):  # Windows only
+            os.add_dll_directory(os.path.dirname(path))
         dll = C.CDLL(path)
         loader = NegotiateLoaderInfo(1, 1, C.sizeof(NegotiateLoaderInfo), 1, 1, _version(1, 0, 0),
                                      _version(1, 1, 0xffff))
@@ -579,8 +610,7 @@ class Client:
         self.f = {name: rt.proc(self.instance.value, name, *args) for name, args in self.FUNCTIONS}
         self.to_time = None
         if TIME_EXTENSION in have:
-            self.to_time = rt.proc(self.instance.value, "xrConvertWin32PerformanceCounterToTimeKHR", H,
-                                   P(C.c_int64), P(C.c_int64))
+            self.to_time = rt.proc(self.instance.value, TIME_FUNCTION, H, P(Stamp), P(C.c_int64))
         self.state, self.last_time = 0, 0
         system = H()
         if self.f["xrGetSystem"](self.instance, C.byref(SystemGetInfo(T_SYSTEM_GET_INFO, None, 1)),
@@ -643,9 +673,14 @@ class Client:
     def now(self):
         if self.to_time is None:
             return self.last_time
-        counter, t = C.c_int64(), C.c_int64()
-        C.windll.kernel32.QueryPerformanceCounter(C.byref(counter))
-        self.to_time(self.instance, C.byref(counter), C.byref(t))
+        if sys.platform == "win32":
+            stamp = Stamp()
+            C.windll.kernel32.QueryPerformanceCounter(C.byref(stamp))
+        else:
+            ns = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
+            stamp = Stamp(ns // 1_000_000_000, ns % 1_000_000_000)
+        t = C.c_int64()
+        self.to_time(self.instance, C.byref(stamp), C.byref(t))
         return t.value
 
     def model_ids(self):

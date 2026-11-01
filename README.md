@@ -749,8 +749,10 @@ With Triggers" is on. The setting applies when the VR session starts.
   with `gpu` from a compact .npz per hand (mesh split into parts, texture,
   how each part moves). The bundled ones are Meta's Quest Pro controllers.
   Get From Runtime starts a background Blender
-  ([controller_worker.py](vr_sculpt/controller_worker.py)) that loads the
-  OpenXR runtime's DLL over ctypes, negotiates with it as the loader does,
+  ([controller_worker.py](vr_sculpt/controller_worker.py)) that finds the
+  active runtime as the OpenXR loader does (`XR_RUNTIME_JSON`, then the
+  registry on Windows or the XDG config folders on Linux), loads its
+  library over ctypes, negotiates with it as the loader does,
   and makes an OpenXR instance of its own with a headless session and the
   Khronos render model extensions: it asks for the interaction render
   models, keeps the two with a hand's subaction path and moving parts,
