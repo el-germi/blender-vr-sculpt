@@ -1147,7 +1147,7 @@ def _paint_setup(context):
 def _paint_rows(context, settings):
     obj = paint.target(context)
     if obj is None:
-        return [_header(context, settings, "Paint"), [vr_ui.label("Select a mesh to paint", align='CENTER')]]
+        return [_header(context, settings, "Paint"), [vr_ui.label("Select a mesh: other-hand trigger on it", align='CENTER')]]
     if not paint.ready(obj):
         items = [(i.identifier, i.name) for i in settings.bl_rna.properties["paint_texture_size"].enum_items]
         return [

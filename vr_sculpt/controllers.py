@@ -43,8 +43,9 @@ KEY_NAMES = {
 
 # What hints() needs besides the settings. Gathered by context_info() in VR; tests build it by hand.
 Info = namedtuple("Info", "ray_on_panel ray_on_desktop picker_open cut_target has_rig paint_ready native_brush "
-                          "primitive rig_bound kit_part playing gizmo_main gizmo_off",
-                  defaults=(False, False, False, False, False, True, "", "Cube", True, False, False, None, None))
+                          "primitive rig_bound kit_part playing gizmo_main gizmo_off needs_target",
+                  defaults=(False, False, False, False, False, True, "", "Cube", True, False, False, None, None,
+                            False))
 
 NATIVE_LABELS = {"Draw": "Draw", "Clay Strips": "Clay", "Smooth": "Smooth", "Inflate/Deflate": "Inflate",
                  "Crease Sharp": "Crease", "Flatten/Contrast": "Flatten"}
@@ -186,6 +187,8 @@ def _trigger(s, info):
 
 def _left_trigger(s, info, right):
     mode = s.mode
+    if info.needs_target:
+        return ("object", "Select mesh")
     if mode == 'SCULPT':
         inverts = s.left_inverts and (s.engine == 'NATIVE' or s.brush in {'DRAW', 'INFLATE'})
         if inverts and right is not None:
@@ -250,6 +253,7 @@ def context_info(context, ss):
         playing=settings.mode == 'PHYSICS' and anim.is_playing(context),
         gizmo_main=gizmo.hint(context, operators.brush_tip(pointer, offset), scale),
         gizmo_off=gizmo.hint(context, operators.brush_tip(off_pose, offset), scale),
+        needs_target=operators.needs_target(context, settings),
     )
 
 

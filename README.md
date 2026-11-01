@@ -304,7 +304,8 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   brushes (Hard, Soft, Airbrush, Blur, Smear, Erase), pressure-sensitive.
   **Contact** paints where the tip touches the surface, like a brush;
   **Spray** paints where the controller points, at any distance. The left
-  hand paints the second color. 8 swatches, hue / saturation / value
+  hand paints the second color; with no mesh to paint, its trigger on one
+  selects it (Sculpt does the same). 8 swatches, hue / saturation / value
   sliders, Swap, and **Pick color**, an eyedropper on anything you see: any
   visible mesh (its texture, color attribute or material color), a reference
   picture, or the one pinned beside the panel (point at it). Reach applies:
@@ -535,7 +536,7 @@ offset and display options; **VR Extras** has the grid, navigation, hands
 | Input | Sculpt mode | Model mode | Draw mode | Paint mode | Rig mode | Pose mode | Physics mode | Tools mode |
 |---|---|---|---|---|---|---|---|---|
 | Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Bones: place the next joint; on a joint, carry on from it (click) or move it (drag). Weights: paint, or pick the touched bone | Grab a bone (FK / IK), or an object without a rig | Select an object (hold to move it) or a bone of the selected rig. Hands on: grab and throw a body or a spring bone, or Push / Pull: pull | Measure / aim the camera / Light: place a light, or grab one to move and aim it / Refs: place the chosen picture, or grab one |
-| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Bones: delete the touched bone; in empty space, end the chain. Weights: the opposite brush | Same as right | Same as right; Push / Pull: push | Same as right; Light: select a light (hold to move it), in empty space nothing; Refs: grab a picture |
+| Left trigger | Sculpt, inverted for Draw / Inflate (configurable). No mesh to sculpt: touch one to select it | Same as right | Same as right | Paint the second color. No mesh to paint: touch one to select it | Bones: delete the touched bone; in empty space, end the chain. Weights: the opposite brush | Same as right | Same as right; Push / Pull: push | Same as right; Light: select a light (hold to move it), in empty space nothing; Refs: grab a picture |
 | Right trigger, pointing at the hand panel | Press buttons, drag sliders, step steppers (hold to repeat) | Same | Same | Same | Same | Same | Same | Same |
 | Y (left) | Next mode (Sculpt, Retopo, Model, Draw, Paint, Rig, Pose, Physics, Tools) | Same | Same | Same | Same | Same | Same | Same |
 | B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Bones: end the chain. Weights: undo the last weight stroke | Switch FK / IK | Simulate / stop | Remove the last measurement / next camera / next light type / turn the picture to face you |

@@ -95,6 +95,15 @@ def sculpt_target(context):
     return None
 
 
+def needs_target(context, settings):
+    """Sculpt and Paint work on the active mesh: with none, the off-hand trigger selects one."""
+    if settings.mode == 'SCULPT':
+        return sculpt_target(context) is None
+    if settings.mode == 'PAINT':
+        return paint.target(context) is None
+    return False
+
+
 def _tip_engaged(context, settings, tip, scale):
     """Whether the tip is at work on something, so a desktop screen behind it doesn't take the trigger."""
     if settings.mode == 'SCULPT':
@@ -142,6 +151,10 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         key = paths.nearest_key(context, tip_pose.translation, scale)
         if key is not None:
             return paths.KeyDrag(context, key[0], key[1], tip_pose.translation)
+    if off and needs_target(context, settings):
+        obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale)
+        if obj is not None and obj.type == 'MESH':
+            return interactions.SelectTarget(context, obj)
     if settings.mode == 'MODEL' and settings.uv_tool != 'NONE':
         handler = uv.pick(context, settings, off, scale)
         if handler is not None:

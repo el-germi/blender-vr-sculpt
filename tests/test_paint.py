@@ -18,7 +18,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import vr_sculpt  # noqa: E402
-from vr_sculpt import actions, menus, operators, paint, refs, vr_ui  # noqa: E402
+from vr_sculpt import actions, menus, operators, paint, primitives, refs, vr_ui  # noqa: E402
 
 failures = []
 
@@ -259,6 +259,39 @@ def test_pick_any(painted):
     ctx.view_layer.objects.active = painted
 
 
+def test_select_target(painted):
+    print("== the off-hand trigger selects a mesh when Sculpt or Paint has none")
+    from vr_sculpt import controllers, interactions
+    ctx = bpy.context
+    settings = ctx.scene.vr_sculpt
+    off_hand = actions.HANDS[actions.off_index(ctx)]
+    main_hand = actions.HANDS[actions.main_index(ctx)]
+    on = Matrix.Translation((1.0, -0.5, 0.0))  # The tip on the painted ball.
+    away = Matrix.Translation((5.0, -5.0, 0.0))
+
+    def press(hand, tip):
+        return operators._pick_handler(ctx, settings, hand, tip, tip, 1.0, 1.0)
+
+    for mode, engine, want in (('PAINT', 'NATIVE', 'TEXTURE_PAINT'), ('SCULPT', 'NATIVE', 'SCULPT'),
+                               ('SCULPT', 'PYTHON', 'OBJECT')):
+        menus.set_object_mode(ctx, painted, 'OBJECT')
+        primitives.make_active(ctx, None)
+        settings.mode, settings.engine = mode, engine
+        check(operators.needs_target(ctx, settings), f"{mode} ({engine}) with no mesh needs one")
+        label = controllers.hints(settings, controllers.Info(needs_target=True))["left"]["trigger"]
+        check(label is not None and label[1] == "Select mesh", f"and the off-hand trigger says so ({label})")
+        check(press(main_hand, on) is None or not isinstance(press(main_hand, on), interactions.SelectTarget),
+              "the main hand doesn't select")
+        check(press(off_hand, away) is None and ctx.view_layer.objects.active is None,
+              "the off hand in empty space selects nothing")
+        h = press(off_hand, on)
+        check(isinstance(h, interactions.SelectTarget) and h.changed, "the off hand on a mesh selects it")
+        check(ctx.view_layer.objects.active == painted and painted.select_get() and painted.mode == want,
+              f"active, selected and ready ({painted.mode}, want {want})")
+        check(not operators.needs_target(ctx, settings), "then it has its target")
+    settings.mode, settings.engine = 'PAINT', 'NATIVE'
+
+
 def test_undo(obj, img):
     print("== stroke undo (changed tiles)")
     ctx = bpy.context
@@ -410,6 +443,7 @@ def main():
         bpy.context.view_layer.update()
         obj, img = test_surface()
         test_pick_any(obj)
+        test_select_target(obj)
         test_undo(obj, img)
         test_panel(obj)
     except Exception:

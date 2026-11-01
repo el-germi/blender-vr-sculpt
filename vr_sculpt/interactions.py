@@ -214,6 +214,27 @@ class DragGate:
         return None
 
 
+class SelectTarget:
+    """Off-hand trigger in Sculpt or Paint with no mesh to work on: select the touched one and get it ready
+    (Sculpt Mode for the native engine; Texture Paint once it can be painted)."""
+
+    def __init__(self, context, obj):
+        from . import paint
+        primitives.make_active(context, obj)
+        settings = context.scene.vr_sculpt
+        if settings.mode == 'PAINT':
+            paint.enter(context)
+        else:
+            menus.set_object_mode(context, obj, 'SCULPT' if settings.engine == 'NATIVE' else 'OBJECT')
+        self.changed = True
+
+    def update(self, context, pose, tip_pose, value):
+        pass
+
+    def finish(self, context):
+        pass
+
+
 class MoveObject:
     """Grab an object with the controller: it follows the controller's position and rotation
     (once the DragGate opens; until then the press only selects it). With Snap to Surface it sits
