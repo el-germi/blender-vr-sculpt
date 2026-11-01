@@ -29,13 +29,17 @@ TIMELINE_WIDTH = 0.2  # hand-space meters
 TIMELINE_GAP = 0.006
 
 
+def panel_matrix(context, ss):
+    """The hand panel's matrix, above the off-hand controller."""
+    scale = ss.viewer_scale
+    anchor = Vector(ss.controller_grip_location_get(context, actions.off_index(context))) + Vector((0.0, 0.0, 0.07 * scale))
+    return vr_ui.panel_matrix(anchor, Vector(ss.viewer_pose_location), scale)
+
+
 def panel_frame(context, ss):
     """(matrix, widgets, height) of the hand panel above the off-hand controller."""
-    scale = ss.viewer_scale
     widgets, height = menus.layout(context)
-    anchor = Vector(ss.controller_grip_location_get(context, actions.off_index(context))) + Vector((0.0, 0.0, 0.07 * scale))
-    matrix = vr_ui.panel_matrix(anchor, Vector(ss.viewer_pose_location), scale)
-    return matrix, widgets, height
+    return panel_matrix(context, ss), widgets, height
 
 
 def panel_frames(context, ss):
@@ -208,6 +212,27 @@ class DragGate:
             return pose.copy()
         self.inside = pose.copy()
         return None
+
+
+class SelectTarget:
+    """Off-hand trigger in Sculpt or Paint with no mesh to work on: select the touched one and get it ready
+    (Sculpt Mode for the native engine; Texture Paint once it can be painted)."""
+
+    def __init__(self, context, obj):
+        from . import paint
+        primitives.make_active(context, obj)
+        settings = context.scene.vr_sculpt
+        if settings.mode == 'PAINT':
+            paint.enter(context)
+        else:
+            menus.set_object_mode(context, obj, 'SCULPT' if settings.engine == 'NATIVE' else 'OBJECT')
+        self.changed = True
+
+    def update(self, context, pose, tip_pose, value):
+        pass
+
+    def finish(self, context):
+        pass
 
 
 class MoveObject:

@@ -707,7 +707,7 @@ class FakeContext:
 def harness():
     cls = operators.VRSCULPT_OT_stroke
     h = type("H", (), {k: cls.__dict__[k] for k in ("invoke", "modal", "_modal", "_apply", "_finish", "_abandon",
-                                                      "_start_modal")})()
+                                                      "_start_modal", "_push_undo", "bl_label")})()
     h.report = lambda kind, msg: print("    report:", kind, msg)
     return h
 

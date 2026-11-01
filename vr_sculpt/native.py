@@ -412,7 +412,10 @@ class NativeStroke:
                 if not self._can_stroke():
                     self.dropped += 1
                     return 0
-                bpy.ops.sculpt.brush_stroke(stroke=elems, mode='INVERT' if self.invert else 'NORMAL')
+                # undo=True: each dab is its own sculpt undo step, as Blender's dyntopo log needs (a dab
+                # without one leaves the log out of step with the undo stack, and undoing crashes).
+                bpy.ops.sculpt.brush_stroke('EXEC_DEFAULT', True, stroke=elems,
+                                            mode='INVERT' if self.invert else 'NORMAL')
         finally:
             v.restore()
         self.last_elem = elem

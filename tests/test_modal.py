@@ -113,7 +113,8 @@ class FakeContext:
 def harness():
     """An object with the operator's methods, without Blender's operator machinery."""
     cls = operators.VRSCULPT_OT_stroke
-    h = type("StrokeHarness", (), {k: cls.__dict__[k] for k in ("invoke", "modal", "_modal", "_apply", "_finish", "_abandon", "_start_modal")})()
+    names = ("invoke", "modal", "_modal", "_apply", "_finish", "_abandon", "_start_modal", "_push_undo", "bl_label")
+    h = type("StrokeHarness", (), {k: cls.__dict__[k] for k in names})()
     h.report = lambda kind, msg: print("    report:", kind, msg)
     return h
 
@@ -200,6 +201,12 @@ def main():
         r = op.modal(ctx, FakeEvent('TIMER'))
         check(r == {'FINISHED'} or r == {'CANCELLED'}, f"pair state handled ({r})")
         check(len(wm.timers) == 0, "...timer removed")
+
+        print("== undo steps")
+        # An UNDO operator holds back the undo steps of what it runs, and native dabs need theirs (dyntopo's
+        # log goes out of step with the undo stack without them, and undoing crashes Blender).
+        check('UNDO' not in operators.VRSCULPT_OT_stroke.bl_options,
+              "the trigger operator isn't UNDO; it pushes its own step (tests/undo_preview.py)")
     except Exception:
         traceback.print_exc()
         failures.append("exception")

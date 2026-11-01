@@ -9,8 +9,8 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
 from . import (actions, camera, controllers, desktop, drawing, gizmo, grid, hardsurface, hud, interactions, kit,
-               measure, menus, onion, operators, paint, paths, physics, presence, primitives, puppet, refs, retopo,
-               rig, shading, snapping, strokes, symmetry, uv, vr_ui)
+               lookdev, measure, menus, onion, operators, paint, paths, physics, presence, primitives, puppet, refs,
+               retopo, rig, shading, snapping, strokes, symmetry, uv, vr_ui)
 from . import pose as pose_mode  # "pose" is a controller pose below
 
 COLORS = hud.PYTHON_COLORS
@@ -299,10 +299,51 @@ def _draw_panel(context, ss, settings, xr):
         refs.draw_pin(context, frames[0][0])  # Right of the hand panel.
 
 
+_pick_preview = {}  # hand index -> (poses, what paint.pick_at found): both eyes draw the same frame
+
+
+def _draw_pick_cursors(context, ss, settings):
+    """Pick: where each hand would take a color (any mesh, a picture, the pinned one), a ring filled with it."""
+    scale = ss.viewer_scale
+    shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+    gpu.state.blend_set('ALPHA')
+    gpu.state.depth_test_set('NONE')
+    for idx in range(2):
+        pose = operators.controller_pose(ss.controller_aim_location_get(context, idx),
+                                         ss.controller_aim_rotation_get(context, idx))
+        tip = operators.brush_tip(pose, settings.tip_offset * scale)
+        main = idx == actions.main_index(context)
+        key = (tuple(pose.translation), tuple(pose.to_quaternion()), settings.paint_reach, main)
+        held = _pick_preview.get(idx)
+        if held is None or held[0] != key:
+            held = (key, paint.pick_at(context, settings, pose, tip, scale, main_hand=main))
+            _pick_preview[idx] = held
+        if held[1] is None:
+            continue
+        point, normal, rgb, on_pin = held[1]
+        radius = (paint.PIN_RING if on_pin else max(settings.paint_radius, paint.PICK_REACH) * 0.5) * scale
+        rot = normal.to_track_quat('Z', 'Y').to_matrix().to_4x4()
+        m = Matrix.Translation(point + normal * 0.0005 * scale) @ rot @ Matrix.Scale(radius, 4)
+        ring = [m @ Vector((math.cos(a), math.sin(a), 0.0)) for a in
+                (2 * math.pi * i / _SEGMENTS for i in range(_SEGMENTS))]
+        disc = [p for i in range(_SEGMENTS) for p in (m.translation, ring[i], ring[(i + 1) % _SEGMENTS])]
+        shader.uniform_float("color", (*lookdev.to_display(rgb), 1.0))
+        batch_for_shader(shader, 'TRIS', {"pos": disc}).draw(shader)
+        edge = [p for i in range(_SEGMENTS) for p in (ring[i], ring[(i + 1) % _SEGMENTS])]
+        if settings.paint_reach == 'SPRAY' and not on_pin:
+            edge += [pose.translation, point]
+        shader.uniform_float("color", (1.0, 1.0, 1.0, 0.95))
+        batch_for_shader(shader, 'LINES', {"pos": edge}).draw(shader)
+    gpu.state.blend_set('NONE')
+
+
 def _draw_paint_cursors(context, ss, settings):
     """Where the paint lands: a ring on the surface (Contact: near the tip; Spray: along the ray)."""
     obj = paint.target(context)
     if obj is None or not paint.ready(obj):
+        return
+    if settings.paint_tool == 'PICK':
+        _draw_pick_cursors(context, ss, settings)
         return
     scale = ss.viewer_scale
     radius = settings.paint_radius * scale

@@ -107,7 +107,7 @@ class FakeContext:
 
 def harness():
     cls = operators.VRSCULPT_OT_stroke
-    names = ("invoke", "modal", "_modal", "_apply", "_finish", "_start_modal")
+    names = ("invoke", "modal", "_modal", "_apply", "_finish", "_start_modal", "_push_undo", "bl_label")
     h = type("TriggerHarness", (), {k: cls.__dict__[k] for k in names})()
     h.report = lambda kind, msg: print("    report:", kind, msg)
     return h

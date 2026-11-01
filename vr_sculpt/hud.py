@@ -151,7 +151,7 @@ def card_content(settings, sculpt_brush):
         b = paint.brush(bpy_context())
         name = b.name if b else "No brush"
         if settings.paint_tool == 'PICK':
-            content = ("Pick Color", "Touch the surface to take its color (other hand: 2nd color)",
+            content = ("Pick Color", "Touch anything to take its color (other hand: 2nd color)",
                        paint.get_color(bpy_context()), "eyedropper")
         else:
             content = (name, paint.INFO.get(name, ""), paint.get_color(bpy_context()), "paint")

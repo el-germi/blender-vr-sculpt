@@ -95,6 +95,15 @@ def sculpt_target(context):
     return None
 
 
+def needs_target(context, settings):
+    """Sculpt and Paint work on the active mesh: with none, the off-hand trigger selects one."""
+    if settings.mode == 'SCULPT':
+        return sculpt_target(context) is None
+    if settings.mode == 'PAINT':
+        return paint.target(context) is None
+    return False
+
+
 def _tip_engaged(context, settings, tip, scale):
     """Whether the tip is at work on something, so a desktop screen behind it doesn't take the trigger."""
     if settings.mode == 'SCULPT':
@@ -106,9 +115,12 @@ def _tip_engaged(context, settings, tip, scale):
     if settings.mode == 'DRAW' and settings.draw_tool in {'EDIT', 'ERASE'}:
         return strokes.nearest(context, tip, drawing.EDIT_RADIUS * scale) is not None
     if settings.mode == 'PAINT':
+        if settings.paint_reach != 'CONTACT':
+            return False
+        if settings.paint_tool == 'PICK':
+            return paint.pick_near(context, tip, max(settings.paint_radius, paint.PICK_REACH) * scale) is not None
         obj = paint.target(context)
-        return obj is not None and settings.paint_reach == 'CONTACT' and \
-            paint.surface_near(obj, tip, settings.paint_radius * scale) is not None
+        return obj is not None and paint.surface_near(obj, tip, settings.paint_radius * scale) is not None
     if settings.mode == 'POSE':
         return pose_mode.engaged(context, tip, scale)
     if settings.mode == 'RIG':
@@ -139,6 +151,10 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         key = paths.nearest_key(context, tip_pose.translation, scale)
         if key is not None:
             return paths.KeyDrag(context, key[0], key[1], tip_pose.translation)
+    if off and needs_target(context, settings):
+        obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale)
+        if obj is not None and obj.type == 'MESH':
+            return interactions.SelectTarget(context, obj)
     if settings.mode == 'MODEL' and settings.uv_tool != 'NONE':
         handler = uv.pick(context, settings, off, scale)
         if handler is not None:
@@ -185,7 +201,9 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
     """Sculpt, model or use the hand panel with a VR controller while the trigger is held"""
     bl_idname = "vrsculpt.stroke"
     bl_label = "VR Trigger"
-    bl_options = {'UNDO', 'INTERNAL'}
+    # Not 'UNDO': while an UNDO operator runs, Blender holds back the undo steps of the operators it calls,
+    # and native dabs need theirs. A finished action pushes its own step instead (_push_undo).
+    bl_options = {'INTERNAL'}
 
     @classmethod
     def poll(cls, context):
@@ -341,6 +359,13 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         print(f"VR Sculpt {name}: undo or redo while the trigger was held; the action was dropped", flush=True)
         return {'CANCELLED'}
 
+    def _push_undo(self):
+        """One undo step for a finished action (native dabs have pushed their own)."""
+        try:
+            bpy.ops.ed.undo_push(message=self.bl_label)
+        except RuntimeError:
+            pass  # No undo stack (background).
+
     def _finish(self, context):
         if self.timer is not None:
             context.window_manager.event_timer_remove(self.timer)
@@ -352,7 +377,10 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
                   f"updates: {self.n_xr} xr events, {self.n_timer} timer polls", flush=True)
             for area in context.screen.areas if context.screen else ():
                 area.tag_redraw()
-            return {'FINISHED'} if self.handler.changed else {'CANCELLED'}
+            if not self.handler.changed:
+                return {'CANCELLED'}
+            self._push_undo()
+            return {'FINISHED'}
         if hasattr(self.stroke, "finish"):
             self.stroke.finish()
         if self.times:
@@ -378,7 +406,11 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
                   f"{self.n_timer} timer polls (is the tip within the brush radius of the mesh?)", flush=True)
         for area in context.screen.areas if context.screen else ():
             area.tag_redraw()
-        return {'FINISHED'} if self.times else {'CANCELLED'}
+        if not self.times:
+            return {'CANCELLED'}
+        if not isinstance(self.stroke, native.NativeStroke):
+            self._push_undo()
+        return {'FINISHED'}
 
 
 MODE_CYCLE = ('SCULPT', 'RETOPO', 'MODEL', 'DRAW', 'PAINT', 'RIG', 'POSE', 'PHYSICS', 'TOOLS')

@@ -304,8 +304,13 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   brushes (Hard, Soft, Airbrush, Blur, Smear, Erase), pressure-sensitive.
   **Contact** paints where the tip touches the surface, like a brush;
   **Spray** paints where the controller points, at any distance. The left
-  hand paints the second color. 8 swatches, hue / saturation / value
-  sliders, Swap, and **Pick color** (an eyedropper on the texture). B takes
+  hand paints the second color; with no mesh to paint, its trigger on one
+  selects it (Sculpt does the same). 8 swatches, hue / saturation / value
+  sliders, Swap, and **Pick color**, an eyedropper on anything you see: any
+  visible mesh (its texture, color attribute or material color), a reference
+  picture, or the one pinned beside the panel (point at it). Reach applies:
+  Contact picks at the tip, Spray along the ray. A ring filled with the color
+  under each hand shows what a press would take. B takes
   back the whole last stroke. **Set up for painting** gives a mesh UVs
   (Smart UV Project, if it has none) and a 1K / 2K / 4K image.
 - **Rig mode**: build an armature, bind a mesh to it and paint its weights.
@@ -388,7 +393,8 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     **Pin**, which shows it beside the hand panel in every mode. They're
     Blender's own image empties (Add > Image > Reference does the same on
     the desktop, and those show too); the headset doesn't draw empties, so
-    VR Sculpt draws them (Show in VR turns that off).
+    VR Sculpt draws them (Show in VR turns that off). Paint's **Pick color**
+    takes colors from them, the pinned one included.
 
   ![The Light page, the Look sheet, matcap and HDRI tiles](docs/lookdev_panels.png)
   ![Lights and their gizmos around a gold ball in Material Preview](docs/lookdev_scene.png)
@@ -530,7 +536,7 @@ offset and display options; **VR Extras** has the grid, navigation, hands
 | Input | Sculpt mode | Model mode | Draw mode | Paint mode | Rig mode | Pose mode | Physics mode | Tools mode |
 |---|---|---|---|---|---|---|---|---|
 | Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Bones: place the next joint; on a joint, carry on from it (click) or move it (drag). Weights: paint, or pick the touched bone | Grab a bone (FK / IK), or an object without a rig | Select an object (hold to move it) or a bone of the selected rig. Hands on: grab and throw a body or a spring bone, or Push / Pull: pull | Measure / aim the camera / Light: place a light, or grab one to move and aim it / Refs: place the chosen picture, or grab one |
-| Left trigger | Sculpt, inverted for Draw / Inflate (configurable) | Same as right | Same as right | Paint the second color | Bones: delete the touched bone; in empty space, end the chain. Weights: the opposite brush | Same as right | Same as right; Push / Pull: push | Same as right; Light: select a light (hold to move it), in empty space nothing; Refs: grab a picture |
+| Left trigger | Sculpt, inverted for Draw / Inflate (configurable). No mesh to sculpt: touch one to select it | Same as right | Same as right | Paint the second color. No mesh to paint: touch one to select it | Bones: delete the touched bone; in empty space, end the chain. Weights: the opposite brush | Same as right | Same as right; Push / Pull: push | Same as right; Light: select a light (hold to move it), in empty space nothing; Refs: grab a picture |
 | Right trigger, pointing at the hand panel | Press buttons, drag sliders, step steppers (hold to repeat) | Same | Same | Same | Same | Same | Same | Same |
 | Y (left) | Next mode (Sculpt, Retopo, Model, Draw, Paint, Rig, Pose, Physics, Tools) | Same | Same | Same | Same | Same | Same | Same |
 | B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Bones: end the chain. Weights: undo the last weight stroke | Switch FK / IK | Simulate / stop | Remove the last measurement / next camera / next light type / turn the picture to face you |
@@ -872,7 +878,17 @@ With Triggers" is on. The setting applies when the VR session starts.
   dab). The brush radius is converted from hand space to pixels with that
   view's projection. The previous dab is passed as a lead-in so Smear knows
   the direction. Each call is its own undo step in Blender, so the add-on
-  snapshots the image when a stroke starts; B restores it.
+  snapshots the image when a stroke starts; B restores it. **Pick** looks
+  for the nearest surface with a color among all visible solid meshes
+  (bounding boxes first) and the reference pictures, plus, for the main
+  hand, the pinned picture. On the mesh being painted it reads the paint
+  slot. On others it goes back from the material's Base Color to the first
+  Image Texture (through its UV Map node), Color Attribute, Attribute or RGB
+  node, else the socket's color. With no material it reads the active color
+  attribute. Pixels are nearest-sample, with see-through parts of pictures
+  skipped (alpha < 0.1). Colors come out scene linear, like the brush's. The
+  preview ring reads cached pixels (the last few images, plus the paint
+  image as of its last VR stroke); a press reads the image again.
 - **Floating desktop window** ([desktop.py](vr_sculpt/desktop.py),
   [winput.py](vr_sculpt/winput.py)): on Windows, a worker thread copies the
   window with GDI (`BitBlt` of the window DC, about 5 ms for 1920x1017,
@@ -1065,6 +1081,13 @@ Found with [tests/probe_lookdev.py](tests/probe_lookdev.py) and
 - The colors come from the unified paint settings even when Unified Color is
   off.
 - A material's paint-slot list is only refreshed by Texture Paint mode.
+- The brush colors are scene linear (`UnifiedPaintSettings.color` is a
+  `COLOR`, not `COLOR_GAMMA`): 0.5 paints 0.737 into an 8-bit sRGB image. So
+  a color picked from a byte image is converted from sRGB first, or it
+  paints back lighter.
+- `Object.ray_cast` and `closest_point_on_mesh` return face indices of the
+  evaluated mesh (modifiers applied): read UVs and colors from
+  `obj.evaluated_get(depsgraph).data`, not `obj.data`.
 
 ### What we learned about `sculpt.brush_stroke` (5.4.0 Alpha)
 
@@ -1089,6 +1112,16 @@ Found with the probes in [tests/](tests/):
 - **XR action operators get a temporary context**: don't keep `context`
   across modal events. Use `bpy.context` each time.
 - Python `Event` objects have no `timer` attribute.
+- **Undo**: while an operator with `'UNDO'` in `bl_options` runs, operators
+  it calls push no undo steps, and neither do `bpy.ops` calls made without
+  `undo=True`. A dab then has no step of its own, but with dyntopo it is
+  still written to the dyntopo log. An undo step pushed after such dabs
+  (the trigger operator's own) doesn't match the log, and undoing it crashes
+  Blender (`BM_log_undo`). Without dyntopo it undoes nothing. So each dab is
+  `sculpt.brush_stroke('EXEC_DEFAULT', True, ...)`, one undo step per dab,
+  and the trigger operator isn't `'UNDO'`: it pushes its own step for
+  everything but native strokes (`tests/undo_preview.py`). Pushing only every
+  fifth dab doesn't group them: it crashes the same way.
 
 ### What we learned about dynamic topology (5.4.0 Alpha)
 
@@ -1291,7 +1324,8 @@ the Sculpt page's dyntopo rows (`dyntopo_panels.png`); `probe_capture.py`
 checks region capture and offscreen camera rendering. `anim_preview.py`
 checks motion paths, key dragging, onion ghosts on a rig and playback.
 `undo_preview.py` runs real undos while a tape measure and a pose grab are
-held (that crashed Blender before the undo guard).
+held (that crashed Blender before the undo guard), and undoes a native
+dyntopo stroke dab by dab (that crashed Blender before each dab had its step).
 `hard_surface_preview.py` builds a beveled plate with a drilled hole, a
 slot, a union boss and a radial ring of bolts, and renders it with the VR
 overlay, the Model panel's pages and the Mark tool's edge highlights
@@ -1336,8 +1370,10 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
 ## Status and limits
 
 - Prototype. Only tested on Blender 5.4.0 Alpha with Meta Quest controllers.
-- The native engine's undo granularity in VR hasn't been checked, with or
-  without dyntopo.
+- Native sculpting makes one undo step per dab (Blender's dyntopo needs
+  them; see "What we learned about `sculpt.brush_stroke`"), so Ctrl+Z takes
+  back one dab and a stroke can be dozens of steps. Blender keeps 32 by
+  default: raise **Undo Steps** (Preferences > System) to undo whole strokes.
 - UVs through dyntopo: a session dyntopo starts on its own from the desktop
   (Sculpt Mode entered there) gets its corners back only if the mesh already
   has rest positions from an earlier VR session, and its shape keys aren't

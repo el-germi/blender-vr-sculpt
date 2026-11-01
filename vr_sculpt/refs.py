@@ -262,6 +262,13 @@ def toggle_pin(context, obj):
     settings.ref_pin = "" if obj is None or settings.ref_pin == obj.name else obj.name
 
 
+def pin_rect(obj):
+    """(x0, y0, x1, y1) of the pinned picture in hand panel space: right of the panel, PIN_WIDTH wide."""
+    ax, ay = aspect(obj.data)
+    x0 = vr_ui.WIDTH / 2 + 0.006
+    return x0, 0.0, x0 + PIN_WIDTH, PIN_WIDTH * ay / ax
+
+
 # --- trigger handlers --------------------------------------------------------------------
 
 class PlaceRef:
@@ -373,11 +380,8 @@ def draw_pin(context, panel_matrix):
         return
     import gpu
     from gpu_extras.batch import batch_for_shader
-    ax, ay = aspect(obj.data)
-    width = PIN_WIDTH
-    height = width * ay / ax
-    x0 = vr_ui.WIDTH / 2 + 0.006
-    y0 = 0.0
+    x0, y0, x1, y1 = pin_rect(obj)
+    width, height = x1 - x0, y1 - y0
     gpu.state.blend_set('ALPHA')
     gpu.state.depth_test_set('NONE')
     gpu.matrix.push()

@@ -1147,7 +1147,7 @@ def _paint_setup(context):
 def _paint_rows(context, settings):
     obj = paint.target(context)
     if obj is None:
-        return [_header(context, settings, "Paint"), [vr_ui.label("Select a mesh to paint", align='CENTER')]]
+        return [_header(context, settings, "Paint"), [vr_ui.label("Select a mesh: other-hand trigger on it", align='CENTER')]]
     if not paint.ready(obj):
         items = [(i.identifier, i.name) for i in settings.bl_rna.properties["paint_texture_size"].enum_items]
         return [
@@ -1174,7 +1174,7 @@ def _paint_rows(context, settings):
         vr_ui.icon_button("paint_swap", "swap", lambda: paint.swap_colors(context), "Swap colors"),
         vr_ui.toggle("paint_pick", "Pick", settings.paint_tool == 'PICK',
                      lambda: setattr(settings, "paint_tool", 'PAINT' if settings.paint_tool == 'PICK' else 'PICK'),
-                     icon="eyedropper", weight=2.2, tip="Pick a color from the surface"),
+                     icon="eyedropper", weight=2.2, tip="Pick a color from any mesh or picture"),
     ])
     out.append([vr_ui.swatch_button("pcolor_" + ident, rgb, (lambda rgb=rgb: paint.set_color(context, rgb)),
                                     all(abs(a - b) < 1e-3 for a, b in zip(color, rgb)))

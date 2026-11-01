@@ -1,7 +1,8 @@
 """Windowed check that a real undo while a VR trigger action is held doesn't crash: the trigger
 operator (driven with fake XR events) holds a tape measure, then a pose grab, while Blender undoes;
 the next event must drop the action instead of touching freed data. Also checks that trigger
-actions after the undo work, and that each finished trigger action is its own undo step.
+actions after the undo work, that each finished trigger action is its own undo step, and that a native
+dyntopo stroke undoes dab by dab without crashing.
 Writes tests/undo_preview_result.txt.
 
 blender --factory-startup test_scene.blend --python tests/undo_preview.py
@@ -136,6 +137,50 @@ def run():
         check(r == {'CANCELLED'} and not puppet.live(), "an undo mid-grab drops the grab")
         rig = bpy.data.objects["Puppet"]
         check(rig.pose.bones["Forearm.L"].rotation_quaternion.angle < 1e-6, "and the pose is the undone one")
+
+        # A native dyntopo stroke: each dab is its own undo step, and undoing them doesn't crash. (With the
+        # trigger operator's UNDO step on top of dabs that had none, Blender crashed in BM_log_undo.)
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, radius=0.3, location=(0.0, 2.0, 1.0),
+                                             calc_uvs=True)
+        ball = bpy.context.active_object
+        name, n0 = ball.name, len(ball.data.vertices)  # Undo frees Blender data: look it up again after.
+        settings = bpy.context.scene.vr_sculpt  # The undos above freed the old references.
+        wm.windows = bpy.context.window_manager.windows
+        settings.smooth_strokes = False  # The stabilizer is time-based; these updates come all at once.
+
+        class WinCtx(Ctx):
+            window = wm.windows[0]  # Native dabs aim the desktop view (an XR action's context has a window).
+        settings.engine = 'NATIVE'
+        menus.set_mode(bpy.context, 'SCULPT')
+        native.activate_brush(bpy.context, "Draw")
+        native.toggle_dyntopo(bpy.context)
+        sculpt = bpy.context.tool_settings.sculpt
+        sculpt.detail_type_method = 'CONSTANT'
+        sculpt.constant_detail_resolution = 100.0
+        check(ball.mode == 'SCULPT' and ball.use_dynamic_topology_sculpting, "native sculpting with dyntopo")
+        top = 1.3 + settings.tip_offset  # The tip (below the controller) on top of the ball.
+        op = harness()
+        ss.loc = Vector((-0.1, 2.0, top))
+        r = op.invoke(WinCtx(), FakeEvent('XR_ACTION', 'PRESS', FakeXR(ss.loc)))
+        check(r == {'RUNNING_MODAL'} and isinstance(op.stroke, native.NativeStroke), "a native stroke")
+        for i in range(1, 8):
+            ss.loc = Vector((-0.1 + 0.03 * i, 2.0, top))
+            op.last_update = 0.0
+            op.modal(WinCtx(), FakeEvent('TIMER'))
+        r = op.modal(WinCtx(), FakeEvent('XR_ACTION', 'RELEASE', FakeXR(ss.loc)))
+        dabs = op.stroke.dabs
+        check(r == {'FINISHED'} and dabs >= 4, f"it finishes ({dabs} dabs)")
+        for i in range(dabs):
+            undo("undo")
+            if bpy.context.active_object.mode != 'SCULPT':
+                break
+        ball = bpy.data.objects[name]
+        check(ball.mode == 'SCULPT' and ball.use_dynamic_topology_sculpting,
+              f"{dabs} undos take back the {dabs} dabs, one each, still in Sculpt Mode with dyntopo")
+        undo("undo")  # Dynamic topology enable, back to before the ball (added without a step of its own)
+        ball = bpy.data.objects.get(name)
+        check(ball is None or not (ball.mode == 'SCULPT' and ball.use_dynamic_topology_sculpting),
+              "one more leaves the dyntopo session: exactly one undo step per dab")
     except Exception:
         log(traceback.format_exc())
         failures.append("raised")
