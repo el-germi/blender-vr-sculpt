@@ -155,7 +155,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 
 | Feature | How |
 |---|---|
-| Brush (Draw, Smooth, Grab, Inflate / the 6 native ones) | segmented control (colored dots match the tip rings); **B** next brush |
+| Brush (Draw, Smooth, Grab, Inflate / the 6 native ones) | segmented control with Blender's brush previews (a colored underline matches the tip ring; the Python engine's four in a row show only the pictures, named on hover); **B** next brush |
 | Radius | slider; **right stick click** cycles 1-16 cm |
 | Strength | slider |
 | Symmetry X / Y / Z | toggles |
@@ -244,15 +244,16 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Feature | How |
 |---|---|
 | Set up a mesh (UVs + 1K / 2K / 4K image) | shown instead of the controls until the mesh is ready |
-| Brush (Hard, Soft, Air, Blur, Smear, Erase) | segmented control |
+| Paint on Color / Height (bump detail) | **Paint on** segmented control |
+| Brush (Hard, Soft, Airbrush, Blur, Smear, Erase) | segmented control of Blender's brush previews (named on hover) |
 | Color, 2nd color, swap | color chips and swap icon (press the 2nd chip to swap too) |
-| Pick color (eyedropper) | **Pick** toggle |
-| 8 swatches | swatch row |
-| Radius | slider; **right stick click** |
-| Strength | slider |
+| Pick color (eyedropper) | **Pick** toggle (Color only) |
+| 8 swatches; Height: 5 gray levels | swatch row |
+| Radius, Strength | one row of sliders; radius also **right stick click** |
+| Height's Depth (how far white raises) | slider (Height only) |
 | Undo stroke | header undo icon; **B** |
 | Contact / Spray | *More* > Reach |
-| Hue / saturation / value | *More* |
+| Hue / saturation / value; Height: Level | *More* |
 | Smooth on / off, Amount, Lag | *More* (the same setting as Draw's) |
 
 ### Rig

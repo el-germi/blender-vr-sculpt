@@ -31,6 +31,94 @@ NATIVE_BRUSHES = ("Draw", "Clay Strips", "Smooth", "Inflate/Deflate", "Crease Sh
 _ESSENTIALS = "brushes/essentials_brushes-mesh_sculpt.blend/Brush/"
 
 
+# --- brush thumbnails -----------------------------------------------------------------
+# The panel's brush buttons show the essentials brushes' own previews (the pictures in Blender's brush
+# asset shelf). They're read from the essentials .blend into a temporary Main, so nothing is linked into
+# the open file; one read per .blend (about 0.2 s), the first time a button needs one.
+
+ESSENTIALS_FILES = {'SCULPT': "essentials_brushes-mesh_sculpt.blend",
+                    'TEXTURE': "essentials_brushes-mesh_texture.blend"}
+ICON_PX = 128  # previews are 146 to 256 px; drawn about 15 mm wide, this is plenty
+_icon_pixels = {}  # (kind, name) -> (w, h, float32 RGBA, bottom row first) or None (no preview)
+_icons = {}  # (kind, name) -> BrushIcon
+
+
+def _read_previews(kind, names):
+    """Read the previews of names from kind's essentials .blend into _icon_pixels."""
+    import os
+    t0 = time.perf_counter()
+    path = os.path.join(bpy.utils.system_resource('DATAFILES', path="assets/brushes"), ESSENTIALS_FILES[kind])
+    for n in names:
+        _icon_pixels[(kind, n)] = None
+    try:
+        with bpy.data.temp_data() as temp:
+            with temp.libraries.load(path, link=True) as (src, dst):
+                dst.brushes = [n for n in names if n in src.brushes]
+            for b in dst.brushes:
+                p = b.preview if b is not None else None
+                if p is None or not p.image_size[0]:
+                    continue
+                w, h = p.image_size
+                px = np.empty(w * h * 4, np.float32)
+                p.image_pixels_float.foreach_get(px)
+                px = px.reshape(h, w, 4)
+                step = max(1, max(w, h) // ICON_PX)
+                px = np.ascontiguousarray(px[::step, ::step])
+                _icon_pixels[(kind, b.name)] = (px.shape[1], px.shape[0], px.ravel())
+    except Exception as ex:  # A build without the essentials, or a changed file: buttons just go without.
+        print("VR Sculpt: couldn't read the brush previews:", ex, flush=True)
+    print(f"VR Sculpt: brush previews from {ESSENTIALS_FILES[kind]} in {(time.perf_counter() - t0) * 1000:.0f} ms",
+          flush=True)
+
+
+class BrushIcon:
+    """An essentials brush's preview as a GPU texture, made on first draw. Hashable, so panels can compare
+    widgets that hold one (see vr_ui.Widget.image)."""
+
+    def __init__(self, kind, name, siblings):
+        self.key = (kind, name)
+        self.siblings = siblings  # read together: one pass over the .blend for the whole row
+        self.tex = None
+        self.missing = False
+
+    def __hash__(self):
+        return hash(self.key)
+
+    def __eq__(self, other):
+        return isinstance(other, BrushIcon) and other.key == self.key
+
+    def pixels(self):
+        if self.key not in _icon_pixels:
+            _read_previews(self.key[0], [n for n in self.siblings if (self.key[0], n) not in _icon_pixels])
+        return _icon_pixels.get(self.key)
+
+    def texture(self):
+        if self.tex is not None or self.missing:
+            return self.tex
+        px = self.pixels()
+        if px is None:
+            self.missing = True
+            return None
+        import gpu
+        w, h, data = px
+        self.tex = gpu.types.GPUTexture((w, h), format='RGBA8', data=gpu.types.Buffer('FLOAT', data.size, data))
+        return self.tex
+
+
+def brush_icon(name, kind='SCULPT', siblings=NATIVE_BRUSHES):
+    """The BrushIcon of essentials brush name (kind 'SCULPT' or 'TEXTURE'); siblings: the other brushes
+    shown with it, read in the same pass."""
+    icon = _icons.get((kind, name))
+    if icon is None:
+        icon = _icons[(kind, name)] = BrushIcon(kind, name, tuple(siblings) + (name,))
+    return icon
+
+
+def forget_icons():
+    """Drop the textures (they belong to the GPU context, which goes with unregister)."""
+    _icons.clear()
+
+
 def largest_view3d(window):
     best = None
     for area in window.screen.areas:

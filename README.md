@@ -313,6 +313,15 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   under each hand shows what a press would take. B takes
   back the whole last stroke. **Set up for painting** gives a mesh UVs
   (Smart UV Project, if it has none) and a 1K / 2K / 4K image.
+  **Paint on Height** paints surface detail instead of color: a grayscale
+  float image (Blender's Bump paint slot, made the first time, mid-gray) that
+  a Bump node turns into normals, so it shades like sculpted detail with no
+  geometry. White raises, the left hand's black digs, the gray levels flatten
+  to a height (mid-gray is flat again); **Depth** is how far white raises.
+  Bump only shows with the material, so Height switches a Solid VR view to
+  Material Preview. The channel is just the material's active paint slot, and
+  each channel keeps its own colors. A Cycles bake (Normal) turns it into a
+  normal map.
 - **Rig mode**: build an armature, bind a mesh to it and paint its weights.
   Choosing Rig takes the active mesh as the one to bind (Mesh on the panel
   changes it) and its rig, or the active armature, as the one to build; with
@@ -731,7 +740,11 @@ With Triggers" is on. The setting applies when the VR session starts.
   rule compares the left controller's -X axis (the back of a left hand) with
   the direction to the head, and the head's view direction with the hand, with
   hysteresis. A select opens a picker page (categories first, then a paged
-  grid).
+  grid). The brush buttons show Blender's own brush previews: `native.py`
+  reads them from the essentials brush .blends into `bpy.data.temp_data()`
+  (nothing is linked into the open file; about 50 ms per file, the first time
+  a page needs them) and makes 128 px textures on first draw. A row too
+  narrow for picture and name shows only the pictures, named on hover.
 - **Controller models** ([controllers.py](vr_sculpt/controllers.py)): drawn
   with `gpu` from a compact .npz per hand (mesh split into parts, texture,
   how each part moves). The bundled ones are Meta's Quest Pro controllers.
