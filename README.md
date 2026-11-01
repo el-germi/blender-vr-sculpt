@@ -305,7 +305,11 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   **Contact** paints where the tip touches the surface, like a brush;
   **Spray** paints where the controller points, at any distance. The left
   hand paints the second color. 8 swatches, hue / saturation / value
-  sliders, Swap, and **Pick color** (an eyedropper on the texture). B takes
+  sliders, Swap, and **Pick color**, an eyedropper on anything you see: any
+  visible mesh (its texture, color attribute or material color), a reference
+  picture, or the one pinned beside the panel (point at it). Reach applies:
+  Contact picks at the tip, Spray along the ray. A ring filled with the color
+  under each hand shows what a press would take. B takes
   back the whole last stroke. **Set up for painting** gives a mesh UVs
   (Smart UV Project, if it has none) and a 1K / 2K / 4K image.
 - **Rig mode**: build an armature, bind a mesh to it and paint its weights.
@@ -388,7 +392,8 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     **Pin**, which shows it beside the hand panel in every mode. They're
     Blender's own image empties (Add > Image > Reference does the same on
     the desktop, and those show too); the headset doesn't draw empties, so
-    VR Sculpt draws them (Show in VR turns that off).
+    VR Sculpt draws them (Show in VR turns that off). Paint's **Pick color**
+    takes colors from them, the pinned one included.
 
   ![The Light page, the Look sheet, matcap and HDRI tiles](docs/lookdev_panels.png)
   ![Lights and their gizmos around a gold ball in Material Preview](docs/lookdev_scene.png)
@@ -872,7 +877,17 @@ With Triggers" is on. The setting applies when the VR session starts.
   dab). The brush radius is converted from hand space to pixels with that
   view's projection. The previous dab is passed as a lead-in so Smear knows
   the direction. Each call is its own undo step in Blender, so the add-on
-  snapshots the image when a stroke starts; B restores it.
+  snapshots the image when a stroke starts; B restores it. **Pick** looks
+  for the nearest surface with a color among all visible solid meshes
+  (bounding boxes first) and the reference pictures, plus, for the main
+  hand, the pinned picture. On the mesh being painted it reads the paint
+  slot. On others it goes back from the material's Base Color to the first
+  Image Texture (through its UV Map node), Color Attribute, Attribute or RGB
+  node, else the socket's color. With no material it reads the active color
+  attribute. Pixels are nearest-sample, with see-through parts of pictures
+  skipped (alpha < 0.1). Colors come out scene linear, like the brush's. The
+  preview ring reads cached pixels (the last few images, plus the paint
+  image as of its last VR stroke); a press reads the image again.
 - **Floating desktop window** ([desktop.py](vr_sculpt/desktop.py),
   [winput.py](vr_sculpt/winput.py)): on Windows, a worker thread copies the
   window with GDI (`BitBlt` of the window DC, about 5 ms for 1920x1017,
@@ -1065,6 +1080,13 @@ Found with [tests/probe_lookdev.py](tests/probe_lookdev.py) and
 - The colors come from the unified paint settings even when Unified Color is
   off.
 - A material's paint-slot list is only refreshed by Texture Paint mode.
+- The brush colors are scene linear (`UnifiedPaintSettings.color` is a
+  `COLOR`, not `COLOR_GAMMA`): 0.5 paints 0.737 into an 8-bit sRGB image. So
+  a color picked from a byte image is converted from sRGB first, or it
+  paints back lighter.
+- `Object.ray_cast` and `closest_point_on_mesh` return face indices of the
+  evaluated mesh (modifiers applied): read UVs and colors from
+  `obj.evaluated_get(depsgraph).data`, not `obj.data`.
 
 ### What we learned about `sculpt.brush_stroke` (5.4.0 Alpha)
 
@@ -1089,7 +1111,6 @@ Found with the probes in [tests/](tests/):
 - **XR action operators get a temporary context**: don't keep `context`
   across modal events. Use `bpy.context` each time.
 - Python `Event` objects have no `timer` attribute.
-
 ### What we learned about dynamic topology (5.4.0 Alpha)
 
 Found with [tests/probe_dyntopo.py](tests/probe_dyntopo.py) and

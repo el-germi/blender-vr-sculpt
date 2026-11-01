@@ -106,9 +106,12 @@ def _tip_engaged(context, settings, tip, scale):
     if settings.mode == 'DRAW' and settings.draw_tool in {'EDIT', 'ERASE'}:
         return strokes.nearest(context, tip, drawing.EDIT_RADIUS * scale) is not None
     if settings.mode == 'PAINT':
+        if settings.paint_reach != 'CONTACT':
+            return False
+        if settings.paint_tool == 'PICK':
+            return paint.pick_near(context, tip, max(settings.paint_radius, paint.PICK_REACH) * scale) is not None
         obj = paint.target(context)
-        return obj is not None and settings.paint_reach == 'CONTACT' and \
-            paint.surface_near(obj, tip, settings.paint_radius * scale) is not None
+        return obj is not None and paint.surface_near(obj, tip, settings.paint_radius * scale) is not None
     if settings.mode == 'POSE':
         return pose_mode.engaged(context, tip, scale)
     if settings.mode == 'RIG':

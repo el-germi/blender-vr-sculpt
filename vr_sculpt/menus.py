@@ -1174,7 +1174,7 @@ def _paint_rows(context, settings):
         vr_ui.icon_button("paint_swap", "swap", lambda: paint.swap_colors(context), "Swap colors"),
         vr_ui.toggle("paint_pick", "Pick", settings.paint_tool == 'PICK',
                      lambda: setattr(settings, "paint_tool", 'PAINT' if settings.paint_tool == 'PICK' else 'PICK'),
-                     icon="eyedropper", weight=2.2, tip="Pick a color from the surface"),
+                     icon="eyedropper", weight=2.2, tip="Pick a color from any mesh or picture"),
     ])
     out.append([vr_ui.swatch_button("pcolor_" + ident, rgb, (lambda rgb=rgb: paint.set_color(context, rgb)),
                                     all(abs(a - b) < 1e-3 for a, b in zip(color, rgb)))

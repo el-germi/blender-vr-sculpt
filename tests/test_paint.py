@@ -1,4 +1,5 @@
-"""Background tests for Paint mode: colors, surface queries, UV sampling, stroke undo and the panel.
+"""Background tests for Paint mode: colors, surface queries, UV sampling, Pick from any mesh or picture,
+stroke undo and the panel.
 Painting itself needs a 3D view (see paint_preview.py).
 
 blender --background --factory-startup --python tests/test_paint.py
@@ -17,7 +18,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import vr_sculpt  # noqa: E402
-from vr_sculpt import actions, menus, operators, paint, vr_ui  # noqa: E402
+from vr_sculpt import actions, menus, operators, paint, refs, vr_ui  # noqa: E402
 
 failures = []
 
@@ -95,13 +96,167 @@ def test_surface():
     settings = ctx.scene.vr_sculpt
     settings.paint_reach, settings.paint_tool = 'SPRAY', 'PICK'
     aim = Matrix.LocRotScale(Vector((1.0, -3.0, 0.0)), Vector((0, 1, 0)).to_track_quat('-Z', 'Y'), None)
-    paint.PickColor(ctx, settings, obj, aim.translation, aim, 1.0)
+    paint.PickColor(ctx, settings, aim.translation, aim, 1.0)
     check(close(paint.get_color(ctx), rgb, 1e-3) and settings.paint_tool == 'PAINT', "Pick takes the color")
-    paint.PickColor(ctx, settings, obj, aim.translation, Matrix.LocRotScale(
+    paint.PickColor(ctx, settings, aim.translation, Matrix.LocRotScale(
         Vector((1.0, 3.0, 0.0)), Vector((0, -1, 0)).to_track_quat('-Z', 'Y'), None), 1.0, secondary=True)
     check(close(paint.get_color(ctx, True), rgb3, 1e-3), "left hand picks the second color")
     settings.paint_reach = 'CONTACT'
     return obj, img
+
+
+def _plane(name, x, y=0.0, mat=None):
+    """A 1 m plane at (x, y, 0) facing -Y (toward a hand in front of it). The active object stays: the mesh
+    being painted is read through its paint slot."""
+    active = bpy.context.view_layer.objects.active
+    bpy.ops.mesh.primitive_plane_add(size=1.0, location=(x, y, 0.0), rotation=(math.pi / 2, 0.0, 0.0))
+    obj = bpy.context.active_object
+    obj.name = name
+    if mat is not None:
+        obj.data.materials.append(mat)
+    bpy.context.view_layer.objects.active = active
+    return obj
+
+
+def _material(name):
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    return mat, mat.node_tree.nodes["Principled BSDF"], mat.node_tree
+
+
+def _image(name, cols):
+    """A 4x4 image whose columns are cols (RGBA each, as stored)."""
+    img = bpy.data.images.new(name, 4, 4, alpha=True)
+    px = np.zeros((4, 4, 4), dtype=np.float32)
+    for i, c in enumerate(cols):
+        px[:, i] = c
+    img.pixels.foreach_set(px.ravel())
+    return img
+
+
+def _srgb_to_linear(v):
+    return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+
+
+def test_pick_any(painted):
+    print("== Pick from any mesh and from pictures")
+    ctx = bpy.context
+    settings = ctx.scene.vr_sculpt
+    ctx.view_layer.objects.active = painted
+    front = Vector((0.0, -0.005, 0.0))
+
+    mat, bsdf, _tree = _material("PickFlat")
+    bsdf.inputs["Base Color"].default_value = (0.2, 0.4, 0.6, 1.0)
+    flat = _plane("PickFlat", 3.0, mat=mat)
+    h = paint.pick_near(ctx, Vector((3.0, 0.0, 0.0)) + front, 0.02)
+    check(h is not None and close(h[2], (0.2, 0.4, 0.6), 1e-4), f"another mesh: its material's color ({h and h[2]})")
+
+    mat, bsdf, tree = _material("PickAttr")
+    node = tree.nodes.new("ShaderNodeVertexColor")
+    node.layer_name = "Col"
+    tree.links.new(node.outputs["Color"], bsdf.inputs["Base Color"])
+    attr_plane = _plane("PickAttr", 5.0, mat=mat)
+    attr = attr_plane.data.color_attributes.new("Col", 'BYTE_COLOR', 'CORNER')
+    for d in attr.data:
+        d.color = (0.25, 0.5, 1.0, 1.0)
+    h = paint.pick_near(ctx, Vector((5.0, 0.0, 0.0)) + front, 0.02)
+    check(h is not None and close(h[2], (0.25, 0.5, 1.0), 0.01),
+          f"a color attribute behind the base color ({h and h[2]})")
+
+    bare = _plane("PickBare", 7.0)
+    attr = bare.data.color_attributes.new("Paint", 'FLOAT_COLOR', 'POINT')
+    bare.data.color_attributes.active_color = attr
+    for d in attr.data:
+        d.color = (1.0, 0.0, 0.0, 1.0)
+    h = paint.pick_near(ctx, Vector((7.0, 0.0, 0.0)) + front, 0.02)
+    check(h is not None and close(h[2], (1.0, 0.0, 0.0), 1e-4), "no material: its active color attribute")
+    _plane("PickNothing", 9.0)
+    check(paint.pick_near(ctx, Vector((9.0, 0.0, 0.0)) + front, 0.02) is None, "no material, no colors: nothing")
+
+    # An image through a UV Map node, on a subdivided mesh: ray casts land on the evaluated faces.
+    red, blue = (1.0, 0.0, 0.0, 1.0), (0.0, 0.0, 1.0, 1.0)
+    mat, bsdf, tree = _material("PickTex")
+    tex = tree.nodes.new("ShaderNodeTexImage")
+    tex.image = _image("PickTex", [red, red, blue, blue])
+    uvnode = tree.nodes.new("ShaderNodeUVMap")
+    uvnode.uv_map = "Flip"
+    tree.links.new(uvnode.outputs["UV"], tex.inputs["Vector"])
+    tree.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
+    tex_plane = _plane("PickTex", 11.0, mat=mat)
+    flip = tex_plane.data.uv_layers.new(name="Flip")
+    uvs = np.empty(len(tex_plane.data.loops) * 2)
+    tex_plane.data.uv_layers[0].data.foreach_get("uv", uvs)
+    uvs = uvs.reshape(-1, 2)
+    uvs[:, 0] = 1.0 - uvs[:, 0]
+    flip.data.foreach_set("uv", uvs.ravel())
+    tex_plane.modifiers.new("Subdiv", 'SUBSURF').levels = 2
+    ctx.view_layer.update()
+    left = Vector((10.75, 0.0, 0.0)) + front
+    near = paint.surface_near(tex_plane, left, 0.02)
+    check(near is not None and near[2] >= len(tex_plane.data.polygons),
+          f"the hit is on a face of the subdivided mesh ({near and near[2]})")
+    h = paint.pick_near(ctx, left, 0.02)
+    check(h is not None and close(h[2], (0.0, 0.0, 1.0), 1e-4),
+          f"the image, read through the Flip UV map ({h and h[2]})")
+
+    # A reference picture: left half gray (as stored, sRGB), right half see-through, a plane behind it.
+    gray, clear = (0.5, 0.5, 0.5, 1.0), (0.0, 0.0, 0.0, 0.0)
+    ref = bpy.data.objects.new("PickRef", None)
+    ref.empty_display_type = 'IMAGE'
+    ref.data = _image("PickRef", [gray, gray, clear, clear])
+    ref.empty_display_size = 1.0
+    ref.location = (13.0, 0.0, 0.0)
+    ref.rotation_euler = (math.pi / 2, 0.0, 0.0)
+    ctx.scene.collection.objects.link(ref)
+    mat, bsdf, _tree = _material("PickBehind")
+    bsdf.inputs["Base Color"].default_value = (0.0, 1.0, 0.0, 1.0)
+    _plane("PickBehind", 13.0, y=0.3, mat=mat)
+    ctx.view_layer.update()
+    linear = _srgb_to_linear(128 / 255)  # 0.5 in an 8-bit image
+    h = paint.pick_near(ctx, Vector((12.75, -0.005, 0.0)), 0.02)
+    check(h is not None and close(h[2], (linear,) * 3, 1e-3),
+          f"a reference picture, sRGB to linear as the brush keeps colors ({h and h[2]}, want {linear:.3f})")
+    h = paint.pick_along(ctx, Vector((12.75, -3.0, 0.0)), Vector((0.0, 1.0, 0.0)))
+    check(h is not None and abs(h[0].y) < 1e-4 and close(h[2], (linear,) * 3, 1e-3), "Spray stops at the picture")
+    h = paint.pick_along(ctx, Vector((13.25, -3.0, 0.0)), Vector((0.0, 1.0, 0.0)))
+    check(h is not None and abs(h[0].y - 0.3) < 1e-4 and close(h[2], (0.0, 1.0, 0.0), 1e-4),
+          "and looks through its see-through part to the plane behind")
+    settings.refs_show = False
+    h = paint.pick_along(ctx, Vector((12.75, -3.0, 0.0)), Vector((0.0, 1.0, 0.0)))
+    check(h is not None and abs(h[0].y - 0.3) < 1e-4, "hidden in the headset (Show refs off): not picked")
+    settings.refs_show = True
+
+    # The picture pinned beside the hand panel: pointed at with the ray.
+    panel = Matrix.Translation((0.0, 0.0, 5.0))
+    x0, y0, x1, y1 = refs.pin_rect(ref)
+    aim = Matrix.Translation((x0 + 0.25 * (x1 - x0), (y0 + y1) / 2, 5.3))  # aim poses point down -Z
+    h = paint.pin_color(ref, panel, aim)
+    check(h is not None and close(h[2], (linear,) * 3, 1e-3) and abs(h[0].z - 5.0) < 1e-6,
+          "pointing at the pinned picture takes its color")
+    check(paint.pin_color(ref, panel, Matrix.Translation((x0 - 0.01, (y0 + y1) / 2, 5.3))) is None,
+          "beside it: nothing")
+
+    # Pick with the trigger: Spray, either hand; Contact with the tip.
+    settings.paint_tool, settings.paint_reach = 'PICK', 'SPRAY'
+    spray = Matrix.LocRotScale(Vector((3.0, -2.0, 0.0)), Vector((0, 1, 0)).to_track_quat('-Z', 'Y'), None)
+    paint.PickColor(ctx, settings, spray.translation, spray, 1.0)
+    check(close(paint.get_color(ctx), (0.2, 0.4, 0.6), 1e-4) and settings.paint_tool == 'PAINT',
+          "Pick on another mesh sets the color, then back to painting")
+    settings.paint_tool, settings.paint_reach = 'PICK', 'CONTACT'
+    paint.PickColor(ctx, settings, Vector((5.0, -0.005, 0.0)), Matrix(), 1.0, secondary=True)
+    check(close(paint.get_color(ctx, True), (0.25, 0.5, 1.0), 0.01), "the other hand picks the second color")
+    check(operators._tip_engaged(ctx, settings, Vector((3.0, -0.005, 0.0)), 1.0),
+          "a tip on any pickable mesh keeps the trigger from a desktop screen")
+    flat.display_type = 'WIRE'
+    check(paint.pick_near(ctx, Vector((3.0, 0.0, 0.0)) + front, 0.02) is None, "wire meshes (cutters) are skipped")
+    settings.paint_tool = 'PICK'
+    paint.PickColor(ctx, settings, Vector((30.0, 0.0, 0.0)), Matrix(), 1.0)
+    check(settings.paint_tool == 'PICK', "a miss keeps Pick on")
+    settings.paint_tool = 'PAINT'
+    for name in ("PickFlat", "PickAttr", "PickBare", "PickNothing", "PickTex", "PickRef", "PickBehind"):
+        bpy.data.objects.remove(bpy.data.objects[name])
+    ctx.view_layer.update()
+    ctx.view_layer.objects.active = painted
 
 
 def test_undo(obj, img):
@@ -191,7 +346,8 @@ def test_panel(obj):
     ctx = bpy.context
     settings = ctx.scene.vr_sculpt
     for o in ctx.view_layer.objects:
-        o.select_set(False)
+        if o is not None:  # Removed objects linger until the view layer syncs.
+            o.select_set(False)
     ctx.view_layer.objects.active = obj
     settings.mode = 'PAINT'
     widgets, height = menus.layout(ctx)
@@ -249,7 +405,11 @@ def main():
     vr_sculpt.register()
     try:
         test_colors()
+        for o in list(bpy.data.objects):
+            bpy.data.objects.remove(o)
+        bpy.context.view_layer.update()
         obj, img = test_surface()
+        test_pick_any(obj)
         test_undo(obj, img)
         test_panel(obj)
     except Exception:

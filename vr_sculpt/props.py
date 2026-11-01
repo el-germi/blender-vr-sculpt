@@ -133,7 +133,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         name="Paint Tool",
         items=(
             ('PAINT', "Paint", "Paint with the active texture paint brush"),
-            ('PICK', "Pick Color", "Take the texture's color under the tip (then back to painting)"),
+            ('PICK', "Pick Color", "Take the color under the tip from any mesh or reference picture "
+                                    "(then back to painting)"),
         ),
         default='PAINT',
     )
