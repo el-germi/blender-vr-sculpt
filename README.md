@@ -1111,6 +1111,17 @@ Found with the probes in [tests/](tests/):
 - **XR action operators get a temporary context**: don't keep `context`
   across modal events. Use `bpy.context` each time.
 - Python `Event` objects have no `timer` attribute.
+- **Undo**: while an operator with `'UNDO'` in `bl_options` runs, operators
+  it calls push no undo steps, and neither do `bpy.ops` calls made without
+  `undo=True`. A dab then has no step of its own, but with dyntopo it is
+  still written to the dyntopo log. An undo step pushed after such dabs
+  (the trigger operator's own) doesn't match the log, and undoing it crashes
+  Blender (`BM_log_undo`). Without dyntopo it undoes nothing. So each dab is
+  `sculpt.brush_stroke('EXEC_DEFAULT', True, ...)`, one undo step per dab,
+  and the trigger operator isn't `'UNDO'`: it pushes its own step for
+  everything but native strokes (`tests/undo_preview.py`). Pushing only every
+  fifth dab doesn't group them: it crashes the same way.
+
 ### What we learned about dynamic topology (5.4.0 Alpha)
 
 Found with [tests/probe_dyntopo.py](tests/probe_dyntopo.py) and
@@ -1312,7 +1323,8 @@ the Sculpt page's dyntopo rows (`dyntopo_panels.png`); `probe_capture.py`
 checks region capture and offscreen camera rendering. `anim_preview.py`
 checks motion paths, key dragging, onion ghosts on a rig and playback.
 `undo_preview.py` runs real undos while a tape measure and a pose grab are
-held (that crashed Blender before the undo guard).
+held (that crashed Blender before the undo guard), and undoes a native
+dyntopo stroke dab by dab (that crashed Blender before each dab had its step).
 `hard_surface_preview.py` builds a beveled plate with a drilled hole, a
 slot, a union boss and a radial ring of bolts, and renders it with the VR
 overlay, the Model panel's pages and the Mark tool's edge highlights
@@ -1357,8 +1369,10 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
 ## Status and limits
 
 - Prototype. Only tested on Blender 5.4.0 Alpha with Meta Quest controllers.
-- The native engine's undo granularity in VR hasn't been checked, with or
-  without dyntopo.
+- Native sculpting makes one undo step per dab (Blender's dyntopo needs
+  them; see "What we learned about `sculpt.brush_stroke`"), so Ctrl+Z takes
+  back one dab and a stroke can be dozens of steps. Blender keeps 32 by
+  default: raise **Undo Steps** (Preferences > System) to undo whole strokes.
 - UVs through dyntopo: a session dyntopo starts on its own from the desktop
   (Sculpt Mode entered there) gets its corners back only if the mesh already
   has rest positions from an earlier VR session, and its shape keys aren't

@@ -188,7 +188,9 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
     """Sculpt, model or use the hand panel with a VR controller while the trigger is held"""
     bl_idname = "vrsculpt.stroke"
     bl_label = "VR Trigger"
-    bl_options = {'UNDO', 'INTERNAL'}
+    # Not 'UNDO': while an UNDO operator runs, Blender holds back the undo steps of the operators it calls,
+    # and native dabs need theirs. A finished action pushes its own step instead (_push_undo).
+    bl_options = {'INTERNAL'}
 
     @classmethod
     def poll(cls, context):
@@ -344,6 +346,13 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
         print(f"VR Sculpt {name}: undo or redo while the trigger was held; the action was dropped", flush=True)
         return {'CANCELLED'}
 
+    def _push_undo(self):
+        """One undo step for a finished action (native dabs have pushed their own)."""
+        try:
+            bpy.ops.ed.undo_push(message=self.bl_label)
+        except RuntimeError:
+            pass  # No undo stack (background).
+
     def _finish(self, context):
         if self.timer is not None:
             context.window_manager.event_timer_remove(self.timer)
@@ -355,7 +364,10 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
                   f"updates: {self.n_xr} xr events, {self.n_timer} timer polls", flush=True)
             for area in context.screen.areas if context.screen else ():
                 area.tag_redraw()
-            return {'FINISHED'} if self.handler.changed else {'CANCELLED'}
+            if not self.handler.changed:
+                return {'CANCELLED'}
+            self._push_undo()
+            return {'FINISHED'}
         if hasattr(self.stroke, "finish"):
             self.stroke.finish()
         if self.times:
@@ -381,7 +393,11 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
                   f"{self.n_timer} timer polls (is the tip within the brush radius of the mesh?)", flush=True)
         for area in context.screen.areas if context.screen else ():
             area.tag_redraw()
-        return {'FINISHED'} if self.times else {'CANCELLED'}
+        if not self.times:
+            return {'CANCELLED'}
+        if not isinstance(self.stroke, native.NativeStroke):
+            self._push_undo()
+        return {'FINISHED'}
 
 
 MODE_CYCLE = ('SCULPT', 'RETOPO', 'MODEL', 'DRAW', 'PAINT', 'RIG', 'POSE', 'PHYSICS', 'TOOLS')

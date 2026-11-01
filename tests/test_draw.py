@@ -270,6 +270,7 @@ def test_pencil():
     own = bpy.data.objects.new("Mine", bpy.data.grease_pencils.new("Mine"))
     scene.collection.objects.link(own)
     own.location = (1, 0, 0)
+    bpy.context.view_layer.update()  # Its matrix, as every frame has in VR.
     bpy.context.view_layer.objects.active = own
     hold(ctx, ss, 1, path((1, 0, 1), (1.2, 0, 1)))
     st = gp_strokes(own)
