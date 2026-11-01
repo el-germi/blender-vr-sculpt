@@ -290,12 +290,59 @@ def test_texture_refresh():
     bpy.data.meshes.remove(me)
 
 
+def test_undo_repair():
+    print("== a mesh undone into an earlier dyntopo session (rebuilt without any attributes)")
+    obj = build()
+    me = obj.data
+    seam_edge = max_uv_edge(me, "UVMap")
+    for name in ("Red", "Blue"):
+        me.materials.append(bpy.data.materials.new(name))
+    up = np.array([p.center.z > 0 for p in me.polygons], dtype=np.int32)
+    me.polygons.foreach_set("material_index", up)
+    heat = me.attributes.new("heat", 'FLOAT', 'POINT')
+    heat.data.foreach_set("value", positions(me)[:, 2])
+    check(rest.prepare(obj), "a session opens")
+    fake_session(obj)
+    # Blender's dyntopo undo log keeps positions, not attributes: no rest positions, UVs, material
+    # indices, point attributes or shape key offsets.
+    for a in [a.name for a in me.attributes if a.name in {rest.REST, "material_index", "heat", "Paint", "side"}
+              or a.name.startswith(rest.KEY_PREFIX)]:
+        me.attributes.remove(me.attributes[a])
+    while me.uv_layers:
+        me.uv_layers.remove(me.uv_layers[0])
+    co = positions(me)
+    check(rest.finish(obj), "finish() still closes it")
+    check(set(me.uv_layers.keys()) == {"UVMap", "Probe"} and max_uv_edge(me, "UVMap") < SMEARED,
+          f"UVs back from the source, matched by position (longest UV edge {max_uv_edge(me, 'UVMap'):.3f},"
+          f" was {seam_edge:.3f})")
+    mi = np.empty(len(me.polygons), dtype=np.int32)
+    me.polygons.foreach_get("material_index", mi)
+    centers = np.array([p.center.z for p in me.polygons])
+    clear = np.abs(centers) > 0.1
+    check("material_index" in me.attributes and (mi[clear] == (centers[clear] > 0)).all(),
+          "material indices back")
+    h = np.empty(len(me.vertices))
+    me.attributes["heat"].data.foreach_get("value", h)
+    # The faked sculpt scaled the sphere radially by up to 15%: heat (old z) is within that of z now.
+    check(np.abs(h - co[:, 2] / (1.0 + 0.15 * np.sin(h * 5.0))).max() < 0.05, "point attributes back")
+    keys = me.shape_keys
+    check(keys is not None and len(keys.key_blocks) == 2, "shape keys rebuilt")
+    if keys is not None:
+        k = np.empty(len(me.vertices) * 3)
+        keys.key_blocks["Smile"].data.foreach_get("co", k)
+        check(np.abs(k.reshape(-1, 3) - co).max() > 0.05, "with their offsets, not flat")
+    for m in list(me.materials):
+        bpy.data.materials.remove(m)
+    bpy.data.objects.remove(obj)
+    bpy.data.meshes.remove(me)
+
+
 def main():
     vr_sculpt.register()
     try:
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o)
-        for t in (test_restore, test_toggle_paths, test_texture_refresh):
+        for t in (test_restore, test_toggle_paths, test_texture_refresh, test_undo_repair):
             try:
                 t()
             except Exception:

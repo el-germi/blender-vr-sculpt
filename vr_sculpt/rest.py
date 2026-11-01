@@ -11,6 +11,9 @@ point attributes onto the vertices it makes (README, "What we learned about dyna
   data, the nearest corner for the rest. For UVs, where that triangle's UV is far from the one the
   face's own triangle (nearest its center) gives, the corner is across a seam and takes the face's
   (extrapolated), so faces don't smear across seams. The shape keys are rebuilt from the offsets, with their settings, action and drivers.
+- An undo back into an earlier dyntopo session brings a mesh Blender rebuilt from its log, without any
+  attributes (no rest positions, material indices, offsets). Then it's matched by where its vertices
+  are now, and the face and point layers it lost come from the source too.
 
 obj.data isn't written while dyntopo sculpts, so it still holds the pre-session mesh for the whole
 session: a session can be opened late (tick() opens one for dyntopo turned on from the desktop, if the
@@ -50,8 +53,22 @@ def _corner_layers(me):
             and a.data_type in _TYPES]
 
 
+def _lost_layers(me, src, domain):
+    """The source's layers on domain that me no longer has (Blender's dyntopo undo rebuilds the mesh from
+    its log without any: material indices, point attributes, our shape key offsets)."""
+    return [a for a in src.attributes
+            if a.domain == domain and a.data_type in _TYPES and a.name not in me.attributes
+            and a.name != "position" and (not a.name.startswith(".") or a.name.startswith(KEY_PREFIX))]
+
+
+def has_corners(me):
+    """UVs, corner colors or other corner layers: what dyntopo draws untextured until they're back."""
+    return bool(_corner_layers(me))
+
+
 def worth_keeping(me):
-    return bool(_corner_layers(me)) or me.shape_keys is not None
+    """Corner layers, shape keys or material indices: what dyntopo (or its undo) can take away."""
+    return has_corners(me) or me.shape_keys is not None or "material_index" in me.attributes
 
 
 def is_open(me):
@@ -236,11 +253,18 @@ def _weights(corners, p):
 
 
 def restore_corners(me, src):
-    """Give every corner layer of the source back to me, matched through the rest positions."""
+    """Give every corner layer of the source back to me, matched through the rest positions, and any
+    face or point layer me lost."""
     layers = _corner_layers(src)
-    rest = _vectors(me, REST)
-    if not layers or rest is None or not len(me.polygons):
+    lost_faces, lost_points = _lost_layers(me, src, 'FACE'), _lost_layers(me, src, 'POINT')
+    if not (layers or lost_faces or lost_points) or not len(me.polygons):
         return 0
+    rest = _vectors(me, REST)
+    if rest is None:
+        # Undone into an earlier dyntopo session: Blender rebuilt it from its log, without any attributes.
+        # Match by where the vertices are now (exact where nothing moved since, near elsewhere).
+        rest = _positions(me)
+        print(f"VR Sculpt rest: {me.name} came back from an undo without its attributes", flush=True)
     t0 = time.perf_counter()
     src.calc_loop_triangles()
     nt = len(src.loop_triangles)
@@ -330,11 +354,27 @@ def restore_corners(me, src):
                 me.attributes.remove(target)
             target = me.attributes.new(name, kind, 'CORNER')
         _write(target, out.astype(values.dtype))
+
+    # Lost face layers (material indices) from the face's own source polygon; lost point layers from the
+    # triangle nearest the vertex, like corners.
+    face_poly = tri_poly[face_tri]
+    for layer in lost_faces:
+        values = _read(layer, len(src.polygons))
+        _write(me.attributes.new(layer.name, layer.data_type, 'FACE'), values[face_poly])
+    vert_w = _weights(sco[tri_verts[vert_tri]], vert_at)
+    for layer in lost_points:
+        values = _read(layer, len(src.vertices))
+        if _TYPES[layer.data_type][2]:
+            out = np.einsum("ij,ijk->ik", vert_w, values.astype(np.float64)[tri_verts[vert_tri]])
+        else:
+            out = values[tri_verts[vert_tri][np.arange(nv), np.argmax(vert_w, axis=1)]]
+        _write(me.attributes.new(layer.name, layer.data_type, 'POINT'), out.astype(values.dtype))
     _copy_active(me, src)
     me.update()
-    print(f"VR Sculpt rest: {', '.join(a.name for a in layers)} back on {me.name} ({len(me.vertices)} vertices,"
+    names = [a.name for a in layers + lost_faces + lost_points if not a.name.startswith(".")]
+    print(f"VR Sculpt rest: {', '.join(names) or 'shape keys'} back on {me.name} ({len(me.vertices)} vertices,"
           f" {len(me.polygons)} faces) in {(time.perf_counter() - t0) * 1000:.0f} ms", flush=True)
-    return len(layers)
+    return len(layers) + len(lost_faces) + len(lost_points)
 
 
 def _copy_active(me, src):

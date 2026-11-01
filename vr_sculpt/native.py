@@ -196,9 +196,11 @@ def toggle_dyntopo(context):
 
 
 def texture_restorable(context):
-    """Whether refresh_texture() has anything to show: dyntopo on, and a rest.py session open."""
+    """Whether refresh_texture() has anything to show: dyntopo on, and a rest.py session open on a mesh
+    with corner layers (one with only materials has a session too)."""
     obj = _sculpt_object(context)
-    return obj is not None and obj.use_dynamic_topology_sculpting and rest.is_open(obj.data)
+    return (obj is not None and obj.use_dynamic_topology_sculpting and rest.is_open(obj.data)
+            and rest.has_corners(obj.data))
 
 
 def refresh_texture(context):
@@ -209,11 +211,18 @@ def refresh_texture(context):
         return _say("Nothing to show: dyntopo is off, or the mesh has no UVs")
     t0 = time.perf_counter()
 
+    # Undo steps for both switches and the restored mesh between them: an undo then stops on the whole
+    # mesh before going into the previous session (which Blender brings back bare: rest.restore_corners).
+    # Not in tests without a window: an undo mode switch with no area crashes Blender.
+    undo = not bpy.app.background
+
     def round_trip():
-        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.mode_set('EXEC_DEFAULT', undo, mode='OBJECT')
         rest.sync(obj)
         rest.prepare(obj)
-        bpy.ops.object.mode_set(mode='SCULPT')  # Blender turns dyntopo back on.
+        if undo:
+            bpy.ops.ed.undo_push(message="Show texture")
+        bpy.ops.object.mode_set('EXEC_DEFAULT', undo, mode='SCULPT')  # Blender turns dyntopo back on.
         rest.sync(obj)
         return {'FINISHED'}
 

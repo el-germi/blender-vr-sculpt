@@ -50,7 +50,7 @@ def check(cond, msg):
 def run():
     import vr_sculpt
     from test_modal import FakeEvent, FakeSessionState, FakeWM, FakeXR, harness
-    from vr_sculpt import live, measure, menus, native, operators, pose
+    from vr_sculpt import live, measure, menus, native, operators, pose, rest
     try:
         vr_sculpt.register()
         bpy.app.timers.unregister(live._tick)  # No VR session here.
@@ -181,6 +181,58 @@ def run():
         ball = bpy.data.objects.get(name)
         check(ball is None or not (ball.mode == 'SCULPT' and ball.use_dynamic_topology_sculpting),
               "one more leaves the dyntopo session: exactly one undo step per dab")
+
+        # Undo back across Show texture, into the session before it: Blender rebuilds that session's mesh
+        # from its dyntopo log with no UVs, material indices or rest positions; rest.py gives them back.
+        menus.set_mode(bpy.context, 'TOOLS')
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, radius=0.3, location=(0.0, 2.0, 1.0),
+                                             calc_uvs=True)
+        ball = bpy.context.active_object
+        name = ball.name
+        for m in ("Red", "Blue"):
+            ball.data.materials.append(bpy.data.materials.new(m))
+        for p in ball.data.polygons:
+            p.material_index = 1 if p.center.z > 0 else 0
+        settings = bpy.context.scene.vr_sculpt  # The undo above took the engine setting back too.
+        settings.smooth_strokes = False
+        settings.engine = 'NATIVE'
+        push("two materials")
+        menus.set_mode(bpy.context, 'SCULPT')
+        native.activate_brush(bpy.context, "Draw")
+        native.toggle_dyntopo(bpy.context)
+
+        def stroke():
+            op = harness()
+            ss.loc = Vector((-0.1, 2.0, top))
+            op.invoke(WinCtx(), FakeEvent('XR_ACTION', 'PRESS', FakeXR(ss.loc)))
+            for i in range(1, 6):
+                ss.loc = Vector((-0.1 + 0.03 * i, 2.0, top))
+                op.last_update = 0.0
+                op.modal(WinCtx(), FakeEvent('TIMER'))
+            op.modal(WinCtx(), FakeEvent('XR_ACTION', 'RELEASE', FakeXR(ss.loc)))
+            return op.stroke.dabs
+
+        stroke()
+        with ctx.temp_override(window=win, area=area, region=region):
+            native.refresh_texture(bpy.context)
+        dabs = stroke()
+        for i in range(dabs):
+            undo("undo")
+        for i in range(3):  # Show texture: leaving, the restored mesh, entering.
+            undo("undo")
+            ball = bpy.data.objects[name]
+            check(len(ball.data.uv_layers) and len({p.material_index for p in ball.data.polygons}) == 2,
+                  f"undo {i + 1} across Show texture lands on the whole mesh ({ball.mode})")
+        undo("undo")  # A dab of the session before.
+        ball = bpy.data.objects[name]
+        check(ball.mode == 'SCULPT' and ball.use_dynamic_topology_sculpting, "back in the earlier session")
+        menus.set_object_mode(bpy.context, ball, 'OBJECT')
+        ball = bpy.data.objects[name]
+        me = ball.data
+        check("UVMap" in me.uv_layers and {p.material_index for p in me.polygons} == {0, 1}
+              and not rest.is_open(me), "leaving Sculpt Mode: UVs and both materials back")
+        wrong = sum((p.material_index == 1) != (p.center.z > 0) for p in me.polygons if abs(p.center.z) > 0.03)
+        check(wrong == 0, f"each face on its own material ({wrong} wrong)")
     except Exception:
         log(traceback.format_exc())
         failures.append("raised")

@@ -595,7 +595,9 @@ With Triggers" is on. The setting applies when the VR session starts.
   from the basis. When the session ends, each corner is matched to the source
   in rest space and takes its value from the source triangle there
   (interpolated; the nearest corner for int data), and the shape keys are
-  rebuilt with their settings, action and drivers. A corner prefers its face's
+  rebuilt with their settings, action and drivers. A mesh with several
+  materials and nothing else gets a session too, for the undo case below.
+  A corner prefers its face's
   own source polygon, and where the nearest triangle's UV jumps by more than
   the face's UV size it is across a seam and extrapolates the face's own, so
   nothing smears across seams. Sessions close from the live timer however
@@ -609,7 +611,13 @@ With Triggers" is on. The setting applies when the VR session starts.
   and comes back in, where dyntopo draws the restored mesh textured: 0.12 s at
   10k vertices, 0.43 s at 33k. **Auto** does it 2 s after the last native
   dyntopo stroke, from the live timer, when no trigger is held. Each one adds
-  the two mode switches to the undo history.
+  three undo steps (leaving, the restored mesh, entering), so an undo stops
+  on the whole mesh before it reaches the session before, which Blender
+  brings back without its attributes (see "What we learned about dynamic
+  topology"). If an undo gets there anyway, the session's end matches the
+  mesh to the source by where its vertices are now (no rest positions left)
+  and also gives back the face and point layers it lost (material indices,
+  attributes, the shape key offsets).
 - **Retopo mode** ([retopo.py](vr_sculpt/retopo.py)): the reference's
   evaluated mesh goes into a BVH tree in world space (about 50 ms for 100k
   triangles), built when the mode starts and again only when the reference
@@ -1151,6 +1159,16 @@ Found with [tests/probe_dyntopo.py](tests/probe_dyntopo.py) and
   | **Shape keys** | resized but scrambled (most vertices lose their offset); rest.py keeps them for sessions started from VR. Blender also leaks a few bytes per session with shape keys |
   | Multires | the toggle turns on anyway; VR Sculpt refuses it |
 
+- **Undoing back into an earlier dyntopo session loses every attribute**
+  (stock Blender too, without the add-on: dyntopo turned off and on, or
+  Sculpt Mode left and entered, then undone into the dabs before; the add-on
+  side is in `tests/undo_preview.py`). Blender
+  rebuilds that session's mesh from its dyntopo log, which keeps positions
+  but no UV maps, material indices, point attributes or rest positions: every
+  face ends up on the first material slot. Undoing back past the first
+  session's start is fine (the mesh from before comes back whole). rest.py
+  repairs it from its source mesh when the session ends (below).
+
 ### What we learned about UV operators (5.4.0 Alpha)
 
 Found with [tests/probe_uv.py](tests/probe_uv.py):
@@ -1374,6 +1392,10 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   them; see "What we learned about `sculpt.brush_stroke`"), so Ctrl+Z takes
   back one dab and a stroke can be dozens of steps. Blender keeps 32 by
   default: raise **Undo Steps** (Preferences > System) to undo whole strokes.
+- Undoing into a dyntopo session before a Show texture / Auto refresh (or a
+  dyntopo off / on) brings back a mesh Blender rebuilt without attributes;
+  rest.py gives them back when the session ends, matched by position, so
+  near the strokes undone since the refresh they can be a little off.
 - UVs through dyntopo: a session dyntopo starts on its own from the desktop
   (Sculpt Mode entered there) gets its corners back only if the mesh already
   has rest positions from an earlier VR session, and its shape keys aren't
