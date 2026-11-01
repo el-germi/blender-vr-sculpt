@@ -18,6 +18,8 @@ from . import (actions, anim, camera, catalog, desktop, generic, hardsurface, hu
                physics, pose, presence, primitives, puppet, rest, retopo, rig, shading, strokes, symmetry, uv, vr_ui)
 from .props import BRUSH_ITEMS
 
+# The Python engine's brushes wear the pictures of Blender's brushes they work like.
+PYTHON_LOOKALIKES = {'DRAW': "Draw", 'SMOOTH': "Smooth", 'GRAB': "Grab", 'INFLATE': "Inflate/Deflate"}
 NATIVE_SHORT = {
     "Draw": "Draw", "Clay Strips": "Clay", "Smooth": "Smooth",
     "Inflate/Deflate": "Inflate", "Crease Sharp": "Crease", "Flatten/Contrast": "Flatten",
@@ -349,10 +351,11 @@ def _pin(context, settings):
                              "Unpin" if settings.panel_pin else "Keep open", active=settings.panel_pin)
 
 
-def _segments(prefix, group, items, current, choose, icons=None, dots=None):
-    """A segmented control: items (value, label); ids prefix + value."""
+def _segments(prefix, group, items, current, choose, icons=None, dots=None, images=None):
+    """A segmented control: items (value, label); ids prefix + value. images: {value: thumbnail}."""
     return [vr_ui.segment(prefix + str(value), text, (lambda v=value: choose(v)), current == value, group,
-                          icon=(icons or {}).get(value), dot=(dots or {}).get(value))
+                          icon=(icons or {}).get(value), dot=(dots or {}).get(value),
+                          image=(images or {}).get(value))
             for value, text in items]
 
 
@@ -376,12 +379,15 @@ def _sculpt_rows(context, settings):
         brush = native.sculpt_brush(context)
         current = brush.name if brush else ""
         cells = [vr_ui.segment("brush_" + n, NATIVE_SHORT[n], (lambda n=n: native.activate_brush(context, n)),
-                               n == current, "brushes_a" if i < 3 else "brushes_b", dot=hud.NATIVE_COLORS.get(n))
+                               n == current, "brushes_a" if i < 3 else "brushes_b", dot=hud.NATIVE_COLORS.get(n),
+                               image=native.brush_icon(n))
                  for i, n in enumerate(native.NATIVE_BRUSHES)]
         out += [cells[:3], cells[3:]]
     else:
         out.append(_segments("brush_", "brushes", [(i, n) for i, n, _d in BRUSH_ITEMS], settings.brush,
-                             lambda v: setattr(settings, "brush", v), dots=hud.PYTHON_COLORS))
+                             lambda v: setattr(settings, "brush", v), dots=hud.PYTHON_COLORS,
+                             images={i: native.brush_icon(n, siblings=PYTHON_LOOKALIKES.values())
+                                     for i, n in PYTHON_LOOKALIKES.items()}))
     out.append([vr_ui.slider("radius", "Radius", settings.radius, 0.005, 0.2,
                              lambda v: setattr(settings, "radius", v), fmt=_meters)])
     if not is_native:
@@ -1135,9 +1141,6 @@ def _smooth_rows(settings):
 
 # --- Paint ----------------------------------------------------------------------
 
-PAINT_SHORT = {"Airbrush": "Air"}  # Six brushes share a row.
-
-
 def _paint_setup(context):
     obj = paint.target(context)
     if obj is not None:
@@ -1161,40 +1164,63 @@ def _paint_rows(context, settings):
         ]
     b = paint.brush(context)
     current = b.name if b else ""
+    height = paint.channel(obj) == 'HEIGHT'
     out = [
         _header(context, settings, "Paint", obj.name, actions=[
             vr_ui.icon_button("paint_undo", "undo", lambda: paint.undo_last(context), "Undo stroke")]),
-        _segments("pbrush_", "pbrush", [(n, PAINT_SHORT.get(n, paint.SHORT[n])) for n in paint.BRUSHES], current,
-                  lambda n: paint.activate_brush(context, n)),
+        [vr_ui.label("Paint on", fixed=LABEL_W)] + _segments(
+            "pchannel_", "pchannel", paint.CHANNELS, 'HEIGHT' if height else 'COLOR',
+            lambda c: paint.set_channel(context, obj, c)),
+        _segments("pbrush_", "pbrush", [(n, paint.SHORT[n]) for n in paint.BRUSHES], current,
+                  lambda n: paint.activate_brush(context, n),
+                  images={n: native.brush_icon(n, 'TEXTURE', paint.BRUSHES) for n in paint.BRUSHES}),
     ]
     color = paint.get_color(context)
     out.append([
         vr_ui.swatch_button("paint_color1", color, lambda: None, active=True),
         vr_ui.swatch_button("paint_color2", paint.get_color(context, True), lambda: paint.swap_colors(context)),
         vr_ui.icon_button("paint_swap", "swap", lambda: paint.swap_colors(context), "Swap colors"),
+        vr_ui.label("White raises", weight=2.2) if height else
         vr_ui.toggle("paint_pick", "Pick", settings.paint_tool == 'PICK',
                      lambda: setattr(settings, "paint_tool", 'PAINT' if settings.paint_tool == 'PICK' else 'PICK'),
                      icon="eyedropper", weight=2.2, tip="Pick a color from any mesh or picture"),
     ])
-    out.append([vr_ui.swatch_button("pcolor_" + ident, rgb, (lambda rgb=rgb: paint.set_color(context, rgb)),
+    if height:
+        swatches = [("level_%d" % round(g * 100), (g, g, g)) for g in paint.HEIGHT_LEVELS]
+    else:
+        swatches = [("pcolor_" + ident, rgb) for ident, _name, rgb in strokes.PALETTE]
+    out.append([vr_ui.swatch_button(ident, rgb, (lambda rgb=rgb: paint.set_color(context, rgb)),
                                     all(abs(a - b) < 1e-3 for a, b in zip(color, rgb)))
-                for ident, _name, rgb in strokes.PALETTE])
-    out.append([vr_ui.slider("paint_radius", "Radius", settings.paint_radius, 0.002, 0.15,
-                             lambda x: setattr(settings, "paint_radius", x), fmt=_meters)])
+                for ident, rgb in swatches])
+    row = [vr_ui.slider("paint_radius", "Radius", settings.paint_radius, 0.002, 0.15,
+                        lambda x: setattr(settings, "paint_radius", x), fmt=_meters)]
     if b is not None:
-        out.append([vr_ui.slider("paint_strength", "Strength", b.strength, 0.0, 1.0,
-                                 lambda x: setattr(b, "strength", x), fmt=_percent)])
+        row.append(vr_ui.slider("paint_strength", "Strength", b.strength, 0.0, 1.0,
+                                lambda x: setattr(b, "strength", x), fmt=_percent))
+    out.append(row)
+    if height:
+        out.append([vr_ui.slider("paint_depth", "Depth", paint.get_depth(obj), 0.0005, 0.05,
+                                 lambda x: paint.set_depth(obj, x), fmt=_meters)])
     h, s, v = paint.get_hsv(context)
     more = [
         [vr_ui.label("Reach", fixed=LABEL_W)] + _segments(
             "reach_", "reach", (('contact', "Contact"), ('spray', "Spray")), settings.paint_reach.lower(),
             lambda r: setattr(settings, "paint_reach", r.upper()), icons={'contact': "contact", 'spray': "spray"}),
-        [vr_ui.slider("paint_hue", "Hue", h, 0.0, 1.0, lambda x: paint.set_hsv(context, h=x),
-                      fmt=lambda x: f"{x * 360:.0f}\u00b0")],
-        [vr_ui.slider("paint_sat", "Saturation", s, 0.0, 1.0, lambda x: paint.set_hsv(context, s=x), fmt=_percent)],
-        [vr_ui.slider("paint_val", "Value", v, 0.0, 1.0, lambda x: paint.set_hsv(context, v=x), fmt=_percent)],
-    ] + _smooth_rows(settings)
-    return _disclose('PAINT', out, more, "Spray, hue / sat / value, smoothing")
+    ]
+    if height:
+        more.append([vr_ui.slider("paint_level", "Level", v, 0.0, 1.0,
+                                  lambda x: paint.set_color(context, (x, x, x)), fmt=_percent)])
+    else:
+        more += [
+            [vr_ui.slider("paint_hue", "Hue", h, 0.0, 1.0, lambda x: paint.set_hsv(context, h=x),
+                          fmt=lambda x: f"{x * 360:.0f}\u00b0")],
+            [vr_ui.slider("paint_sat", "Saturation", s, 0.0, 1.0, lambda x: paint.set_hsv(context, s=x),
+                          fmt=_percent)],
+            [vr_ui.slider("paint_val", "Value", v, 0.0, 1.0, lambda x: paint.set_hsv(context, v=x), fmt=_percent)],
+        ]
+    more += _smooth_rows(settings)
+    return _disclose('PAINT', out, more,
+                     "Spray, level, smoothing" if height else "Spray, hue / sat / value, smoothing")
 
 
 # --- Rig ------------------------------------------------------------------------

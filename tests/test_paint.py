@@ -18,7 +18,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import vr_sculpt  # noqa: E402
-from vr_sculpt import actions, menus, operators, paint, primitives, refs, vr_ui  # noqa: E402
+from vr_sculpt import actions, lookdev, menus, operators, paint, primitives, refs, vr_ui  # noqa: E402
 
 failures = []
 
@@ -394,6 +394,9 @@ def test_panel(obj):
     check(need <= ids, f"with More: reach and HSV (missing {sorted(need - ids)})")
     check(height < 0.32, f"panel height {height:.3f} m")
     check(sum(1 for w in widgets if w.id.startswith("pcolor_")) == 8, "8 color swatches")
+    check(all(w.image is not None for w in widgets if w.id.startswith("pbrush_"))
+          and vr_ui._groups(widgets)["pbrush"][6],
+          "six brushes in a row: thumbnails only")
     vr_ui.find(widgets, "pcolor_YELLOW").on_press()
     check(close(paint.get_color(ctx), next(rgb for i, _n, rgb in vr_sculpt.strokes.PALETTE if i == 'YELLOW')),
           "a swatch sets the color")
@@ -434,6 +437,58 @@ def test_panel(obj):
     check(not operators._tip_engaged(ctx, settings, Vector((1.0, -0.9, 0.0)), 1.0), "away from it, it isn't")
 
 
+def test_height():
+    print("== height channel")
+    ctx = bpy.context
+    settings = ctx.scene.vr_sculpt
+    obj, img = make_paintable()
+    ctx.view_layer.objects.active = obj
+    settings.mode = 'PAINT'
+    menus.set_object_mode(ctx, obj, 'TEXTURE_PAINT')
+    paint.set_color(ctx, (0.9, 0.2, 0.1))
+    paint.set_color(ctx, (0.1, 0.2, 0.9), True)
+    check(paint.channel(obj) == 'COLOR' and paint.paint_image(obj) == img, "it starts on Color")
+    lookdev.shading(ctx).type = 'SOLID'
+    check(paint.set_channel(ctx, obj, 'HEIGHT'), "Height")
+    h = paint.height_image(obj)
+    check(h is not None and h.is_float and h.colorspace_settings.name == "Non-Color" and tuple(h.size) == (64, 64),
+          "makes a float, Non-Color height image as big as the color one")
+    check(h is not None and paint.paint_image(obj) == h and paint.channel(obj) == 'HEIGHT', "and paints on it")
+    check(h is not None and abs(h.pixels[0] - 0.5) < 1e-6, "mid-gray, so it can raise and dig")
+    bsdf = obj.active_material.node_tree.nodes["Principled BSDF"]
+    check(bsdf.inputs["Normal"].is_linked and bsdf.inputs["Normal"].links[0].from_node == paint.bump_node(obj),
+          "through a Bump node into the normal")
+    check(close(paint.get_color(ctx), (1, 1, 1)) and close(paint.get_color(ctx, True), (0, 0, 0)),
+          "white raises, the other hand's black digs")
+    check(lookdev.shading(ctx).type == 'MATERIAL', "the VR view shows materials, where bump shows")
+    check(abs(paint.get_depth(obj) - paint.DEPTH) < 1e-6, f"depth {paint.get_depth(obj)}")
+
+    menus.set_more('PAINT', True)
+    widgets, height = menus.layout(ctx)
+    ids = {w.id for w in widgets}
+    need = {"pchannel_COLOR", "pchannel_HEIGHT", "paint_depth", "level_50", "paint_level", "paint_strength"}
+    check(need <= ids and not {"paint_pick", "paint_hue", "pcolor_YELLOW"} & ids,
+          f"Height page: depth and gray levels, no Pick or hues (missing {sorted(need - ids)})")
+    check(height < 0.32, f"panel height {height:.3f} m")
+    vr_ui.find(widgets, "paint_depth").on_change(0.01)
+    check(abs(paint.get_depth(obj) - 0.01) < 1e-6, "Depth sets the bump's distance")
+    vr_ui.find(widgets, "level_50").on_press()
+    check(close(paint.get_color(ctx), (0.5, 0.5, 0.5)), "mid-gray level, to flatten back")
+    menus.set_more('PAINT', False)
+
+    vr_ui.find(widgets, "pchannel_COLOR").on_press()
+    check(paint.channel(obj) == 'COLOR' and paint.paint_image(obj) == img, "back to Color")
+    check(close(paint.get_color(ctx), (0.9, 0.2, 0.1)) and close(paint.get_color(ctx, True), (0.1, 0.2, 0.9)),
+          "with its own colors")
+    n = len(bpy.data.images)
+    check(paint.set_channel(ctx, obj, 'HEIGHT') and len(bpy.data.images) == n and paint.paint_image(obj) == h,
+          "Height again reuses its image")
+    check(close(paint.get_color(ctx), (0.5, 0.5, 0.5)), "and its level")
+    paint.set_channel(ctx, obj, 'COLOR')
+    menus.set_object_mode(ctx, obj, 'OBJECT')
+    bpy.data.objects.remove(obj)
+
+
 def main():
     vr_sculpt.register()
     try:
@@ -446,6 +501,7 @@ def main():
         test_select_target(obj)
         test_undo(obj, img)
         test_panel(obj)
+        test_height()
     except Exception:
         traceback.print_exc()
         failures.append("raised")

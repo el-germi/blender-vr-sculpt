@@ -160,6 +160,18 @@ def run():
             stroke(bpy.context, settings, cube, wall)
             painted = int(np.any(np.abs(pixels(cimg)[..., :3] - cbase[..., :3]) > 0.05, axis=2).sum())
             check(painted > 2000, f"a stroke across the middle of a 1 m face paints ({painted} texels)")
+            # Height: the same stroke raises the float height image; the other hand digs.
+            check(paint.set_channel(bpy.context, cube, 'HEIGHT'), "Height channel")
+            himg = paint.paint_image(cube)
+            stroke(bpy.context, settings, cube, wall)
+            raised = int((pixels(himg)[..., 0] > 0.55).sum())
+            check(raised > 2000 and cimg.pixels[0] == cbase.ravel()[0],
+                  f"a stroke raises the height ({raised} texels)")
+            low = [pose_at(p.translation + Vector((0.0, 0.0, -0.2)), -n) for p in wall]
+            stroke(bpy.context, settings, cube, low, left=True)
+            dug = int((pixels(himg)[..., 0] < 0.45).sum())
+            check(dug > 2000, f"the other hand digs ({dug} texels)")
+            check(paint.set_channel(bpy.context, cube, 'COLOR'), "back to Color")
             menus.set_object_mode(bpy.context, cube, 'OBJECT')
             cube.hide_set(True)
 

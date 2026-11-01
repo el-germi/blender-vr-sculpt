@@ -10,7 +10,8 @@ Widget kinds:
   button     text and/or icon; active = filled with the accent
   toggle     on/off, icon and text; on = tinted, with an accent bar
   segment    one option of a segmented control (segments sharing a group draw as one track
-             with a pill that slides to the chosen option)
+             with a pill that slides to the chosen option); with an image, a thumbnail before the
+             text, or alone when the group's texts don't fit beside them
   icon       an icon-only button (header actions, transport)
   select     label, value and a chevron; opens a picker sheet
   slider     value inside the track, dragged with the ray
@@ -93,7 +94,7 @@ class Widget:
         self.on_change = on_change
         self.icon, self.group, self.dot, self.tip = icon, group, dot, tip or text
         self.weight, self.fixed, self.align = weight, fixed, align
-        self.image = image  # tile: anything with texture() -> GPUTexture or None, hashable
+        self.image = image  # tile, segment: anything with texture() -> GPUTexture or None, hashable
         self.icon_only = False  # drawn without its text (set while drawing)
         self.rect = (0.0, 0.0, 0.0, 0.0)
 
@@ -157,9 +158,10 @@ def toggle(id, text, on, on_press, icon=None, weight=1.0, tip=""):
     return Widget('toggle', id, text, active=on, on_press=on_press, icon=icon, weight=weight, tip=tip)
 
 
-def segment(id, text, on_press, active, group, icon=None, dot=None, weight=1.0):
+def segment(id, text, on_press, active, group, icon=None, dot=None, weight=1.0, image=None):
+    """image: a thumbnail before the text (a brush's preview); dot then underlines it."""
     return Widget('segment', id, text, active=active, on_press=on_press, group=group, icon=icon, dot=dot,
-                  weight=weight)
+                  weight=weight, image=image)
 
 
 def icon_button(id, icon, on_press, tip="", active=False, danger=False):
@@ -187,6 +189,14 @@ def swatch_button(id, rgb, on_press, active=False):
 def tile(id, text, on_press, image=None, icon=None, active=False):
     """A thumbnail over a name. image: see Widget.image; without one, icon is drawn instead."""
     return Widget('tile', id, text, active=active, on_press=on_press, image=image, icon=icon)
+
+
+IMAGE_GAP = 0.0018  # between a segment's thumbnail and its text
+
+
+def segment_image_side(rect):
+    """How big a segment's thumbnail is: a square filling the row's height but for a margin."""
+    return rect[3] - rect[1] - 0.006
 
 
 def tile_image_rect(rect):
@@ -434,6 +444,18 @@ def _content(cv, texts, w, rect, color, icon_color=None, size=TEXT_H, align='CEN
     if w.icon and not text:
         gfx.icon(cv, w.icon, (x0 + x1) / 2, mid, ic, icon_color or color)
         return
+    if w.image is not None:
+        # A thumbnail (drawn later, from the rect returned) before the text; the dot underlines it.
+        side = segment_image_side(rect)
+        text = "" if w.icon_only else text
+        tw = min(hud.text_width(text, size), room - side - IMAGE_GAP) if text else 0.0
+        sx = (x0 + x1) / 2 - (side + (IMAGE_GAP + tw if text else 0.0)) / 2
+        if w.dot is not None:
+            cv.rect(sx + side * 0.2, mid - side / 2 - 0.0012, sx + side * 0.8, mid - side / 2 - 0.0004,
+                    (*w.dot[:3], 1.0), 0.0004)
+        if text:
+            texts.add(sx + side + IMAGE_GAP, mid, text, tw + 1e-6, color, 'LEFT', size)
+        return (sx, mid - side / 2, sx + side, mid + side / 2)
     if not w.icon:
         if w.dot is not None:
             tw = min(hud.text_width(text, size), room - 0.006)
@@ -450,24 +472,29 @@ def _content(cv, texts, w, rect, color, icon_color=None, size=TEXT_H, align='CEN
 
 
 def _groups(widgets):
-    """Segment groups: {group: [x0, y0, x1, y1, active rect or None, text height]}. The text height is
-    the one every option fits at, so a control's labels stay one size."""
+    """Segment groups: {group: [x0, y0, x1, y1, active rect or None, text height, pictures only]}. The text
+    height is the one every option fits at, so a control's labels stay one size; with thumbnails, when one
+    doesn't fit even at the smallest size, the whole group shows only its thumbnails."""
     out = {}
     for w in widgets:
         if w.kind != 'segment':
             continue
         x0, y0, x1, y1 = w.rect
-        room = x1 - x0 - 0.004 - (0.0055 if w.dot is not None else 0.0)
+        room = x1 - x0 - 0.004 - (0.0055 if w.dot is not None and w.image is None else 0.0)
+        if w.image is not None:
+            room -= segment_image_side(w.rect) + IMAGE_GAP
         tw = hud.text_width(w.text, TEXT_H) if w.text else 0.0
         if w.icon and tw and ICON * 0.9 + 0.0025 + tw <= room:
             room -= ICON * 0.9 + 0.0025
         size = TEXT_H * min(room / tw, 1.0) if tw else TEXT_H
+        pictures_only = w.image is not None and tw * MIN_TEXT_SCALE > room
         g = out.get(w.group)
         if g is None:
-            out[w.group] = [x0, y0, x1, y1, w.rect if w.active else None, size]
+            out[w.group] = [x0, y0, x1, y1, w.rect if w.active else None, size, pictures_only]
         else:
             g[0], g[1], g[2], g[3] = min(g[0], x0), min(g[1], y0), max(g[2], x1), max(g[3], y1)
             g[5] = min(g[5], size)
+            g[6] = g[6] or pictures_only
             if w.active:
                 g[4] = w.rect
     for g in out.values():
@@ -572,7 +599,7 @@ def _build(widgets, height, width, hover_id, pressed_id, pointer):
         cv.rect(x0 + 0.0006, 0.0006, x1 - 0.0006, height - 0.0006, COL_CARD, CARD_CORNER - 0.0006)
 
     groups = _groups(widgets)
-    for group, (gx0, gy0, gx1, gy1, active_rect, _size) in groups.items():
+    for group, (gx0, gy0, gx1, gy1, active_rect, _size, _only) in groups.items():
         cv.rect(gx0, gy0, gx1, gy1, COL_TRACK, CORNER)
         shown = ease((group, "on"), 1.0 if active_rect else 0.0, SLIDE, now, 0.0)
         if active_rect is not None:
@@ -598,6 +625,8 @@ def _build(widgets, height, width, hover_id, pressed_id, pointer):
              hud.text_width(w.text, TEXT_H) + ICON + 0.0065 > w.rect[2] - w.rect[0]}
     for w in widgets:
         w.icon_only = bool(w.icon and w.text and w.kind in {'button', 'toggle'} and round(w.rect[3], 5) in tight)
+        if w.kind == 'segment' and w.image is not None:
+            w.icon_only = groups[w.group][6]
 
     for w in widgets:
         hot = bool(w.id) and w.id == hover_id
@@ -607,7 +636,9 @@ def _build(widgets, height, width, hover_id, pressed_id, pointer):
         q = max(_pulse_level(w.id, now), 1.0 if held else 0.0) if w.id else 0.0
         rect = _inset(w.rect, 0.0007 * q)
         size = groups[w.group][5] if w.kind == 'segment' else TEXT_H
-        _draw_widget(cv, texts, w, rect, h, q, now, pointer if hot else None, size)
+        picture = _draw_widget(cv, texts, w, rect, h, q, now, pointer if hot else None, size)
+        if picture is not None:
+            images.append([w.image, picture, None])
         if w.kind == 'tile' and w.image is not None:
             images.append([w.image, tile_image_rect(rect), None])
         cut_short = w.kind == 'tile' and hud.text_width(w.text, SMALL_H) > w.rect[2] - w.rect[0] - 0.003
@@ -633,6 +664,7 @@ def _tooltip(cv, texts, w, h, panel_x0):
 
 
 def _draw_widget(cv, texts, w, rect, h, q, now, pointer, size=TEXT_H):
+    """Add w's look to the canvas and texts; returns where its segment thumbnail goes, if it has one."""
     x0, y0, x1, y1 = rect
     mid = (y0 + y1) / 2
     k = w.kind
@@ -662,7 +694,7 @@ def _draw_widget(cv, texts, w, rect, h, q, now, pointer, size=TEXT_H):
         if q > 0:
             cv.rect(x0 + 0.0016, y0 + 0.0016, x1 - 0.0016, y1 - 0.0016, (1.0, 1.0, 1.0, 0.2 * q), CORNER - 0.001)
         color = WHITE if w.active else gfx.mix(COL_DIM, COL_TEXT, h)
-        _content(cv, texts, w, rect, color, size=size)
+        return _content(cv, texts, w, rect, color, size=size)
     elif k in {'button', 'toggle'}:
         on = ease((w.id, "on"), 1.0 if w.active else 0.0, SLIDE, now, 0.0) if k == 'toggle' else 0.0
         if k == 'button' and w.active:

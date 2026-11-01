@@ -973,6 +973,37 @@ def test_status():
     s.mode = 'SCULPT'
 
 
+def test_brush_icons():
+    print("== brush buttons wear the essentials brushes' previews")
+    from vr_sculpt import native
+    ctx = bpy.context
+    settings = ctx.scene.vr_sculpt
+    settings.mode = 'SCULPT'
+    for engine, groups, only in (('PYTHON', ("brushes",), True), ('NATIVE', ("brushes_a", "brushes_b"), False)):
+        settings.engine = engine
+        widgets, _ = menus.layout(ctx)
+        segs = [w for w in widgets if w.kind == 'segment' and w.id.startswith("brush_")]
+        check(segs and all(w.image is not None for w in segs), f"{engine}: every brush button has a thumbnail")
+        info = vr_ui._groups(widgets)
+        check(all(info[g][6] == only for g in groups),
+              f"{engine}: " + ("four in a row: thumbnails only (names as tooltips)" if only else "names beside them"))
+        images = vr_ui._build(widgets, _, vr_ui.WIDTH, segs[0].id, None, None)[4]
+        check(len(images) == len(segs) and all(segs[0].rect[0] <= r[0] < r[2] <= segs[0].rect[2] for i, r, _b in
+                                                images[:1]), f"{engine}: the panel builds with a thumbnail each")
+    settings.engine = 'PYTHON'
+    native._icon_pixels.clear()
+    before = ({b.name for b in bpy.data.brushes}, len(bpy.data.libraries))
+    px = native.brush_icon("Draw").pixels()
+    check(px is not None and max(px[0], px[1]) <= native.ICON_PX and px[2].size == px[0] * px[1] * 4
+          and 0.02 < float(px[2].mean()) < 0.98, f"read from the essentials .blend ({px and px[:2]})")
+    check(native.brush_icon("Smooth").pixels() is not None, "the others come in the same pass")
+    check(({b.name for b in bpy.data.brushes}, len(bpy.data.libraries)) == before,
+          "nothing is linked into the open file")
+    check(native.brush_icon("Draw") == native.brush_icon("Draw") and native.brush_icon("Draw") != native.brush_icon(
+        "Draw", 'TEXTURE'), "icons compare by brush, so panel batches are reused")
+    check(native.brush_icon("No Such Brush").pixels() is None, "a brush the file doesn't have just goes without")
+
+
 def test_dyntopo():
     print("== dyntopo (native engine)")
     from vr_sculpt import native
@@ -1127,7 +1158,7 @@ def main():
             bpy.data.objects.remove(o)
         for t in (test_disclosure, test_sheets, test_layout, test_stepper_and_detents, test_presence, test_held_dim, test_ghost,
                   test_controller_hints, test_controller_inputs, test_controller_fetched, test_controller_visibility,
-                  test_status,
+                  test_status, test_brush_icons,
                   test_dyntopo, test_left_handed):
             try:
                 t()

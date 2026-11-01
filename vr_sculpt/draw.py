@@ -9,8 +9,8 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
 from . import (actions, camera, controllers, desktop, drawing, gizmo, grid, hardsurface, hud, interactions, kit,
-               lookdev, measure, menus, onion, operators, paint, paths, physics, presence, primitives, puppet, refs,
-               retopo, rig, shading, snapping, strokes, symmetry, uv, vr_ui)
+               lookdev, measure, menus, native, onion, operators, paint, paths, physics, presence, primitives, puppet,
+               refs, retopo, rig, shading, snapping, strokes, symmetry, uv, vr_ui)
 from . import pose as pose_mode  # "pose" is a controller pose below
 
 COLORS = hud.PYTHON_COLORS
@@ -449,3 +449,5 @@ def unregister():
     _handles.clear()
     hud.clear()
     controllers.clear()
+    native.forget_icons()
+    vr_ui._built.clear()  # Its panels hold brush icons' textures.

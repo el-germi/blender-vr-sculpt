@@ -186,6 +186,113 @@ def enter(context):
         menus.set_object_mode(context, obj, 'OBJECT')
 
 
+# --- channels ----------------------------------------------------------------
+# Color paints the base color image. Height paints a grayscale float image that a Bump node turns into
+# normals: detail that shades like sculpted detail with no geometry (only in Material Preview and Rendered).
+# The channel is just which of the material's paint slots is active, so it stays plain Blender data.
+# Height starts mid-gray: white raises, black digs, mid-gray is flat again.
+
+CHANNELS = (('COLOR', "Color"), ('HEIGHT', "Height"))
+HEIGHT_COLORS = ((1.0, 1.0, 1.0), (0.0, 0.0, 0.0))  # raise; the other hand digs
+HEIGHT_LEVELS = (0.0, 0.25, 0.5, 0.75, 1.0)  # swatches: painting a level flattens to it
+DEPTH = 0.005  # meters a full white raises over mid-gray, at first
+
+
+def _bump_link(mat):
+    """The link from an image into a Bump node's Height, or None."""
+    if mat is None or mat.node_tree is None:
+        return None
+    return next((l for l in mat.node_tree.links if l.to_node.type == 'BUMP' and l.to_socket.name == "Height"
+                 and l.from_node.type == 'TEX_IMAGE' and l.from_node.image is not None), None)
+
+
+def height_image(obj):
+    link = _bump_link(obj.active_material) if obj is not None and obj.type == 'MESH' else None
+    return link.from_node.image if link is not None else None
+
+
+def bump_node(obj):
+    link = _bump_link(obj.active_material) if obj is not None and obj.type == 'MESH' else None
+    return link.to_node if link is not None else None
+
+
+def channel(obj):
+    img = height_image(obj)
+    return 'HEIGHT' if img is not None and paint_image(obj) == img else 'COLOR'
+
+
+def get_depth(obj):
+    bump = bump_node(obj)
+    return bump.inputs["Distance"].default_value * bump.inputs["Strength"].default_value if bump else DEPTH
+
+
+def set_depth(obj, value):
+    bump = bump_node(obj)
+    if bump is not None:
+        bump.inputs["Strength"].default_value = 1.0
+        bump.inputs["Distance"].default_value = value
+
+
+def _stash_colors(context, name):
+    context.scene.vr_sculpt["vrs_paint_" + name.lower()] = [*get_color(context), *get_color(context, True)]
+
+
+def _unstash_colors(context, name):
+    saved = context.scene.vr_sculpt.get("vrs_paint_" + name.lower())
+    if saved is not None and len(saved) == 6:
+        pair = (tuple(saved[:3]), tuple(saved[3:]))
+    elif name == 'HEIGHT':
+        pair = HEIGHT_COLORS
+    else:
+        return
+    set_color(context, pair[0])
+    set_color(context, pair[1], True)
+
+
+def set_channel(context, obj, name):
+    """Paint the Color or the Height of obj (ready for painting): make the Height slot the first time,
+    make that slot active, and swap in that channel's colors. Returns whether it's painting name now."""
+    from . import menus
+    old = channel(obj)
+    if name == old:
+        return True
+    menus.set_object_mode(context, obj, 'TEXTURE_PAINT')  # It refreshes the material's slot list.
+    ip = image_paint(context)
+    if ip.mode != 'MATERIAL':
+        ip.mode = 'MATERIAL'
+    mat = obj.active_material
+    height = height_image(obj)
+    if name == 'HEIGHT' and height is None:
+        color = paint_image(obj)
+        w, h = tuple(color.size) if color is not None else (2048, 2048)
+        try:
+            ov = _override(context)
+        except RuntimeError:
+            ov = {}  # No window (tests): the operator runs without one.
+        with context.temp_override(**ov, active_object=obj, object=obj):
+            bpy.ops.paint.add_texture_paint_slot(type='BUMP', slot_type='IMAGE', name=obj.name + " Height",
+                                                 color=(0.5, 0.5, 0.5, 1.0), width=w, height=h, alpha=False,
+                                                 float=True)
+        set_depth(obj, DEPTH)
+    else:
+        images = list(mat.texture_paint_images)
+        want = height if name == 'HEIGHT' else next((i for i in images if i != height), None)
+        if want is None or want not in images:
+            return False
+        mat.paint_active_slot = images.index(want)
+    if channel(obj) != name:
+        return False
+    _stash_colors(context, old)
+    _unstash_colors(context, name)
+    context.scene.vr_sculpt.paint_tool = 'PAINT'  # Pick takes colors, which mean nothing on heights.
+    if name == 'HEIGHT':
+        from . import lookdev
+        sh = lookdev.shading(context)
+        if sh.type in {'SOLID', 'WIREFRAME'}:
+            sh.type = 'MATERIAL'  # Bump only shows with the material.
+    return True
+
+
 # --- surface queries -------------------------------------------------------
 
 def surface_near(obj, point, radius):
@@ -848,7 +955,7 @@ def pick(context, settings, hand_left, pose, tip_pose, scale, value=1.0):
         return None
     if obj.mode != 'TEXTURE_PAINT':
         enter(context)
-    if settings.paint_tool == 'PICK':
+    if settings.paint_tool == 'PICK' and channel(obj) == 'COLOR':
         return PickColor(context, settings, tip_pose.translation, pose, scale, secondary=hand_left)
     stroke = PaintStroke(context, settings, obj, hand_left, scale)
     stroke.update(context, pose, tip_pose, value)
