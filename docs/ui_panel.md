@@ -268,6 +268,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Mesh to bind and paint | **Mesh** select > picker (the mesh active when you chose Rig, to start) |
 | Bones / Weights | segmented control (Edit Mode / Object Mode on the rig) |
 | Place joints, carry on from a joint, move a joint | trigger in the scene (Bones) |
+| Select a bone, move it | trigger on the bone (drag to move it, with the bones connected to it) |
 | End the chain | **End chain**; **B**; left trigger in empty space |
 | Delete a bone | left trigger on it; **Delete bone** (the active one) |
 | Remove the last bone made | header undo icon |

@@ -333,7 +333,8 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     your hand in between. Press a joint to carry on from it: the next bone
     is that bone's child, so an inner joint branches (a root's head starts a
     new root beside it). Drag a joint to move it, with the bones connected
-    there. **End chain** (or B, or the left trigger in empty space) ends the
+    there; press a bone's body to make it the active bone, and drag it to
+    move the whole bone (the bones connected at its ends follow). **End chain** (or B, or the left trigger in empty space) ends the
     chain; the left trigger on a bone deletes it (its children are kept),
     as does **Delete bone** for the active one; the header's undo removes
     the last bone made. **Mirror X** (More) builds
@@ -544,7 +545,7 @@ offset and display options; **VR Extras** has the grid, navigation, hands
 
 | Input | Sculpt mode | Model mode | Draw mode | Paint mode | Rig mode | Pose mode | Physics mode | Tools mode |
 |---|---|---|---|---|---|---|---|---|
-| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Bones: place the next joint; on a joint, carry on from it (click) or move it (drag). Weights: paint, or pick the touched bone | Grab a bone (FK / IK), or an object without a rig | Select an object (hold to move it) or a bone of the selected rig. Hands on: grab and throw a body or a spring bone, or Push / Pull: pull | Measure / aim the camera / Light: place a light, or grab one to move and aim it / Refs: place the chosen picture, or grab one |
+| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Bones: place the next joint; on a joint, carry on from it (click) or move it (drag); on a bone, select it (click) or move it (drag). Weights: paint, or pick the touched bone | Grab a bone (FK / IK), or an object without a rig | Select an object (hold to move it) or a bone of the selected rig. Hands on: grab and throw a body or a spring bone, or Push / Pull: pull | Measure / aim the camera / Light: place a light, or grab one to move and aim it / Refs: place the chosen picture, or grab one |
 | Left trigger | Sculpt, inverted for Draw / Inflate (configurable). No mesh to sculpt: touch one to select it | Same as right | Same as right | Paint the second color. No mesh to paint: touch one to select it | Bones: delete the touched bone; in empty space, end the chain. Weights: the opposite brush | Same as right | Same as right; Push / Pull: push | Same as right; Light: select a light (hold to move it), in empty space nothing; Refs: grab a picture |
 | Right trigger, pointing at the hand panel | Press buttons, drag sliders, step steppers (hold to repeat) | Same | Same | Same | Same | Same | Same | Same |
 | Y (left) | Next mode (Sculpt, Retopo, Model, Draw, Paint, Rig, Pose, Physics, Tools) | Same | Same | Same | Same | Same | Same | Same |
