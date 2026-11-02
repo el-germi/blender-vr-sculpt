@@ -6,9 +6,11 @@ chain sets its root; every press after that ends a bone at the tip and the next 
 from there, connected (hold and move to place the joint precisely). Between presses a rubber band
 runs from the last joint to the tip. A press on a joint carries on from it: on a bone's tail the next
 bone is its child, so pressing an inner joint branches; on a root's head, a new root starts beside
-it. Dragging a joint moves it, and the bones connected to it follow. The off-hand trigger deletes the
-bone it touches, or ends the chain in empty space; End chain (B) ends it too. Mirror X builds and
-edits .L / .R pairs across the rig's X = 0 plane (a new rig's origin is its first joint).
+it. Dragging a joint moves it, and the bones connected to it follow; a press on a bone's body makes
+it the active bone, and dragging it moves the whole bone (with the bones connected at its ends). The
+off-hand trigger deletes the bone it touches, or ends the chain in empty space; End chain (B) ends it
+too. Mirror X builds and edits .L / .R pairs across the rig's X = 0 plane (a new rig's origin is its
+first joint).
 
 Bind: an Armature modifier and automatic weights (Blender's bone heat, object.parent_set with
 type 'ARMATURE_AUTO').
@@ -366,6 +368,22 @@ def move_joint(arm, name, end, point, mirror=False):
             _move(other, end, _mirrored(point))
 
 
+def move_bone(arm, name, head, tail, mirror=False):
+    """Move bone `name` to head / tail (rig space), with the bones connected at either end; with mirror,
+    its .L / .R counterpart the mirrored way."""
+    eb = arm.data.edit_bones
+    bone = eb.get(name)
+    if bone is None:
+        return
+    _move(bone, 'HEAD', head)
+    _move(bone, 'TAIL', tail)
+    if mirror:
+        other = eb.get(bpy.utils.flip_name(name))
+        if other is not None and other != bone:
+            _move(other, 'HEAD', _mirrored(head))
+            _move(other, 'TAIL', _mirrored(tail))
+
+
 def delete_bone(arm, name, mirror=False):
     """Delete a bone (and, with mirror, its counterpart); its children go to its parent."""
     eb = arm.data.edit_bones
@@ -530,9 +548,44 @@ class JointPress:
             _state["anchor"] = (arm.name, bone.head.copy(), None, False)
 
 
+class MoveBone:
+    """Trigger on a bone's body (Bones tool): it becomes the active bone, and a drag moves the whole
+    bone, with the bones connected at its ends."""
+
+    def __init__(self, context, settings, arm, name, tip_pose):
+        from . import interactions
+        self.rig_name, self.name = arm.name, name
+        self.mirror = settings.rig_mirror
+        bone = arm.data.edit_bones[name]
+        mw = arm.matrix_world
+        self.head, self.tail = mw @ bone.head, mw @ bone.tail  # world, at the press
+        self.start = tip_pose.translation.copy()
+        self.gate = interactions.DragGate(context, tip_pose)
+        set_active_bone(arm, name)
+        self.changed = False
+
+    def update(self, context, pose, tip_pose, value):
+        if not self.gate.open:
+            base = self.gate.update(tip_pose)
+            if base is None:
+                return
+            self.start = base.translation.copy()  # From where the hand was when the move began.
+        arm = _rig_named(self.rig_name)
+        if arm is None or arm.mode != 'EDIT':
+            return
+        # Snap the head; the tail keeps its offset from it.
+        head = grid.snap_if(context.scene.vr_sculpt, self.head + (tip_pose.translation - self.start))
+        mwi = arm.matrix_world.inverted_safe()
+        move_bone(arm, self.name, mwi @ head, mwi @ (head + (self.tail - self.head)), self.mirror)
+        self.changed = True
+
+    def finish(self, context):
+        pass
+
+
 class SelectBone:
-    """Trigger on a bone (Bones tool), or near one and away from the surface (Weights tool): it becomes
-    the active bone (the one Delete deletes and Weights paints)."""
+    """Trigger near a bone and away from the surface (Weights tool): it becomes the active bone (the one
+    Weights paints)."""
 
     def __init__(self, context, arm, name):
         set_active_bone(arm, name)
@@ -895,7 +948,7 @@ def pick(context, settings, left, tip_pose, scale):
     if joint is not None:
         return JointPress(context, settings, arm, joint[0], joint[1], joint[2], tip_pose)
     if bone is not None:
-        return SelectBone(context, arm, bone[0])
+        return MoveBone(context, settings, arm, bone[0], tip_pose)
     return PlaceBone(context, settings, arm, tip, scale)
 
 

@@ -147,6 +147,26 @@ def test_branch_and_move(arm, first, second, third):
     h.finish(ctx)
     check(near(world(arm, edit_bones(arm)[first].head), (0, 0, 0.45), 1e-3), "the root's head moves")
     h.update(ctx, at((0.0, 0.0, 0.5)), at((0.0, 0.0, 0.5)), 1.0)  # Put it back for the weights.
+    # A bone's body: a click selects it, a drag moves the whole bone and the joints it shares.
+    eb = edit_bones(arm)
+    head, tail = world(arm, eb[second].head), world(arm, eb[second].tail)
+    mid = (head + tail) / 2
+    h = press(ctx, mid)
+    check(isinstance(h, rig.MoveBone) and not h.changed and rig.active_bone(arm) == second,
+          "a click on a bone selects it")
+    check(near(world(arm, edit_bones(arm)[second].head), head), "and doesn't move it")
+    d = Vector((0.0, 0.1, 0.0))
+    h = press(ctx, mid, path=[mid, mid + d / 2, mid + d])
+    eb = edit_bones(arm)
+    check(h.changed and near(world(arm, eb[second].head), head + d, 1e-3) and
+          near(world(arm, eb[second].tail), tail + d, 1e-3), "dragging a bone moves both its ends")
+    check(near(world(arm, eb[first].tail), head + d, 1e-3) and near(world(arm, eb[branch].head), head + d, 1e-3) and
+          near(world(arm, eb[third].head), tail + d, 1e-3), "the connected parent, sibling and child follow")
+    check(near(world(arm, eb[first].head), (0, 0, 0.5), 1e-3), "the parent's head stays")
+    rig.move_bone(arm, second, eb[second].head - arm.matrix_world.to_3x3().inverted() @ d,
+                  eb[second].tail - arm.matrix_world.to_3x3().inverted() @ d)  # Put it back.
+    eb = edit_bones(arm)
+    check(near(world(arm, eb[second].head), head) and near(world(arm, eb[third].head), tail), "and back")
     return branch
 
 
