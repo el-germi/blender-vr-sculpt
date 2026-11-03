@@ -4,6 +4,12 @@ Sculpt, model, draw, paint, rig, pose, puppeteer, simulate and measure with VR c
 extension, no Blender fork. Built and tested on **Blender 5.4.0 Alpha** with a
 Meta Quest over OpenXR.
 
+> [!WARNING]
+> **Starting a VR session with Cycles as the render engine can crash the whole
+> computer** (not just Blender). We are still investigating the cause. Until
+> then, switch the scene's render engine to EEVEE or Workbench before you press
+> **Start VR Session**, and save your work first.
+
 ![Brush rings at the controller tips, native engine](docs/overlay_native.png)
 
 ## Install
