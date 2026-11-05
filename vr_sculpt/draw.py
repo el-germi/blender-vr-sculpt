@@ -110,7 +110,7 @@ def _draw_cursors(context, ss, settings, xr):
             settings.draw_tool, settings.draw_width / 2) * scale
     else:
         marking = model and (settings.model_mark != 'NONE' or settings.uv_tool == 'SEAM')
-        fixing = model and settings.uv_tool == 'FIX'
+        fixing = model and settings.uv_tool in {'FIX', 'TIDY'}
         island = model and settings.uv_tool in uv.ISLAND_TOOLS
         # Stamping, the ring is half the spacing: stamps go where neighboring rings would touch.
         stamping = model and settings.kit_stamp and kit.is_key(settings.primitive)
@@ -150,7 +150,7 @@ def _draw_cursors(context, ss, settings, xr):
                     _draw_bounds(shader, near, (*color, 0.9))
         elif model and settings.uv_tool != 'NONE':
             color = uv.TOOL_STYLES[settings.uv_tool][0]
-            if idx == off and settings.uv_tool == 'SEAM':
+            if idx == off and settings.uv_tool in {'SEAM', 'TIDY'}:
                 color = (1.0, 1.0, 1.0)  # The off hand clears.
         elif model and settings.model_mark != 'NONE':
             color = {'HARD': shading.HARD_COLOR, 'SOFT': shading.SOFT_COLOR}.get(settings.model_mark, (1.0, 1.0, 1.0))

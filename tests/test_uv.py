@@ -397,10 +397,14 @@ def test_islands():
           "one color per island")
     check(not np.allclose(before[labels == low][0], before[labels != low][0]), "different islands, different colors")
 
-    # After a real unwrap the UVs separate them, seams or not.
+    # After our unwrap the seams say what the islands are, as the next unwrap will cut them.
     uv.unwrap(bpy.context, box)
     uv.clear_seams(box)
-    check(len(np.unique(uv.island_labels(me))) == 2, "unwrapped: the islands come from the UVs too")
+    check(len(np.unique(uv.island_labels(me))) == 1, "our unwrap: cleared seams join the islands")
+    check(len(np.unique(uv.island_labels(me, use_seams=False))) == 2, "though the UVs still have two")
+    # UVs from elsewhere can have islands with no seams at all: those count.
+    del me["vrs_unwrapped"]
+    check(len(np.unique(uv.island_labels(me))) == 2, "UVs from elsewhere: their islands count")
 
     # A big mesh mustn't be slow to label: this runs while a seam is traced.
     dense = sphere("DenseIslands", 256, 128)
@@ -442,7 +446,13 @@ def test_islands_view():
         uv.set_seams(me, half)
         uv._view["next"] = 0.0
         uv.tick(bpy.context)
-        check("open seam" in uv.island_note(settings), f"half a ring: open ({uv.island_note(settings)!r})")
+        check(uv.island_note(settings) == "1 island", f"half a ring: the closed box's one cut ({uv.island_note(settings)!r})")
+        stray = (segs[:, :, 2] > 0.09).all(1) & (segs[:, :, 1] > 0.01).all(1)
+        uv.set_seams(me, half | stray)
+        uv._view["next"] = 0.0
+        uv.tick(bpy.context)
+        check(stray.any() and "dead-end seam" in uv.island_note(settings), f"a smaller one too: that's the stray "
+              f"({uv.island_note(settings)!r})")
         uv.set_seams(me, ring)
         uv._view["next"] = time.monotonic() + 100.0
         uv.tick(bpy.context)
@@ -471,7 +481,7 @@ def test_islands_view():
           f"under a Subsurf, still two islands ({len(np.unique(arrays[2], axis=0)) if arrays else None})")
     box.modifiers.clear()
     operators._on_data_swap()
-    check(uv._view["open"] is None, "undo forgets it")
+    check(uv._view["dead"] is None, "undo forgets it")
     menus.close_sheet(bpy.context)
     settings.uv_view = 'CHECKER'
     settings.model_page = 'SHAPE'
@@ -699,6 +709,473 @@ def test_hover():
     settings.model_page = 'SHAPE'
 
 
+def grid(name="Tidy", n=40, side=0.4):
+    """A flat grid on z = 0, faces side / n across, with no UV splits."""
+    bpy.ops.mesh.primitive_grid_add(x_subdivisions=n, y_subdivisions=n, size=side)
+    obj = bpy.context.active_object
+    obj.name = name
+    primitives.make_active(bpy.context, obj)
+    bpy.context.view_layer.update()
+    return obj
+
+
+def centers(obj):
+    return np.array([p.center[:] for p in obj.data.polygons])
+
+
+def seams_between(obj, regions):
+    """Seams where regions (an int per face) differ."""
+    st = uv._Stitching(obj.data)
+    out = np.zeros(len(obj.data.edges), dtype=bool)
+    out[st.edges[regions[st.face_a] != regions[st.face_b]]] = True
+    uv.set_seams(obj.data, out)
+    return out
+
+
+def edge_mids(obj):
+    return edge_world(obj).mean(1)
+
+
+def face_at(obj, x, y):
+    return int(np.argmin(np.linalg.norm(centers(obj)[:, :2] - np.array((x, y)), axis=1)))
+
+
+def tidy_setup():
+    ss, ctx, settings = setup()
+    settings.uv_tool = 'TIDY'
+    settings.uv_live = False
+    settings.uv_fix_radius = 0.03
+    settings.smooth_strokes = False
+    return ss, ctx, settings
+
+
+def test_tidy_push():
+    print("== Tidy, main hand: dragging an island's boundary out")
+    clear()
+    ss, ctx, settings = tidy_setup()
+    obj = grid()
+    me = obj.data
+    fc = centers(obj)
+    before = seams_between(obj, (fc[:, 1] > 0).astype(int))
+    label_low = uv.island_labels(me)[face_at(obj, 0.0, -0.1)]
+    uv.changed()
+
+    op, r = hold(ctx, ss, 1, ((0.0, -0.05, 0.0), Quaternion()),
+                 [((0.0, y, 0.0), Quaternion()) for y in (-0.04, -0.02, 0.0, 0.02, 0.04)])
+    check(type(op.handler).__name__ == "TidySeams" and r == {'FINISHED'}, f"the main hand pushes ({r})")
+    labels = uv.island_labels(me)
+    check(len(np.unique(labels)) == 2, f"still two islands ({len(np.unique(labels))})")
+    check(labels[face_at(obj, 0.0, 0.05)] == labels[face_at(obj, 0.0, -0.1)], "the island it started in grew")
+    check(labels[face_at(obj, 0.0, 0.1)] != labels[face_at(obj, 0.0, -0.1)], "as far as the brush went")
+    check(labels[face_at(obj, 0.15, 0.01)] != labels[face_at(obj, 0.15, -0.01)], "the line stays away from the brush")
+    mids = edge_mids(obj)
+    s = uv.seams(me)
+    old = (np.abs(mids[:, 1]) < 1e-5) & (np.abs(mids[:, 0]) < 0.01)
+    check(old.any() and not s[old].any(), "the old boundary under the brush is gone")
+    far = (np.abs(mids[:, 1]) < 1e-5) & (np.abs(mids[:, 0]) > 0.1)
+    check(far.any() and s[far].all() and before[far].all(), "and it's where it was outside")
+    check(not uv.open_seams(me, labels).any(), "no stray seams left inside an island")
+    check(uv.message() == "Seams tidied", f"said ({uv.message()!r})")
+    check(label_low == labels[face_at(obj, 0.0, -0.1)], "the island keeps its label: its color holds")
+
+    # Back the other way, starting in the other island.
+    op, r = hold(ctx, ss, 1, ((0.0, 0.1, 0.0), Quaternion()),
+                 [((0.0, y, 0.0), Quaternion()) for y in (0.08, 0.06, 0.04, 0.02, 0.0, -0.02)])
+    labels = uv.island_labels(me)
+    check(r == {'FINISHED'} and labels[face_at(obj, 0.0, 0.0)] != labels[face_at(obj, 0.0, -0.1)],
+          "the other island pushes back")
+
+    # A relief cut stays when a boundary is pushed past it; pushing doesn't clean.
+    clear()
+    obj = grid()
+    me = obj.data
+    fc = centers(obj)
+    seams_between(obj, (fc[:, 1] > 0).astype(int))
+    mids = edge_mids(obj)
+    s = uv.seams(me)
+    cut = (np.abs(mids[:, 0] - 0.0) < 1e-5) & (mids[:, 1] > 0.02) & (mids[:, 1] < 0.06)
+    s[cut] = True
+    uv.set_seams(me, s)
+    uv.changed()
+    check(uv.open_seams(me, uv.island_labels(me)).sum() == cut.sum(), "a cut that goes nowhere")
+    hold(ctx, ss, 1, ((0.0, -0.05, 0.0), Quaternion()),
+         [((0.0, y, 0.0), Quaternion()) for y in (-0.03, -0.01, 0.01, 0.03)])
+    check(uv.seams(me)[cut].all(), "stays through a push")
+
+    # Pushed right through a thin island, that splits in two.
+    clear()
+    obj = grid()
+    me = obj.data
+    fc = centers(obj)
+    seams_between(obj, np.digitize(fc[:, 1], (0.0, 0.03)))
+    uv.changed()
+    check(len(np.unique(uv.island_labels(me))) == 3, "three stripes")
+    hold(ctx, ss, 1, ((0.0, -0.03, 0.0), Quaternion()), [((0.0, y, 0.0), Quaternion()) for y in (-0.02, 0.0, 0.02)])
+    check(len(np.unique(uv.island_labels(me))) == 4, f"the middle one is cut in two "
+          f"({len(np.unique(uv.island_labels(me)))})")
+
+    # The far side of a thin part isn't taken.
+    clear()
+    thin = cube(0.4, (0, 0, 0), "Thin", subdivisions=9)
+    thin.vr_prim.size = (0.4, 0.4, 0.01)
+    primitives.make_active(bpy.context, thin)
+    bpy.context.view_layer.update()
+    stroke = uv.TidySeams(bpy.context, thin, 1.0)
+    brushed = stroke._brushed(Vector((0.0, 0.0, 0.005)))
+    fc = centers(thin)
+    check(brushed[fc[:, 2] > 0.004].any() and not brushed[fc[:, 2] < -0.004].any(), "the far side stays out of it")
+
+    # Where the trigger can't start: nothing happens, and nothing's created.
+    clear()
+    obj = grid()
+    count = len(bpy.data.objects)
+    op, r = hold(ctx, ss, 1, ((2.0, 2.0, 2.0), Quaternion()), [((2.0, 2.0, 2.0), Quaternion())])
+    check(type(op.handler).__name__ == "NoIsland" and r == {'CANCELLED'} and len(bpy.data.objects) == count,
+          f"far from the surface: says so ({uv.message()!r})")
+    op, r = hold(ctx, ss, 1, ((0.0, 0.0, 0.0), Quaternion()), [((0.0, 0.0, 0.0), Quaternion())])
+    check(type(op.handler).__name__ == "NoIsland" and "one island" in uv.message(),
+          f"one island: says so ({uv.message()!r})")
+
+    # Nothing moved: no change, no undo step.
+    fc = centers(obj)
+    seams_between(obj, (fc[:, 1] > 0).astype(int))
+    op, r = hold(ctx, ss, 1, ((0.0, -0.1, 0.0), Quaternion()), [((0.0, -0.1, 0.0), Quaternion())])
+    check(r == {'CANCELLED'} and not op.handler.changed, "deep inside an island: no change")
+    settings.uv_tool = 'NONE'
+
+
+def test_tidy_clean():
+    print("== Tidy, off hand: smoothing boundaries, removing cuts that go nowhere")
+    clear()
+    ss, ctx, settings = tidy_setup()
+    every = uv.TIDY_SMOOTH_EVERY
+    uv.TIDY_SMOOTH_EVERY = 0.0
+    try:
+        settings.uv_fix_radius = 0.06
+        obj = grid()
+        me = obj.data
+        fc = centers(obj)
+        # A straight boundary with a jag in it: a bump two faces wide and high, and a notch beside it.
+        bump = (np.abs(fc[:, 0] - 0.02) < 0.02) & (fc[:, 1] > 0) & (fc[:, 1] < 0.02)
+        notch = (np.abs(fc[:, 0] + 0.03) < 0.02) & (fc[:, 1] < 0) & (fc[:, 1] > -0.02)
+        regions = (fc[:, 1] > 0).astype(int)
+        regions[bump] = 0
+        regions[notch] = 1
+        seams_between(obj, regions)
+        uv.changed()
+        jagged = int(uv.seams(me).sum())
+        far_before = uv.seams(me)[np.abs(edge_mids(obj)[:, 0]) > 0.12].copy()
+        op, r = hold(ctx, ss, 0, ((0.0, 0.0, 0.0), Quaternion()), [((0.0, 0.0, 0.0), Quaternion())] * 6)
+        check(type(op.handler).__name__ == "TidySeams" and r == {'FINISHED'}, f"the off hand smooths ({r})")
+        smooth = int(uv.seams(me).sum())
+        check(smooth == 40, f"the jag is gone: a straight line again ({jagged} seam edges, now {smooth})")
+        labels = uv.island_labels(me)
+        check(len(np.unique(labels)) == 2, f"still two islands ({len(np.unique(labels))})")
+        check(not uv.open_seams(me, labels).any(), "nothing stray left")
+        check((uv.seams(me)[np.abs(edge_mids(obj)[:, 0]) > 0.12] == far_before).all(), "outside the brush, as it was")
+
+        # A straight boundary stays: more strokes don't wear it away.
+        straight = uv.seams(me).copy()
+        op, r = hold(ctx, ss, 0, ((0.0, 0.0, 0.0), Quaternion()), [((0.0, 0.0, 0.0), Quaternion())] * 6)
+        check(r == {'CANCELLED'} and (uv.seams(me) == straight).all(), f"a straight one holds, no change ({r})")
+
+        # Three islands meeting: smoothing keeps them all.
+        clear()
+        obj = grid()
+        me = obj.data
+        fc = centers(obj)
+        regions = (fc[:, 1] > 0).astype(int) + ((fc[:, 1] <= 0) & (fc[:, 0] > 0)) * 2
+        regions[(np.abs(fc[:, 0] - 0.02) < 0.012) & (fc[:, 1] > 0) & (fc[:, 1] < 0.02)] = 2
+        seams_between(obj, regions)
+        uv.changed()
+        hold(ctx, ss, 0, ((0.0, 0.0, 0.0), Quaternion()), [((0.0, 0.0, 0.0), Quaternion())] * 3)
+        check(len(np.unique(uv.island_labels(me))) == 3, f"a junction keeps its three "
+              f"({len(np.unique(uv.island_labels(me)))})")
+
+        # A speck under the brush is absorbed.
+        clear()
+        obj = grid()
+        me = obj.data
+        fc = centers(obj)
+        speck = np.linalg.norm(fc[:, :2] - np.array((0.005, 0.005)), axis=1) < 0.012
+        seams_between(obj, speck.astype(int))
+        uv.changed()
+        check(len(np.unique(uv.island_labels(me))) == 2, "a speck of an island")
+        hold(ctx, ss, 0, ((0.0, 0.0, 0.0), Quaternion()), [((0.0, 0.0, 0.0), Quaternion())] * 4)
+        check(len(np.unique(uv.island_labels(me))) == 1 and not uv.seams(me).any(), "is absorbed, with its seams")
+
+        # Cuts that go nowhere: gone under the brush, kept elsewhere.
+        settings.uv_fix_radius = 0.03
+        clear()
+        obj = grid()
+        me = obj.data
+        fc = centers(obj)
+        seams_between(obj, (fc[:, 1] > 0).astype(int))
+        boundary = uv.seams(me).copy()
+        mids = edge_mids(obj)
+        here = (np.abs(mids[:, 0]) < 1e-5) & (mids[:, 1] > 0.08) & (mids[:, 1] < 0.15)
+        there = (np.abs(mids[:, 0] - 0.15) < 1e-5) & (mids[:, 1] > 0.08) & (mids[:, 1] < 0.15)
+        s = uv.seams(me)
+        s[here | there] = True
+        uv.set_seams(me, s)
+        uv.changed()
+        op, r = hold(ctx, ss, 0, ((0.0, 0.08, 0.0), Quaternion()),
+                     [((0.0, y, 0.0), Quaternion()) for y in (0.08, 0.1, 0.12, 0.14, 0.16)])
+        s = uv.seams(me)
+        check(r == {'FINISHED'} and not s[here].any(), f"the cut brushed over is gone ({s[here].sum()} left)")
+        check(s[there].all(), "the other isn't")
+        check(s[boundary].all(), "and the boundary stays")
+
+        # The button, everywhere.
+        check(uv.clear_dead_ends(obj) and not uv.seams(me)[there].any() and uv.seams(me)[boundary].all(),
+              f"Clear ends removes the rest ({uv.message()!r})")
+        check(not uv.clear_dead_ends(obj) and uv.message() == "No dead-end seams", "and has nothing more to do")
+    finally:
+        uv.TIDY_SMOOTH_EVERY = every
+    settings.uv_tool = 'NONE'
+
+
+def tube(name="Tube", segments=32, rings=20, radius=0.1, height=0.4, caps=True):
+    """A cylinder along z, rings + 1 rows of vertices, its sides quads and its caps n-gons."""
+    step = height / rings
+    verts = [(radius * math.cos(2 * math.pi * s / segments), radius * math.sin(2 * math.pi * s / segments),
+              -height / 2 + r * step) for r in range(rings + 1) for s in range(segments)]
+    at = lambda r, s: r * segments + s % segments
+    faces = [(at(r, s), at(r, s + 1), at(r + 1, s + 1), at(r + 1, s)) for r in range(rings) for s in range(segments)]
+    if caps:
+        faces += [tuple(at(0, s) for s in reversed(range(segments))), tuple(at(rings, s) for s in range(segments))]
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], faces)
+    me.update()
+    obj = bpy.data.objects.new(name, me)
+    bpy.context.collection.objects.link(obj)
+    primitives.make_active(bpy.context, obj)
+    bpy.context.view_layer.update()
+    return obj
+
+
+def tube_seams(obj, height=0.4):
+    """(the two rings the caps are cut off along, the cut from one to the other, at +x)."""
+    segs = edge_world(obj)
+    rings = (np.abs(np.abs(segs[:, :, 2]) - height / 2) < 1e-5).all(1)
+    line = (np.abs(segs[:, :, 1]) < 1e-5).all(1) & (segs[:, :, 0] > 0).all(1) & ~rings
+    return rings, line
+
+
+def test_tidy_keeps():
+    print("== Tidy keeps the seams that do something, though they've the same island on both sides")
+    clear()
+    ss, ctx, settings = tidy_setup()
+    every = uv.TIDY_SMOOTH_EVERY
+    uv.TIDY_SMOOTH_EVERY = 0.0
+    try:
+        settings.uv_fix_radius = 0.05
+        along = [((0.1, 0.0, z), Quaternion()) for z in (-0.2, -0.15, -0.1, -0.05, 0.0, 0.05, 0.1, 0.15, 0.2)]
+
+        # A tube with its caps cut off, and the cut that lets it flatten.
+        obj = tube()
+        me = obj.data
+        rings, line = tube_seams(obj)
+        uv.set_seams(me, rings | line)
+        uv.changed()
+        labels = uv.island_labels(me)
+        check(len(np.unique(labels)) == 3 and uv.open_seams(me, labels).sum() == line.sum() and line.sum() == 20,
+              f"three islands, and the tube's cut has the tube on both sides ({uv.open_seams(me, labels).sum()})")
+        check(not uv.dead_ends(me, labels).any(), "but it goes from end to end")
+        settings.uv_view = 'ISLANDS'
+        uv.tick(bpy.context)
+        check(uv.island_note(settings) == "3 islands", f"so the view doesn't call it one ({uv.island_note(settings)!r})")
+        settings.uv_view = 'NONE'
+        hold(ctx, ss, 0, along[0], along)
+        s = uv.seams(me)
+        check(s[line].all() and s[rings].all(), f"brushed all along, it stays ({s[line].sum()} of {line.sum()})")
+        check(not uv.clear_dead_ends(obj) and uv.seams(me)[line].all(), "and so it does through Clear ends")
+        uv.unwrap(bpy.context, obj, 'ANGLE_BASED')
+        islands = uv.island_labels(me, use_seams=False)
+        check(len(np.unique(islands)) == 3, f"it unwraps to the three ({len(np.unique(islands))})")
+
+        # A branch off it does go nowhere, as far back as the cut.
+        segs = edge_world(obj)
+        branch = (np.abs(segs[:, :, 2]) < 1e-5).all(1) & (segs[:, :, 0] > 0.085).all(1) & (segs[:, :, 1] > -1e-5).all(1)
+        uv.set_seams(me, rings | line | branch)
+        uv.changed()
+        check(branch.sum() >= 2 and (uv.dead_ends(me, uv.island_labels(me)) == branch).all(),
+              f"a branch is a dead end ({branch.sum()} edges), the rest isn't")
+        hold(ctx, ss, 0, along[4], along[4:5] * 3)
+        s = uv.seams(me)
+        check(not s[branch].any() and s[line].all(), "brushed, the branch goes and the cut stays")
+
+        # An open tube: its cut runs from one border of the mesh to the other.
+        clear()
+        obj = tube(caps=False)
+        me = obj.data
+        _rings, line = tube_seams(obj)
+        uv.set_seams(me, line)
+        uv.changed()
+        labels = uv.island_labels(me)
+        check(len(np.unique(labels)) == 1 and not uv.dead_ends(me, labels).any(), "without caps: from border to border")
+        hold(ctx, ss, 0, along[0], along)
+        check(uv.seams(me)[line].all(), "stays")
+
+        # Half way along, it isn't holding anything open any more.
+        short = line & (edge_world(obj)[:, :, 2] < 1e-5).all(1)
+        uv.set_seams(me, short)
+        uv.changed()
+        check((uv.dead_ends(me, uv.island_labels(me)) == short).all(), "half way along: a dead end")
+
+        # A closed shape's only cut: without it there's no flattening.
+        clear()
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, radius=0.2)
+        ball = bpy.context.active_object
+        primitives.make_active(bpy.context, ball)
+        bpy.context.view_layer.update()
+        me = ball.data
+        segs = edge_world(ball)
+        meridian = (np.abs(segs[:, :, 1]) < 1e-5).all(1) & (segs[:, :, 0] > -1e-5).all(1)
+        uv.set_seams(me, meridian)
+        uv.changed()
+        check(meridian.sum() == 16 and not uv.dead_ends(me, uv.island_labels(me)).any(), "a sphere's meridian isn't a dead end")
+        hold(ctx, ss, 0, ((0.2, 0.0, 0.0), Quaternion()), [((0.2, 0.0, z), Quaternion()) for z in (0.0, 0.05, 0.1)])
+        check(uv.seams(me)[meridian].all(), "and stays")
+        twig = (np.abs(segs[:, :, 2]) < 1e-5).all(1) & (segs[:, :, 0] < -0.1).all(1) & (segs[:, :, 1] > -1e-5).all(1)
+        uv.set_seams(me, meridian | twig)
+        uv.changed()
+        check(twig.any() and (uv.dead_ends(me, uv.island_labels(me)) == twig).all(), "a second, smaller cut is the stray")
+        check(uv.clear_dead_ends(ball) and (uv.seams(me) == meridian).all(), "and it's the one removed")
+
+        # A tube's cut follows the boundary it ends on, pushed away from the tube's end.
+        clear()
+        obj = tube()
+        me = obj.data
+        rings, line = tube_seams(obj)
+        # The cap has a skirt to push into: the boundary a little way up the sides.
+        segs = edge_world(obj)
+        top_ring = (np.abs(segs[:, :, 2] - 0.1) < 1e-5).all(1)
+        low_ring = (np.abs(segs[:, :, 2] + 0.2) < 1e-5).all(1)
+        short = line & (segs[:, :, 2] < 0.1 + 1e-5).all(1)
+        uv.set_seams(me, low_ring | top_ring | short)
+        uv.changed()
+        labels = uv.island_labels(me)
+        check(len(np.unique(labels)) == 3 and not uv.dead_ends(me, labels).any(), "a tube, its cut up to the skirt")
+        settings.uv_fix_radius = 0.03
+        op, r = hold(ctx, ss, 1, ((0.1, 0.0, 0.08), Quaternion()),
+                     [((0.1, 0.0, z), Quaternion()) for z in (0.09, 0.11, 0.13, 0.15)])
+        labels = uv.island_labels(me)
+        check(r == {'FINISHED'} and len(np.unique(labels)) == 3, f"pushed up into the skirt ({r})")
+        s = uv.seams(me)
+        check(not (s & ~line & (edge_world(obj)[:, :, 2] < 0.1 - 1e-5).all(1) & ~low_ring).any(), "nothing new below")
+        check(s[short].all(), f"the cut's all there ({s[short].sum()} of {short.sum()})")
+        check(not uv.dead_ends(me, labels).any(), "and it reaches the boundary again, wherever that went")
+        hold(ctx, ss, 0, ((0.1, 0.0, 0.11), Quaternion()), [((0.1, 0.0, 0.11), Quaternion())] * 4)
+        s = uv.seams(me)
+        check(s[short].all() and not uv.dead_ends(me, uv.island_labels(me)).any(), "smoothing there doesn't eat it")
+
+        # A branch that hung off a boundary doesn't get carried along: it went nowhere before.
+        clear()
+        obj = grid()
+        me = obj.data
+        fc = centers(obj)
+        seams_between(obj, (fc[:, 1] > 0).astype(int))
+        mids = edge_mids(obj)
+        s = uv.seams(me)
+        stub = (np.abs(mids[:, 0]) < 1e-5) & (mids[:, 1] < -1e-5) & (mids[:, 1] > -0.05)
+        s[stub] = True
+        uv.set_seams(me, s)
+        uv.changed()
+        check((uv.dead_ends(me, uv.island_labels(me)) == stub).all(), "a stub off a boundary")
+        hold(ctx, ss, 1, ((0.0, -0.05, 0.0), Quaternion()), [((0.0, y, 0.0), Quaternion()) for y in (-0.02, 0.0, 0.02, 0.04)])
+        s = uv.seams(me)
+        check((s & (np.abs(mids[:, 0]) < 1e-5) & (mids[:, 1] > 1e-5)).sum() == 0, "isn't carried along by a push")
+    finally:
+        uv.TIDY_SMOOTH_EVERY = every
+    settings.uv_tool = 'NONE'
+    settings.uv_view = 'NONE'
+
+
+def test_tidy_uvs():
+    print("== Tidy and the UVs: unwrapping after, UVs from elsewhere, the view")
+    clear()
+    ss, ctx, settings = tidy_setup()
+    obj = grid()
+    me = obj.data
+    fc = centers(obj)
+    seams_between(obj, (fc[:, 1] > 0).astype(int))
+    settings.uv_live = True
+    uv.changed()
+    hold(ctx, ss, 1, ((0.0, -0.05, 0.0), Quaternion()), [((0.0, y, 0.0), Quaternion()) for y in (-0.02, 0.0, 0.02, 0.04)])
+    check(me.get("vrs_unwrapped"), "Live: it unwraps when let go")
+    uv_islands = uv.island_labels(me, use_seams=False)
+    check(len(np.unique(uv_islands)) == 2, f"into the two islands ({len(np.unique(uv_islands))})")
+    check((uv_islands == uv_islands[face_at(obj, 0.0, -0.1)])[face_at(obj, 0.0, 0.05)], "with the boundary moved")
+    # A push on what's been unwrapped: the old UV split doesn't hold the islands apart.
+    settings.uv_live = False
+    uv.changed()
+    hold(ctx, ss, 1, ((0.1, -0.05, 0.0), Quaternion()), [((0.1, y, 0.0), Quaternion()) for y in (-0.02, 0.0, 0.02, 0.04)])
+    labels = uv.island_labels(me)
+    check(len(np.unique(labels)) == 2 and labels[face_at(obj, 0.1, 0.05)] == labels[face_at(obj, 0.1, -0.1)],
+          f"after an unwrap, pushes go straight to the islands ({len(np.unique(labels))})")
+
+    # UVs from elsewhere: two islands in the UVs, no seams. Those become seams as soon as one's pushed.
+    clear()
+    obj = grid()
+    me = obj.data
+    fc = centers(obj)
+    low = loops_of(me, fc[:, 1] < 0)
+    u = uvs(obj)
+    u[low, 0] += 1.5
+    me.uv_layers.active.data.foreach_set("uv", u.ravel())
+    uv.changed()
+    check(not uv.seams(me).any() and len(np.unique(uv.island_labels(me))) == 2, "islands with no seams")
+    op, r = hold(ctx, ss, 1, ((0.1, 0.1, 0.0), Quaternion()), [((0.1, 0.1, 0.0), Quaternion())])
+    check(r == {'CANCELLED'} and uv.SEAMS_LEAD not in me and not uv.seams(me).any(), "no change: left alone")
+    hold(ctx, ss, 1, ((0.0, -0.05, 0.0), Quaternion()), [((0.0, y, 0.0), Quaternion()) for y in (-0.02, 0.0, 0.02, 0.04)])
+    mids = edge_mids(obj)
+    far = (np.abs(mids[:, 1]) < 1e-5) & (np.abs(mids[:, 0]) > 0.1)
+    labels = uv.island_labels(me)
+    check(me.get(uv.SEAMS_LEAD) and uv.seams(me)[far].all(), "a push makes seams of the UV islands")
+    check(len(np.unique(labels)) == 2 and labels[face_at(obj, 0.0, 0.05)] == labels[face_at(obj, 0.0, -0.1)],
+          f"and the boundary moved ({len(np.unique(labels))})")
+
+    # The island view follows Tidy, and the stroke uses its stitching.
+    settings.model_page = 'UV'
+    menus.open_sheet('OBJECT')
+    settings.uv_view = 'ISLANDS'
+    uv.tick(bpy.context)
+    check(uv._stitching_of(obj) is uv._view["stitching"], "the stroke reuses the view's stitching")
+    uv.changed()
+    check(uv._stitching_of(obj) is not uv._view["stitching"], "not a stale one")
+    uv.tick(bpy.context)
+    operators.active_hands.add(1)
+    try:
+        check(uv.busy(bpy.context), "the view follows a Tidy stroke")
+        count = uv._view["count"]
+        fc = centers(obj)
+        seams_between(obj, np.digitize(fc[:, 1], (0.0, 0.05)))
+        uv._view["next"] = 0.0
+        uv.tick(bpy.context)
+        check(uv._view["count"] == 3 and count == 2, f"and shows it during the stroke ({count} to {uv._view['count']})")
+    finally:
+        operators.active_hands.discard(1)
+
+    # Hover: the seams' islands, with or without a UV map.
+    uv.tick(bpy.context)
+    hover = uv._hover["labels"]
+    check(hover is not None and len(np.unique(hover)) == 3, "hover: the islands Tidy works on")
+    check(uv._pick_tidy(ctx, settings, False, Matrix.Translation((0.0, 0.1, 0.0)), 1.0).label == hover[face_at(obj, 0.0, 0.1)],
+          "the press takes the one tinted")
+    while len(me.uv_layers):
+        me.uv_layers.remove(me.uv_layers[0])
+    uv.changed()
+    uv.tick(bpy.context)
+    check(uv._hover["labels"] is not None, "with no UV map too")
+    pos, u, color, tris = uv._island_arrays(obj, hover == hover[0], (1.0, 1.0, 1.0, 1.0))
+    check(len(pos) == len(u) and len(tris), "and its tint can be drawn")
+    menus.close_sheet(bpy.context)
+    settings.uv_view = 'CHECKER'
+    settings.model_page = 'SHAPE'
+    settings.uv_tool = 'NONE'
+
+
 def test_primitive_rebuild():
     print("== seams and UVs survive a resize")
     clear()
@@ -724,10 +1201,10 @@ def test_panel():
     menus.set_more('OBJECT_UV', True)
     widgets, _h = menus.layout(ctx)
     ids = {w.id: w for w in widgets if w.id}
-    want = ("page_uv", "uv_tool_seam", "uv_tool_fix", "uv_tool_twist", "uv_tool_size", "uv_view_checker",
-            "uv_view_stretch", "uv_view_islands", "uv_unwrap", "uv_smart", "uv_pack", "uv_method_conformal", "uv_live",
-            "uv_repack", "uv_twist_snap", "uv_checker", "uv_fix_radius", "uv_from_sharp", "uv_average",
-            "uv_clear_seams")
+    want = ("page_uv", "uv_tool_seam", "uv_tool_tidy", "uv_tool_fix", "uv_tool_twist", "uv_tool_size",
+            "uv_view_checker", "uv_view_stretch", "uv_view_islands", "uv_unwrap", "uv_smart", "uv_pack",
+            "uv_method_conformal", "uv_live", "uv_repack", "uv_twist_snap", "uv_checker", "uv_fix_radius",
+            "uv_from_sharp", "uv_clear_ends", "uv_average", "uv_clear_seams")
     missing = [k for k in want if k not in ids]
     check(not missing, f"UV page widgets ({missing or 'all there'})")
     settings.uv_view = 'NONE'
@@ -738,6 +1215,16 @@ def test_panel():
     widgets, _h = menus.layout(ctx)
     {w.id: w for w in widgets if w.id}["uv_tool_size"].on_press()
     check(settings.uv_tool == 'SIZE' and settings.uv_view == 'STRETCH', "and leaves another view alone")
+    settings.uv_tool = 'NONE'
+    settings.uv_view = 'CHECKER'
+    widgets, _h = menus.layout(ctx)
+    {w.id: w for w in widgets if w.id}["uv_tool_tidy"].on_press()
+    check(settings.uv_tool == 'TIDY' and settings.uv_view == 'ISLANDS', "Tidy shows the islands")
+    settings.uv_tool = 'NONE'
+    settings.uv_view = 'STRETCH'
+    widgets, _h = menus.layout(ctx)
+    {w.id: w for w in widgets if w.id}["uv_tool_tidy"].on_press()
+    check(settings.uv_view == 'STRETCH', "unless you're watching the stretch")
     settings.uv_tool = 'NONE'
     settings.uv_view = 'CHECKER'
     widgets, _h = menus.layout(ctx)
@@ -779,7 +1266,8 @@ def main():
     vr_sculpt.register()
     try:
         for test in (test_seams, test_fix, test_buttons, test_stretch, test_view, test_islands, test_islands_view,
-                     test_twist, test_size, test_hover, test_primitive_rebuild, test_panel):
+                     test_twist, test_size, test_hover, test_tidy_push, test_tidy_clean, test_tidy_keeps, test_tidy_uvs,
+                     test_primitive_rebuild, test_panel):
             try:
                 test()
             except Exception:

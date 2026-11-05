@@ -837,7 +837,7 @@ def _finish_rows(context, settings, obj):
     return rows, more, "Edge marks" + (", segments" if on else "")
 
 
-UV_TOOLS = (('SEAM', "Seams"), ('FIX', "Fix"), ('TWIST', "Twist"), ('SIZE', "Size"))
+UV_TOOLS = (('SEAM', "Seams"), ('TIDY', "Tidy"), ('FIX', "Fix"), ('TWIST', "Twist"), ('SIZE', "Size"))
 UV_VIEWS = (('NONE', "Off"), ('CHECKER', "Checker"), ('STRETCH', "Stretch"), ('ISLANDS', "Islands"))
 
 
@@ -845,11 +845,13 @@ def _press_uv_tool(settings, ident):
     settings.uv_tool = 'NONE' if settings.uv_tool == ident else ident
     if settings.uv_tool in uv.ISLAND_TOOLS and settings.uv_view == 'NONE':
         settings.uv_view = 'CHECKER'  # Their effect shows on a texture.
+    if settings.uv_tool == 'TIDY' and settings.uv_view in {'NONE', 'CHECKER'}:
+        settings.uv_view = 'ISLANDS'  # Its work is the islands.
 
 
 def _uv_rows(context, settings, obj):
     rows = [
-        [vr_ui.label("Tool", fixed=LABEL_W)] + [
+        [
             vr_ui.segment("uv_tool_" + ident.lower(), name, (lambda i=ident: _press_uv_tool(settings, i)),
                           settings.uv_tool == ident, "uv_tool")
             for ident, name in UV_TOOLS],
@@ -878,11 +880,13 @@ def _uv_rows(context, settings, obj):
                       tip="Pack the islands after Twist and Size (without turning them)"),
          vr_ui.toggle("uv_twist_snap", "Snap 15\u00b0", settings.uv_twist_snap, _toggle(settings, "uv_twist_snap"),
                       icon="gizmo_turn", tip="Twist turns in steps")],
-        [vr_ui.slider("uv_fix_radius", "Fix radius", settings.uv_fix_radius, 0.005, 0.2,
+        [vr_ui.slider("uv_fix_radius", "Radius", settings.uv_fix_radius, 0.005, 0.2,
                       lambda v: setattr(settings, "uv_fix_radius", v), fmt=_meters)],
-        [vr_ui.button("uv_from_sharp", "From sharp", lambda: uv.seams_from_sharp(obj), icon="seam",
+        [vr_ui.button("uv_from_sharp", "From sharp", lambda: uv.seams_from_sharp(obj),
                       tip="Seams on the edges that shade sharp"),
-         vr_ui.button("uv_average", "Even out", lambda: uv.average_scale(context, obj), icon="islands",
+         vr_ui.button("uv_clear_ends", "Clear ends", lambda: uv.clear_dead_ends(obj),
+                      tip="Remove the seams that go nowhere, everywhere"),
+         vr_ui.button("uv_average", "Even out", lambda: uv.average_scale(context, obj),
                       tip="Scale islands to their share of the surface, then pack"),
          vr_ui.icon_button("uv_clear_seams", "trash", lambda: uv.clear_seams(obj), "Clear seams", danger=True)],
     ]

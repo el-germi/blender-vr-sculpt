@@ -9,6 +9,10 @@ headset.
 - Fix: the faces the tip brushes over unwrap again, and only those: their corners on the border of the
   brushed patch are pinned for the unwrap (and unpinned after), so the patch stays stitched into the
   layout and nothing outside it moves. For where sculpting has stretched or scrambled the UVs.
+- Tidy: a brush for seams already traced, working on islands as regions of faces, with the seams wherever
+  regions meet (so they stay on edges and junctions need no special case). The main hand starts in an island
+  and drags its boundary out across the others; the off hand smooths the boundaries in the brush and removes
+  the seams there that separate nothing.
 - Twist: hold the trigger on an island and roll the wrist: its texture turns on the surface with the hand.
 - Size: hold the trigger on an island and raise or lower the hand: it gets more or less of the UV square.
   Both are previewed on the island in the shader, and written (and packed) on release.
@@ -25,6 +29,7 @@ they were.
 import heapq
 import math
 import time
+from collections import deque
 from contextlib import contextmanager
 
 import bpy
@@ -39,7 +44,7 @@ SMART_ANGLE = math.radians(66.0)  # Smart UV Project's default
 SHARP_ANGLE = math.radians(30.0)  # Seams from Sharp, when the object has no Auto shading angle
 PATH_SLACK = 1.6  # a seam path may be this much longer than the straight line between its ends
 SEAM_COLOR = (1.0, 0.32, 0.28)
-OPEN_SEAM_COLOR = (1.0, 0.8, 0.2)  # a seam with the same island on both sides
+OPEN_SEAM_COLOR = (1.0, 0.8, 0.2)  # a seam that goes nowhere (_Stitching.dead_ends())
 FIX_COLOR = (0.55, 0.9, 0.45)
 ISLAND_COLOR = (0.45, 0.8, 1.0)  # Twist and Size
 STRETCH_FULL = 1.0  # log2 of the stretch shown fully red: twice (or half) the size
@@ -56,10 +61,17 @@ SIZE_DOUBLE = 0.1  # raising the hand this far (hand-space meters) doubles an is
 SIZE_MIN, SIZE_MAX = 0.1, 10.0  # the most one Size stroke can do
 FOLLOW_MIN = 0.05  # the island view rebuilds at most this often during a seam stroke (seconds)
 FOLLOW_SHARE = 4.0  # and waits this many times its last rebuild, so a dense mesh costs a share of the frames
+TIDY_COLOR = (0.95, 0.55, 0.9)
+TIDY_FACING = -0.1  # the brush leaves faces turned further from the surface it's on than this (the far side)
+TIDY_SMOOTH_EVERY = 0.1  # seconds between the off hand's smoothing passes
+TIDY_STEPS_MAX = 40  # diffusion steps in a smoothing pass, at most
 TOOL_STYLES = {'SEAM': (SEAM_COLOR, "seam"), 'FIX': (FIX_COLOR, "fix"), 'TWIST': (ISLAND_COLOR, "gizmo_turn"),
-               'SIZE': (ISLAND_COLOR, "gizmo_size")}
+               'SIZE': (ISLAND_COLOR, "gizmo_size"), 'TIDY': (TIDY_COLOR, "seam")}
+HOVER_TOOLS = ISLAND_TOOLS | {'TIDY'}
 
 ORIENTED = "vrs_uv_oriented"  # On a mesh with an island turned by hand: packing mustn't turn islands.
+SEAMS_LEAD = "vrs_seams_lead"  # On a mesh whose UV islands Tidy has turned into seams (see seams_lead()).
+SEAM_ATTR = "uv_seam"  # The edge attribute Blender keeps MeshEdge.use_seam in.
 
 # Bumped whenever our own operations change UVs or seams, and on depsgraph geometry updates; the view
 # rebuilds when it changes.
@@ -83,14 +95,26 @@ def changed():
 # --- mesh data ---------------------------------------------------------------------
 
 def seams(mesh):
+    """Bool per edge. Through the attribute under MeshEdge.use_seam, not that: on 274k edges this takes 0.01 ms
+    and foreach_get("use_seam") 27 ms, and the headset reads this every frame for each eye. No attribute yet, or
+    no data in it (Edit Mode), reads as no seams."""
     out = np.zeros(len(mesh.edges), dtype=bool)
-    if len(out):
-        mesh.edges.foreach_get("use_seam", out)
+    attr = mesh.attributes.get(SEAM_ATTR)
+    if attr is not None and len(attr.data) == len(out):
+        attr.data.foreach_get("value", out)
     return out
 
 
+def _write_seams(mesh, values):
+    """Only the data: see set_seams()."""
+    attr = mesh.attributes.get(SEAM_ATTR)
+    if attr is None:
+        attr = mesh.attributes.new(SEAM_ATTR, 'BOOLEAN', 'EDGE')
+    attr.data.foreach_set("value", np.asarray(values, dtype=bool))
+
+
 def set_seams(mesh, values):
-    mesh.edges.foreach_set("use_seam", np.asarray(values, dtype=bool))
+    _write_seams(mesh, values)
     mesh.update()
     changed()
 
@@ -205,21 +229,29 @@ class _Stitching:
         self.loop_f, loop_v = _loop_faces(mesh)
         a, b, self.edges = _edge_pairs(mesh)
         self.face_a, self.face_b = self.loop_f[a], self.loop_f[b]
-        self.n_faces, self.n_edges = len(mesh.polygons), len(mesh.edges)
+        self.n_faces, self.n_edges, self.n_verts = len(mesh.polygons), len(mesh.edges), len(mesh.vertices)
+        nxt = _next_loops(mesh)
+        self.pair_verts = np.stack((loop_v[a], loop_v[nxt[a]]), axis=1)  # The ends of each pair's edge.
+        alone = np.ones(len(loop_v), dtype=bool)  # Corners on an edge with one face: the mesh's own border.
+        alone[a] = alone[b] = False
+        self.rim_faces = self.loop_f[alone]
+        self.rim_verts = np.zeros(self.n_verts, dtype=bool)
+        self.rim_verts[loop_v[alone]] = self.rim_verts[loop_v[nxt[alone]]] = True
         if len(mesh.uv_layers):
             uv = _uvs(mesh)
-            nxt = _next_loops(mesh)
             same = loop_v[a] == loop_v[b]  # The faces wind the same way along the edge: normals disagree.
             at_a, at_next = np.where(same, b, nxt[b]), np.where(same, nxt[b], b)
             self.joined = (np.abs(uv[a] - uv[at_a]).max(1) < UV_MATCH) & (np.abs(uv[nxt[a]] - uv[at_next]).max(1) < UV_MATCH)
         else:
             self.joined = np.ones(len(a), dtype=bool)
 
-    def labels(self, cuts=None):
+    def labels(self, cuts=None, use_uvs=True):
         """Per face, its island's label: the lowest face index in it, so when an island splits only the new
-        part changes label (and color). Faces are in one island when joined across edges whose UVs match on
-        both sides, and that aren't in cuts (bool per edge)."""
-        keep = self.joined if cuts is None else self.joined & ~cuts[self.edges]
+        part changes label (and color). Faces are in one island when joined across edges that aren't in cuts
+        (bool per edge) and, with use_uvs, whose UVs match on both sides."""
+        keep = self.joined if use_uvs else np.ones(len(self.joined), dtype=bool)
+        if cuts is not None:
+            keep = keep & ~cuts[self.edges]
         return _components(self.n_faces, self.face_a[keep], self.face_b[keep])
 
     def open_seams(self, labels, marked):
@@ -228,16 +260,164 @@ class _Stitching:
         out[self.edges[labels[self.face_a] == labels[self.face_b]]] = True
         return out & marked
 
+    def _fixed_verts(self, labels):
+        """Bool per vertex: on the mesh's border or between two islands, where a cut ending is connected."""
+        out = self.rim_verts.copy()
+        out[self.pair_verts[labels[self.face_a] != labels[self.face_b]]] = True
+        return out
 
-def island_labels(mesh, use_seams=True):
-    """_Stitching.labels(), cut by the mesh's seams with use_seams: that shows what a new seam cuts before an
-    unwrap."""
-    return _Stitching(mesh).labels(seams(mesh) if use_seams else None)
+    def _open_edges(self, labels, marked):
+        """The open seams, once each (more than two faces on one edge chain up): (edges, their two vertices,
+        their islands)."""
+        same = labels[self.face_a] == labels[self.face_b]
+        pairs = np.flatnonzero(same & marked[self.edges])
+        edges, first = np.unique(self.edges[pairs], return_index=True)
+        pairs = pairs[first]
+        return edges, self.pair_verts[pairs], labels[self.face_a[pairs]]
+
+    def dead_ends(self, labels, marked):
+        """Bool per edge: the open seams that do nothing for the island they're in, so removing them can't make
+        it harder to flatten. That's whatever is left hanging when free ends are trimmed back, again and again,
+        as far as a border or an island boundary: a tube's cut from one end to the other stays, and so does a
+        ring around a torus, though they have the same island on both sides. A cut touching nothing is a hole
+        in the island, except on a closed one, which needs it to open at all (a sphere's meridian, a cube's
+        unfolding): there the biggest such cut stays, with all its branches."""
+        out = np.zeros(self.n_edges, dtype=bool)
+        edges, verts, islands = self._open_edges(labels, marked)
+        if not len(edges):
+            return out
+        degree = np.bincount(verts.ravel(), minlength=self.n_verts)
+        degree[self._fixed_verts(labels)] += 2  # So those never come down to one.
+        left = np.arange(len(edges))
+        while True:
+            free = (degree[verts[left]] == 1).any(1)
+            if not free.any():
+                break
+            np.subtract.at(degree, verts[left[free]].ravel(), 1)
+            left = left[~free]
+        dead = np.ones(len(edges), dtype=bool)
+        dead[left] = False
+        if dead.any():
+            differ = labels[self.face_a] != labels[self.face_b]
+            opened = np.zeros(self.n_faces, dtype=bool)  # By label, the lowest face in the island.
+            opened[labels[self.rim_faces]] = True
+            opened[labels[self.face_a[differ]]] = opened[labels[self.face_b[differ]]] = True
+            opened[islands[left]] = True
+            for island in np.unique(islands[dead & ~opened[islands]]).tolist():
+                here = np.flatnonzero(dead & (islands == island))
+                cuts = _components(self.n_verts, verts[here, 0], verts[here, 1])[verts[here, 0]]
+                names, counts = np.unique(cuts, return_counts=True)
+                dead[here[cuts == names[counts.argmax()]]] = False
+        out[edges[dead]] = True
+        return out
+
+    def carried_on(self, marked, was_marked, before, after):
+        """marked, after a boundary has moved (labels before, after; the seams was_marked before): the cuts that
+        ended on it and did something (see dead_ends()) go on to where it is now, across the faces that changed
+        hands. Otherwise a tube's cut stops short when its end's boundary is pushed away: the tube won't flatten,
+        and the cut is one that goes nowhere. A boundary that's gone altogether leaves nothing to reach."""
+        edges, verts, _islands = self._open_edges(after, marked)
+        if not len(edges):
+            return marked
+        fixed = self._fixed_verts(after)
+        lost = self._fixed_verts(before) & ~fixed
+        tips = (np.bincount(verts.ravel(), minlength=self.n_verts) == 1) & lost
+        if not tips.any():
+            return marked
+        alive = np.zeros(self.n_verts, dtype=bool)
+        alive[verts[~self.dead_ends(before, was_marked)[edges]]] = True
+        tips = np.flatnonzero(tips & alive)
+        if not len(tips):
+            return marked
+        moved = before != after
+        near = moved[self.face_a] | moved[self.face_b]
+        graph = {}
+        for (v, w), edge in zip(self.pair_verts[near].tolist(), self.edges[near].tolist()):
+            graph.setdefault(v, []).append((w, edge))
+            graph.setdefault(w, []).append((v, edge))
+        marked = marked.copy()
+        for tip in tips.tolist():
+            came = {tip: None}
+            queue = deque((tip,))
+            while queue:
+                v = queue.popleft()
+                if fixed[v]:
+                    while came[v] is not None:
+                        v, edge = came[v]
+                        marked[edge] = True
+                    break
+                for w, edge in graph.get(v, ()):
+                    if w not in came:
+                        came[w] = (v, edge)
+                        queue.append(w)
+        return marked
+
+
+def seams_lead(mesh):
+    """Whether the mesh's seams say what its islands are. After our unwrap they do: a UV split without a seam is
+    only left over, and the next unwrap will close it. On UVs from elsewhere, islands can have no seams at all,
+    so the UV splits count too, until Tidy has made seams of them."""
+    return bool(mesh.get("vrs_unwrapped") or mesh.get(SEAMS_LEAD))
+
+
+def island_labels(mesh, use_seams=True, leader=None):
+    """Per face, its island's label (_Stitching.labels()). use_seams: as the next unwrap would cut them, from
+    the seams (and the UV splits where seams don't lead: leader, the object's own mesh if this isn't it). Off,
+    the islands the UVs have now."""
+    if not use_seams:
+        return _Stitching(mesh).labels()
+    return _Stitching(mesh).labels(seams(mesh), not seams_lead(leader or mesh))
 
 
 def open_seams(mesh, labels):
     """Bool per edge: a seam with the same island on both sides, so it doesn't separate anything (yet)."""
     return _Stitching(mesh).open_seams(labels, seams(mesh))
+
+
+def dead_ends(mesh, labels):
+    """Bool per edge: a seam that goes nowhere (_Stitching.dead_ends())."""
+    return _Stitching(mesh).dead_ends(labels, seams(mesh))
+
+
+def clear_dead_ends(obj):
+    """Remove every seam that goes nowhere, what Tidy's off hand does under its brush."""
+    me = obj.data
+    extra = dead_ends(me, island_labels(me))
+    if not extra.any():
+        say("No dead-end seams")
+        return False
+    set_seams(me, seams(me) & ~extra)
+    say(f"Removed {int(extra.sum())} dead-end seam edges")
+    return True
+
+
+def relaxed_labels(labels, a, b, weight, free, steps):
+    """Region boundaries smoothed, by threshold dynamics (a step of mean curvature flow): each island's mask is
+    blurred across the faces in free, and each face goes to whichever island is strongest there. The faces
+    outside free hold still, so boundaries stay joined where they leave the brush; bumps go, straight runs
+    stay, and an island smaller than the blur goes too. a, b, weight: pairs of adjacent faces and how strongly
+    they're coupled. Works whatever number of islands meet, at the cost of those in reach."""
+    touch = free[a] | free[b]
+    a, b, weight = a[touch], b[touch], weight[touch]
+    if not len(a) or (labels[a] == labels[b]).all():
+        return labels
+    faces = np.unique(np.concatenate((a, b)))
+    ia, ib = np.searchsorted(faces, a), np.searchsorted(faces, b)
+    names, local = np.unique(labels[faces], return_inverse=True)
+    n = len(faces)
+    mask = np.zeros((n, len(names)))
+    mask[np.arange(n), local] = 1.0
+    total = np.bincount(ia, weight, n) + np.bincount(ib, weight, n)
+    total[total <= 0.0] = 1.0
+    movable = free[faces]
+    blurred = np.empty_like(mask)
+    for _ in range(steps):
+        for c in range(len(names)):
+            blurred[:, c] = (np.bincount(ia, weight * mask[ib, c], n) + np.bincount(ib, weight * mask[ia, c], n)) / total
+        mask[movable] = 0.5 * (mask[movable] + blurred[movable])
+    out = labels.copy()
+    out[faces[movable]] = names[mask[movable].argmax(1)]
+    return out
 
 
 def island_colors(labels):
@@ -282,7 +462,7 @@ def restore(mesh, saved):
     n_edges, s, n_loops, uv = saved
     if n_edges != len(mesh.edges):
         return False
-    mesh.edges.foreach_set("use_seam", s)
+    _write_seams(mesh, s)
     if uv is not None and n_loops == len(mesh.loops):
         ensure_layer(mesh)
         mesh.uv_layers.active.data.foreach_set("uv", uv.ravel())
@@ -774,6 +954,136 @@ class FixUV:
 _fixing = [None]  # the Fix stroke in progress, for its preview
 
 
+class TidySeams:
+    """Trigger handler for the Tidy tool. The stroke keeps every face's island (self.labels) and rewrites the
+    seams from them as faces change hands: the main hand's brush gives the faces it passes to the island it
+    started in (label), the off hand's smooths the boundaries under it and removes the seams there that go
+    nowhere (_Stitching.dead_ends()). Those stay where only the main hand goes. Unwraps on release when live."""
+    smooth = True  # The trigger operator stabilizes the tip (smoothing.py).
+
+    def __init__(self, context, obj, scale, label=None):
+        settings = context.scene.vr_sculpt
+        self.obj = obj
+        self.label = label  # None: the off hand's cleaning.
+        self.radius = settings.uv_fix_radius * scale
+        self.live = settings.uv_live
+        self.method = settings.uv_method
+        me = obj.data
+        self.stitching = stitching = _stitching_of(obj)
+        self.marked = seams(me)
+        # UV islands without seams (UVs from elsewhere) become seams, here in the stroke's copy until it changes
+        # something: otherwise the old boundary would stay in the UVs wherever the new one goes.
+        self.adopt = not seams_lead(me)
+        self.labels = stitching.labels(self.marked, self.adopt)
+        if self.adopt:
+            differ = self.labels[stitching.face_a] != self.labels[stitching.face_b]
+            self.marked[stitching.edges[differ]] = True
+        world = _world(obj)
+        self.centers = _face_centers(me, world)
+        normals = np.empty(len(me.polygons) * 3)
+        me.polygons.foreach_get("normal", normals)
+        m = np.linalg.inv(np.array(obj.matrix_world)[:3, :3]).T
+        normals = normals.reshape(-1, 3) @ m.T
+        self.normals = normals / np.maximum(np.linalg.norm(normals, axis=1), 1e-12)[:, None]
+        self.weight = self.apart = None  # The smoothing's, on its first pass.
+        self.next_pass = 0.0
+        self.changed = False
+
+    def _brushed(self, point):
+        """Bool per face: under the brush, and not the far side of a thin part."""
+        from . import paint
+        near = np.linalg.norm(self.centers - np.array(point[:]), axis=1) <= self.radius
+        hit = paint.surface_near(self.obj, point, 2.0 * self.radius)
+        if hit is not None:
+            near &= self.normals @ np.array(hit[1][:]) > TIDY_FACING
+        return near
+
+    def _write(self, labels, marked):
+        """New islands and seams, from these labels and marked, the seams that had the same island on both
+        sides staying: a boundary that's gone leaves nothing, but a relief cut isn't a boundary, and one that
+        reached the boundary still does (_Stitching.carried_on())."""
+        st = self.stitching
+        moved = labels != self.labels
+        if moved.any():
+            was_marked = marked
+            kept = st.open_seams(self.labels, marked)
+            touched = moved[st.face_a] | moved[st.face_b]
+            marked = marked.copy()
+            marked[st.edges[touched]] = False
+            marked[st.edges[touched & (labels[st.face_a] != labels[st.face_b])]] = True
+            marked |= kept
+            marked = st.carried_on(marked, was_marked, self.labels, labels)
+            self.labels = labels
+        elif (marked == self.marked).all():
+            return
+        self.marked = marked
+        if self.adopt:
+            self.obj.data[SEAMS_LEAD] = True
+            self.adopt = False
+        # Only the data: what draws seams in the headset reads it from there, so mesh.update() can wait for
+        # finish(), once.
+        _write_seams(self.obj.data, marked)
+        self.changed = True
+
+    def _weights(self):
+        """How strongly each pair of adjacent faces couples: the edge between them over the distance between
+        their centers. And the typical distance, the scale a smoothing pass has to reach across."""
+        st = self.stitching
+        me = self.obj.data
+        world = _world(self.obj)
+        ev = np.empty(len(me.edges) * 2, dtype=np.int64)
+        me.edges.foreach_get("vertices", ev)
+        ev = ev.reshape(-1, 2)
+        lengths = np.linalg.norm(world[ev[:, 0]] - world[ev[:, 1]], axis=1)[st.edges]
+        apart = np.maximum(np.linalg.norm(self.centers[st.face_a] - self.centers[st.face_b], axis=1), 1e-9)
+        self.weight = np.maximum(lengths, 1e-9) / apart
+        self.apart = apart
+
+    def _clean(self, point):
+        st = self.stitching
+        brushed = self._brushed(point)
+        if self.weight is None:
+            self._weights()
+        touching = brushed[st.face_a] | brushed[st.face_b]
+        reach = np.zeros(st.n_edges, dtype=bool)
+        reach[st.edges[touching]] = True
+        marked = self.marked & ~(st.dead_ends(self.labels, self.marked) & reach)
+        spacing = float(self.apart[touching].mean()) if touching.any() else self.radius
+        steps = int(min(max((self.radius / spacing) ** 2 / 2.0, 2.0), TIDY_STEPS_MAX))
+        self._write(relaxed_labels(self.labels, st.face_a, st.face_b, self.weight, brushed, steps), marked)
+
+    def update(self, context, pose, tip_pose, value):
+        point = tip_pose.translation
+        if self.label is not None:
+            take = self._brushed(point) & (self.labels != self.label)
+            if take.any():
+                labels = self.labels.copy()
+                labels[take] = self.label
+                self._write(labels, self.marked)
+            return
+        now = time.monotonic()
+        if now >= self.next_pass:
+            self.next_pass = now + TIDY_SMOOTH_EVERY
+            self._clean(point)
+
+    def finish(self, context):
+        if not self.changed:
+            return
+        self.obj.data.update()
+        changed()
+        if self.live:
+            unwrap(context, self.obj, self.method)  # Which says how it went.
+        else:
+            say("Seams tidied")
+        tick(context)
+
+
+def _stitching_of(obj):
+    """The object's _Stitching, the island view's if that's current."""
+    key = (obj.name, obj.data.as_pointer(), 'ISLANDS', _version[0])
+    return _view["stitching"] if _view["stitching"] is not None and _view["key"] == key else _Stitching(obj.data)
+
+
 class _IslandGrab:
     """Base of the trigger handlers that transform one UV island about its center. The stroke only draws: the
     shader turns the island's UVs (uv_transform()), so a dense mesh costs nothing per frame. Release writes
@@ -953,7 +1263,8 @@ def _island_arrays(obj, faces, color):
     used, tris = np.unique(tris, return_inverse=True)
     colors = np.empty((len(used), 4), dtype=np.float32)
     colors[:] = color
-    return pos[used], _uvs(me)[used].astype(np.float32), colors, tris.reshape(-1, 3).astype(np.int32)
+    uv = _uvs(me)[used].astype(np.float32) if len(me.uv_layers) else np.zeros((len(used), 2), dtype=np.float32)
+    return pos[used], uv, colors, tris.reshape(-1, 3).astype(np.int32)
 
 
 def _centers_if_remade(obj):
@@ -986,12 +1297,30 @@ def _pick_island(context, settings, hand, pose, tip_pose, scale):
     face = face_under(obj, tip_pose.translation, ISLAND_REACH * scale, _centers_if_remade(obj))
     if face is None:
         return NoIsland("Touch an island with the tip")
-    labels = _hover["labels"] if _hover["key"] == _hover_key(obj) else island_labels(me, use_seams=False)
+    current = _hover["key"] == _hover_key(obj, settings.uv_tool)
+    labels = _hover["labels"] if current else island_labels(me, use_seams=False)
     if settings.uv_tool == 'TWIST':
         return TwistIsland(context, obj, face, labels, hand, pose)
     if settings.uv_repack and (labels == labels[face]).all():
         return NoIsland("Only one island: packing would size it back")
     return SizeIsland(context, obj, face, labels, tip_pose, scale)
+
+
+def _pick_tidy(context, settings, off, tip_pose, scale):
+    obj = fix_target(context)
+    if obj is None or not len(obj.data.polygons):
+        return None
+    if off:
+        return TidySeams(context, obj, scale)
+    reach = max(settings.uv_fix_radius, ISLAND_REACH) * scale
+    face = face_under(obj, tip_pose.translation, reach, _centers_if_remade(obj))
+    if face is None:
+        return NoIsland("Start on the island to push out")
+    stroke = TidySeams(context, obj, scale, None)
+    if (stroke.labels == stroke.labels[0]).all():
+        return NoIsland("Only one island: there's no boundary to push")
+    stroke.label = stroke.labels[face]
+    return stroke
 
 
 _grab = [None]  # the Twist or Size stroke in progress, for its preview
@@ -1014,6 +1343,8 @@ def pick(context, settings, left, scale, hand, pose, tip_pose):
             return FixUV(context, obj, scale)
     if settings.uv_tool in ISLAND_TOOLS:
         return _pick_island(context, settings, hand, pose, tip_pose, scale)
+    if settings.uv_tool == 'TIDY':
+        return _pick_tidy(context, settings, left, tip_pose, scale)
     return None
 
 
@@ -1024,16 +1355,16 @@ def pick(context, settings, left, scale, hand, pose, tip_pose):
 # the batch is made when drawing. open and count: the island view's seams that separate nothing (a bool per
 # edge of the object's own mesh) and how many islands there are; labels and stitching: what a seam stroke
 # works them out from; next: when a seam stroke can do it again.
-_view = {"key": None, "arrays": None, "batch": None, "batch_key": None, "open": None, "count": 0, "labels": None,
+_view = {"key": None, "arrays": None, "batch": None, "batch_key": None, "dead": None, "count": 0, "labels": None,
          "stitching": None, "next": 0.0}
 
-# The island under each tip with Twist or Size on: the object's island labels, from the timer, and a batch
-# for each island drawn so far.
+# The island under each tip with Twist, Size or Tidy on: the object's island labels, from the timer, and a
+# batch for each island drawn so far.
 _hover = {"key": None, "labels": None, "centers": None, "batches": {}}
 
 
 def _forget_view():
-    _view.update(key=None, arrays=None, batch=None, batch_key=None, open=None, count=0, labels=None, stitching=None)
+    _view.update(key=None, arrays=None, batch=None, batch_key=None, dead=None, count=0, labels=None, stitching=None)
 
 
 def forget_caches():
@@ -1087,7 +1418,7 @@ def build_view(context, obj, view, labels=None):
             color = rig.heat_colors(np.repeat(score, totals), VIEW_ALPHA)
         elif view == 'ISLANDS':
             if labels is None or len(labels) != len(me.polygons):
-                labels = island_labels(me)
+                labels = island_labels(me, leader=obj.data)
             color = island_colors(labels)[_loop_faces(me)[0]]
         else:
             color = np.ones((nl, 4), dtype=np.float32)
@@ -1098,8 +1429,8 @@ def build_view(context, obj, view, labels=None):
 
 
 def _following(settings):
-    """A seam stroke with the island view: it rebuilds during the stroke, to show what the cut does."""
-    return settings.uv_view == 'ISLANDS' and settings.uv_tool == 'SEAM'
+    """A Seams or Tidy stroke with the island view: it rebuilds during the stroke, to show what the cut does."""
+    return settings.uv_view == 'ISLANDS' and settings.uv_tool in {'SEAM', 'TIDY'}
 
 
 def busy(context):
@@ -1109,27 +1440,28 @@ def busy(context):
 
 
 def _hover_tick(context, settings):
-    """Twist and Size: the labels the island under a tip is looked up in. (Not while one is held: that
-    island is its own preview.)"""
+    """Twist, Size and Tidy: the labels the island under a tip is looked up in: the islands the UVs have for the
+    first two, and the seams' for Tidy, which works on those. (Not during a stroke: what's held draws itself.)"""
     from . import operators
-    if settings.mode != 'MODEL' or settings.uv_tool not in ISLAND_TOOLS:
+    tool = settings.uv_tool
+    if settings.mode != 'MODEL' or tool not in HOVER_TOOLS:
         if _hover["key"] is not None:
             _hover.update(key=None, labels=None, centers=None, batches={})
         return
     if operators.active_hands:
         return
     obj = fix_target(context)
-    if obj is None or not has_uvs(obj) or not len(obj.data.polygons):
+    if obj is None or not len(obj.data.polygons) or (tool != 'TIDY' and not has_uvs(obj)):
         _hover.update(key=None, labels=None, centers=None, batches={})
         return
-    key = _hover_key(obj)
+    key = _hover_key(obj, tool)
     if key != _hover["key"]:
-        _hover.update(key=key, labels=island_labels(obj.data, use_seams=False), centers=_centers_if_remade(obj),
-                      batches={})
+        _hover.update(key=key, labels=island_labels(obj.data, use_seams=tool == 'TIDY'),
+                      centers=_centers_if_remade(obj), batches={})
 
 
-def _hover_key(obj):
-    return obj.name, obj.data.as_pointer(), _version[0]
+def _hover_key(obj, tool):
+    return obj.name, obj.data.as_pointer(), tool, _version[0]
 
 
 def _follow_tick(context, obj):
@@ -1142,8 +1474,8 @@ def _follow_tick(context, obj):
     if stitching is None or stitching.n_edges != len(mesh.edges) or stitching.n_faces != len(mesh.polygons):
         return
     marked = seams(mesh)
-    labels = stitching.labels(marked)
-    _view["open"] = stitching.open_seams(labels, marked)
+    labels = stitching.labels(marked, not seams_lead(mesh))
+    _view["dead"] = stitching.dead_ends(labels, marked)
     if _view["labels"] is None or not np.array_equal(labels, _view["labels"]):
         _view.update(labels=labels, count=len(np.unique(labels)), batch=None)
         arrays = _view["arrays"]
@@ -1175,25 +1507,25 @@ def tick(context):
     key = (obj.name, obj.data.as_pointer(), settings.uv_view, _version[0])
     if key == _view["key"]:
         return
-    labels = open_edges = stitching = None
+    labels = dead = stitching = None
     count = 0
     if settings.uv_view == 'ISLANDS':
         stitching = _Stitching(obj.data)
         marked = seams(obj.data)
-        labels = stitching.labels(marked)
-        open_edges = stitching.open_seams(labels, marked)
+        labels = stitching.labels(marked, not seams_lead(obj.data))
+        dead = stitching.dead_ends(labels, marked)
         count = len(np.unique(labels))
-    _view.update(key=key, arrays=build_view(context, obj, settings.uv_view, labels), batch=None, open=open_edges,
+    _view.update(key=key, arrays=build_view(context, obj, settings.uv_view, labels), batch=None, dead=dead,
                  count=count, labels=labels, stitching=stitching)
 
 
 def island_note(settings):
     """The island view's count for the panel, or ""."""
-    if settings.uv_view != 'ISLANDS' or _view["open"] is None:
+    if settings.uv_view != 'ISLANDS' or _view["dead"] is None:
         return ""
-    count, open_edges = _view["count"], int(_view["open"].sum())
+    count, dead = _view["count"], int(_view["dead"].sum())
     text = f"{count} island" + ("" if count == 1 else "s")
-    return text + (f", {open_edges} open seam edges" if open_edges else "")
+    return text + (f", {dead} dead-end seam edges" if dead else "")
 
 
 @bpy.app.handlers.persistent
@@ -1296,10 +1628,13 @@ def _draw_grab(settings):
 
 def _draw_hover(context, settings, tips, scale):
     """The islands under the tips, tinted: what the trigger would take."""
+    from . import actions
     labels = _hover["labels"]
     obj = fix_target(context)
     if labels is None or obj is None or _hover["key"][0] != obj.name or len(labels) != len(obj.data.polygons):
         return
+    if settings.uv_tool == 'TIDY' and len(tips) == 2:
+        tips = [tips[actions.main_index(context)]]  # Only the main hand takes an island; the off hand brushes.
     seen = set()
     for tip in tips:
         face = face_under(obj, tip, ISLAND_REACH * scale, _hover["centers"])
@@ -1318,21 +1653,21 @@ def _draw_hover(context, settings, tips, scale):
 
 
 def draw(shader, context, tips, scale):
-    """The UV page in the headset: the view, the island in reach of Twist and Size or the one they hold, the
-    seams of what the tools work on, the edges in reach of the Seams tool, and the faces a Fix stroke has
+    """The UV page in the headset: the view, the island in reach of Twist, Size and Tidy or the one they hold,
+    the seams of what the tools work on, the edges in reach of the Seams tool, and the faces a Fix stroke has
     brushed. shader: UNIFORM_COLOR."""
-    from . import shading
+    from . import operators, shading
     settings = context.scene.vr_sculpt
     if settings.uv_view != 'NONE':
         _draw_view(context, settings)
     if _grab[0] is not None:
         _draw_grab(settings)
-    elif settings.uv_tool in ISLAND_TOOLS:
+    elif settings.uv_tool in HOVER_TOOLS and not operators.active_hands:
         _draw_hover(context, settings, tips, scale)
     gpu.state.blend_set('ALPHA')
     gpu.state.depth_test_set('NONE')
     seam_pts, open_pts, reach_pts = [], [], []
-    follow = _view["open"] if settings.uv_view == 'ISLANDS' else None
+    follow = _view["dead"] if settings.uv_view == 'ISLANDS' else None
     view_name = _view["key"][0] if _view["key"] is not None else None
     for obj in shading.mark_targets(context):
         segs = shading._edge_segments(obj)

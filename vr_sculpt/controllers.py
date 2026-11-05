@@ -147,6 +147,8 @@ def _trigger(s, info):
             return ("seam", "Mark seams")
         if s.uv_tool == 'FIX':
             return ("fix", "Fix UVs")
+        if s.uv_tool == 'TIDY':
+            return ("seam", "Push boundary")
         if s.uv_tool == 'TWIST':
             return ("gizmo_turn", "Twist island")
         if s.uv_tool == 'SIZE':
@@ -201,6 +203,8 @@ def _left_trigger(s, info, right):
         return ("trash", "Delete")
     if mode == 'MODEL' and s.uv_tool == 'SEAM':
         return ("seam", "Clear seams")
+    if mode == 'MODEL' and s.uv_tool == 'TIDY':
+        return ("seam", "Smooth, clean seams")
     if mode == 'MODEL' and s.uv_tool in {'FIX', 'TWIST', 'SIZE'}:
         return right
     if mode == 'MODEL' and s.model_mark != 'NONE':

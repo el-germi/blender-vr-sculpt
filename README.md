@@ -213,6 +213,23 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     and nothing outside it moves. A brushed whole island is unwrapped in
     place. The cost goes with the patch (about 60 ms for 50 faces on a
     32k-face mesh), not the sculpt.
+  - **Tidy** is a brush for cleaning up seams once they're traced (it brings up
+    the Islands view, and shares the **Radius** under More with Fix). With the
+    main hand, start inside an island (it's tinted) and drag across its border:
+    the faces you pass join it and the boundary moves out with you. You can
+    push through a thin island, which splits it, or into its own other side,
+    which closes the gap. With the off hand, brush over seams: boundaries
+    smooth out (bumps and notches go, straight runs and junctions stay, and a
+    speck of an island smaller than the brush is absorbed) and seams that go
+    nowhere (amber in the Islands view) are removed. Those are the ones with a
+    loose end, as far back as they reach a border or a boundary. A seam that
+    does a job stays, though it has the same island on both sides: a tube's cut
+    from one end to the other, or the one cut that opens a closed shape (a
+    sphere's meridian, with any branches). The Seams tool's off hand still
+    removes those. Pushing a boundary leaves dead ends alone, and a tube's cut
+    follows the boundary it ends on. Seams stay on edges, so on quads a
+    diagonal is still a staircase. With **Live** on the mesh unwraps when you
+    let go. **Clear ends** (More) removes every seam that goes nowhere at once.
   - **Twist** turns one island's texture on the surface: touch it (the island
     in reach is tinted), hold the trigger and roll your wrist. The texture
     turns the way your hand does, for grain and fabric directions. **Snap 15°**
@@ -230,8 +247,11 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     pink outside the UV square), **Stretch**, each face colored from blue
     (true to the surface) to red (twice or half the typical face's size, or
     skewed as much), or **Islands**, each island in its own color. Islands
-    follow the seams while you trace them, before any unwrap, so you see the
-    moment a cut closes and splits one. Seams with the same island on both
+    follow the seams while you trace or tidy them, before any unwrap, so you
+    see the moment a cut closes and splits one. They're the islands the next
+    unwrap will cut: once we've unwrapped a mesh only its seams count (a UV
+    split without a seam is left over), and on UVs from elsewhere the UV
+    splits count too, until a Tidy stroke makes seams of them. Seams with the same island on both
     sides are amber instead of red: they don't separate anything, which is
     what you want from a relief cut and not from a loop you meant to close.
     The panel counts both.
@@ -706,6 +726,12 @@ With Triggers" is on. The setting applies when the VR session starts.
   that aren't seams. During a seam stroke only the seams change, so it keeps
   the slow part (which faces meet where: ~190 ms at 135k faces) and redoes the
   rest (~5 ms), and rebuilds the colors only when an island really splits.
+  Tidy keeps every face's island and rewrites seams from them, so boundaries
+  stay on edges and any number of islands can meet. Smoothing is threshold
+  dynamics: each island's mask is blurred across the brushed faces, faces
+  outside holding still, and each face goes to the strongest. During a stroke
+  it writes the seam attribute without `mesh.update()`, which it does once on
+  release: the headset's seams read the attribute.
   Twist and Size don't touch the mesh during the stroke: the shader transforms
   the island's UVs from two uniforms, so they cost nothing per frame on a dense
   mesh. The write and the pack happen on release (~1.4 s at 135k faces; Repack
@@ -1221,7 +1247,10 @@ Found with [tests/probe_dyntopo.py](tests/probe_dyntopo.py) and
 
 Found with [tests/probe_uv.py](tests/probe_uv.py):
 
-- Seams are `MeshEdge.use_seam`, stored as an edge attribute `uv_seam`.
+- Seams are `MeshEdge.use_seam`, stored as an edge attribute `uv_seam`, which
+  only exists once a seam has been set. Go through the attribute: on 274k edges
+  `attributes["uv_seam"].data.foreach_get` takes 0.01 ms and
+  `edges.foreach_get("use_seam")` 27 ms (setting: 0.04 ms against 32 ms).
   Pins are a corner attribute `.pn.<UV map name>`; `MeshUVLoopLayer.pin` is
   empty until it exists.
 - `uv.unwrap` (methods `ANGLE_BASED`, `CONFORMAL`, `MINIMUM_STRETCH`),

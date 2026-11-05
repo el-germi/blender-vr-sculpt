@@ -432,6 +432,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('NONE', "Off", "The trigger grabs and creates"),
             ('SEAM', "Seams", "Touched edges become UV seams (other hand clears them)"),
             ('FIX', "Fix", "Brushed faces unwrap again, stitched to the rest of the layout"),
+            ('TIDY', "Tidy", "Drag an island's boundary out from inside it; the other hand smooths boundaries and "
+                             "removes seams that separate nothing"),
             ('TWIST', "Twist", "Hold on an island and roll the wrist: its texture turns on the surface"),
             ('SIZE', "Size", "Hold on an island and raise or lower the hand: it gets more or less of the UV square"),
         ),
@@ -444,7 +446,7 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('NONE', "Off", "Nothing"),
             ('CHECKER', "Checker", "A checker on the UVs: squares should stay square and even"),
             ('STRETCH', "Stretch", "Faces colored by UV stretch: blue is true to the surface, red twice off"),
-            ('ISLANDS', "Islands", "Each island in its own color, from the UVs and the seams traced since"),
+            ('ISLANDS', "Islands", "Each island in its own color, as the seams cut them"),
         ),
         default='CHECKER',
     )
@@ -472,8 +474,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         name="Checker Squares", default=16, min=2, max=64,
         description="Squares per side of the UV square in the checker view")
     uv_fix_radius: FloatProperty(
-        name="Fix Radius", default=0.03, min=0.005, max=0.2, unit='LENGTH', subtype='DISTANCE',
-        description="Reach of the Fix brush (hand-space meters)")
+        name="Brush Radius", default=0.03, min=0.005, max=0.2, unit='LENGTH', subtype='DISTANCE',
+        description="Reach of the Fix and Tidy brushes (hand-space meters)")
     model_mark: EnumProperty(
         name="Mark Edges",
         description="While on, the trigger marks the edges it touches on the selected object instead of grabbing "

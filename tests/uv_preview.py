@@ -133,7 +133,7 @@ def shoot(win, area, region, name):
             log("unwrap with the ring:", uv.unwrap(ctx, ball), uv.message())
             s.uv_view = 'ISLANDS'
             uv.tick(ctx)
-            log("island note:", uv.island_note(s), "| open edges:", int(uv._view["open"].sum()))
+            log("island note:", uv.island_note(s), "| dead-end edges:", int(uv._view["dead"].sum()))
             bpy.app.timers.register(lambda: (shoot(win, area, region, "islands"), None)[1], first_interval=0.5)
             return
         if name == "islands":
