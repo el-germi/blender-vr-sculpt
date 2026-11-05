@@ -1163,6 +1163,16 @@ Found with [tests/probe_lookdev.py](tests/probe_lookdev.py) and
 - The colors come from the unified paint settings even when Unified Color is
   off.
 - A material's paint-slot list is only refreshed by Texture Paint mode.
+- With the experimental **3D Texture Paint** preference
+  (`use_3d_texture_paint`) on, the Draw-type brushes (Hard, Soft, Airbrush,
+  Erase) go to another engine: it finds each dab by the element's `location`
+  in **object space** and doesn't follow its `size`, and with a world-space
+  `location` it answers `FINISHED` and paints nothing. Blur and Smear aren't
+  affected. Painting from the desktop works either way, since mouse strokes
+  are built for it. So Paint mode turns the preference off for the length of
+  each call (`paint.projection_paint`, about 1.5 microseconds) and the user
+  keeps it. The tests' `--factory-startup` hides this: run a check with the
+  user's preferences too when something only fails on their machine.
 - The brush colors are scene linear (`UnifiedPaintSettings.color` is a
   `COLOR`, not `COLOR_GAMMA`): 0.5 paints 0.737 into an 8-bit sRGB image. So
   a color picked from a byte image is converted from sRGB first, or it
