@@ -1,6 +1,7 @@
 """Background tests for the UV page: seams marked with the trigger (and joined along the mesh), live
 unwrap, the Fix brush's partial unwrap, Smart UV / Pack / Seams from Sharp, the stretch measure, the
-view's arrays, seams kept through primitive resizes, and the panel page.
+view's arrays, islands and their view, Twist and Size, seams kept through primitive resizes, and the
+panel page.
 
 blender --background --factory-startup --python tests/test_uv.py
 """
@@ -8,11 +9,12 @@ blender --background --factory-startup --python tests/test_uv.py
 import math
 import os
 import sys
+import time
 import traceback
 
 import bpy
 import numpy as np
-from mathutils import Vector
+from mathutils import Matrix, Quaternion, Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -269,7 +271,7 @@ def test_view():
     ss, ctx, settings = setup()
     box = cube(0.1, (0, 0, 0), "View")
     uv.smart_project(bpy.context, box)
-    out = uv.build_view(bpy.context, box, stretch=True)
+    out = uv.build_view(bpy.context, box, 'STRETCH')
     check(out is not None, "built")
     pos, u, color, tris = out
     me = box.data
@@ -292,6 +294,407 @@ def test_view():
     check(uv._view["key"] != key, "a change rebuilds it")
     operators._on_data_swap()
     check(uv._view["arrays"] is None, "undo forgets it")
+    menus.close_sheet(bpy.context)
+    settings.model_page = 'SHAPE'
+
+
+def seamed_cube(name="Isles", loc=(0.0, 0.0, 0.0), subdivisions=2):
+    """A cube unwrapped from its 12 edges: six islands, one per side."""
+    box = cube(0.2, loc, name, subdivisions=subdivisions)
+    primitives.make_active(bpy.context, box)
+    uv.seams_from_sharp(box)
+    check(uv.unwrap(bpy.context, box), "unwrap the seamed cube")
+    bpy.context.view_layer.update()
+    return box
+
+
+def side_faces(obj, axis, value):
+    """Bool per face: on the side of a cube at this coordinate (local)."""
+    fc = np.array([p.center[:] for p in obj.data.polygons])
+    return np.abs(fc[:, axis] - value) < 1e-5
+
+
+def loops_of(mesh, faces):
+    return faces[uv._loop_faces(mesh)[0]]
+
+
+def island_area(obj, faces):
+    me = obj.data
+    u = uvs(obj)
+    tris = np.array([t.loops[:] for t in me.loop_triangles if faces[t.polygon_index]])
+    d1, d2 = u[tris[:, 1]] - u[tris[:, 0]], u[tris[:, 2]] - u[tris[:, 0]]
+    return float(np.abs(d1[:, 0] * d2[:, 1] - d1[:, 1] * d2[:, 0]).sum() / 2)
+
+
+def surface_direction(obj, faces):
+    """Which way U runs along the surface on these faces (a flat side), as a world unit vector."""
+    me = obj.data
+    u = uvs(obj)
+    co = np.array([v.co[:] for v in me.vertices])
+    loop_v = uv._loop_faces(me)[1]
+    tri = next(t.loops[:] for t in me.loop_triangles if faces[t.polygon_index])
+    p = co[loop_v[list(tri)]]
+    t = u[list(tri)]
+    e1, e2 = p[1] - p[0], p[2] - p[0]
+    u1, u2 = t[1] - t[0], t[2] - t[0]
+    det = u1[0] * u2[1] - u1[1] * u2[0]
+    du = (e1 * u2[1] - e2 * u1[1]) / det
+    return du / np.linalg.norm(du)
+
+
+def hold(ctx, ss, hand_idx, start, frames):
+    """Hold the trigger through frames, each (aim location, aim rotation), then let go."""
+    ss.trigger = 1.0
+    ss.aim_loc[hand_idx], ss.aim_rot[hand_idx] = Vector(start[0]), Quaternion(start[1])
+    op = tm.harness()
+    r = op.invoke(ctx, tm.FakeEvent('XR_ACTION', 'PRESS', tm.FakeXR(start[0], start[1], hand=tm.actions.HANDS[hand_idx])))
+    if r != {'RUNNING_MODAL'}:
+        return op, r
+    for loc, rot in frames:
+        time.sleep(0.01)
+        ss.aim_loc[hand_idx], ss.aim_rot[hand_idx] = Vector(loc), Quaternion(rot)
+        op.modal(ctx, tm.FakeEvent('TIMER'))
+    ss.trigger = 0.0
+    time.sleep(0.01)
+    return op, op.modal(ctx, tm.FakeEvent('TIMER'))
+
+
+def rolled(degrees, steps=9):
+    """Aim rotations from none to this roll about the controller's own axis, a few degrees a frame."""
+    return [Quaternion((0.0, 0.0, 1.0), math.radians(degrees) * (i + 1) / steps) for i in range(steps)]
+
+
+def test_islands():
+    print("== islands: from UVs and seams")
+    clear()
+    ss, ctx, settings = setup()
+    box = cube(0.2, (0, 0, 0), "Plain", subdivisions=1)
+    primitives.make_active(bpy.context, box)
+    me = box.data
+    me.uv_layers.new(name="UVMap") if not len(me.uv_layers) else None
+    me.uv_layers.active.data.foreach_set("uv", np.zeros(len(me.loops) * 2))
+    check(len(np.unique(uv.island_labels(me))) == 1, "UVs all alike and no seams: one island")
+
+    # A seam ring around the middle splits it before any unwrap. An open line doesn't.
+    segs = edge_world(box)
+    ring = (np.abs(segs[:, :, 2]) < 1e-5).all(1)
+    line = ring & (segs[:, :, 1] < 1e-5).all(1) & (segs[:, :, 0] > -1e-5).all(1)
+    uv.set_seams(me, line)
+    labels = uv.island_labels(me)
+    check(len(np.unique(labels)) == 1, "an open seam line separates nothing")
+    check((uv.open_seams(me, labels) == line).all() and line.any(), "and it's the open one")
+    uv.set_seams(me, ring)
+    labels = uv.island_labels(me)
+    check(len(np.unique(labels)) == 2, f"a closed ring makes two islands ({len(np.unique(labels))})")
+    check(not uv.open_seams(me, labels).any(), "and no seam is open")
+    fc = np.array([p.center[:] for p in me.polygons])
+    check(len(set(labels[fc[:, 2] > 0])) == 1 and labels[fc[:, 2] > 0][0] != labels[fc[:, 2] < 0][0],
+          "above and below the ring are the two")
+    check(len(np.unique(uv.island_labels(me, use_seams=False))) == 1, "without seams, the UVs still join them")
+    low = labels.min()
+    before = uv.island_colors(labels)
+    check(before.shape == (len(labels), 4) and (before[labels == low] == before[labels == low][0]).all(),
+          "one color per island")
+    check(not np.allclose(before[labels == low][0], before[labels != low][0]), "different islands, different colors")
+
+    # After a real unwrap the UVs separate them, seams or not.
+    uv.unwrap(bpy.context, box)
+    uv.clear_seams(box)
+    check(len(np.unique(uv.island_labels(me))) == 2, "unwrapped: the islands come from the UVs too")
+
+    # A big mesh mustn't be slow to label: this runs while a seam is traced.
+    dense = sphere("DenseIslands", 256, 128)
+    t0 = time.perf_counter()
+    n = len(np.unique(uv.island_labels(dense.data)))
+    ms = (time.perf_counter() - t0) * 1000
+    print(f"    {ms:.1f} ms for {len(dense.data.polygons)} faces, {n} islands")
+    check(ms < 150, f"labels a {len(dense.data.polygons)}-face mesh quickly ({ms:.0f} ms)")
+    bpy.data.objects.remove(dense)
+
+
+def test_islands_view():
+    print("== island view: tints the mesh, follows a seam stroke")
+    clear()
+    ss, ctx, settings = setup()
+    box = cube(0.2, (0, 0, 0), "IslandView", subdivisions=1)
+    primitives.make_active(bpy.context, box)
+    me = box.data
+    check(uv.build_view(bpy.context, box, 'CHECKER') is None or len(me.uv_layers), "checker needs UVs")
+    settings.model_page = 'UV'
+    menus.open_sheet('OBJECT')
+    settings.uv_view = 'ISLANDS'
+    uv.tick(bpy.context)
+    arrays = uv._view["arrays"]
+    check(arrays is not None and len(arrays[2]) == len(me.loops), "built, one color per corner")
+    check(uv._view["count"] == 1 and uv.island_note(settings) == "1 island", f"counted ({uv.island_note(settings)!r})")
+
+    # The ring around the middle traced with the trigger, seen during the stroke.
+    settings.uv_tool = 'SEAM'
+    settings.uv_live = False
+    uv.tick(bpy.context)
+    check(not uv.busy(bpy.context), "the timer's not hurried without a stroke")
+    operators.active_hands.add(1)
+    try:
+        check(uv.busy(bpy.context), "a seam stroke hurries the timer")
+        segs = edge_world(box)
+        ring = (np.abs(segs[:, :, 2]) < 1e-5).all(1)
+        half = ring & (segs[:, :, 1] < 1e-5).all(1)
+        uv.set_seams(me, half)
+        uv._view["next"] = 0.0
+        uv.tick(bpy.context)
+        check("open seam" in uv.island_note(settings), f"half a ring: open ({uv.island_note(settings)!r})")
+        uv.set_seams(me, ring)
+        uv._view["next"] = time.monotonic() + 100.0
+        uv.tick(bpy.context)
+        check(uv._view["count"] == 1, "rebuilds are spaced out during the stroke")
+        uv._view["next"] = 0.0
+        uv.tick(bpy.context)
+        check(uv._view["count"] == 2, f"the whole ring: two islands, during the stroke ({uv._view['count']})")
+        check(uv.island_note(settings) == "2 islands", f"none open ({uv.island_note(settings)!r})")
+        tint = uv._view["arrays"][2]
+        check(len(np.unique(tint, axis=0)) == 2, "and two colors on the mesh")
+        settings.uv_view = 'CHECKER'
+        check(not uv.busy(bpy.context), "the other views don't follow a stroke")
+        key = uv._view["key"]
+        uv.tick(bpy.context)
+        check(uv._view["key"] == key, "so they wait for it to end")
+    finally:
+        operators.active_hands.discard(1)
+    # Modifiers changing the faces: labels come from the shown mesh.
+    settings.uv_view = 'ISLANDS'
+    settings.uv_tool = 'NONE'
+    box.modifiers.new("Sub", 'SUBSURF').levels = 1
+    bpy.context.view_layer.update()
+    uv.tick(bpy.context)
+    arrays = uv._view["arrays"]
+    check(arrays is not None and len(np.unique(arrays[2], axis=0)) == 2 and uv._view["count"] == 2,
+          f"under a Subsurf, still two islands ({len(np.unique(arrays[2], axis=0)) if arrays else None})")
+    box.modifiers.clear()
+    operators._on_data_swap()
+    check(uv._view["open"] is None, "undo forgets it")
+    menus.close_sheet(bpy.context)
+    settings.uv_view = 'CHECKER'
+    settings.model_page = 'SHAPE'
+
+
+def test_twist():
+    print("== Twist: a wrist roll turns the island on the surface")
+    clear()
+    ss, ctx, settings = setup()
+    box = seamed_cube("Twist")
+    me = box.data
+    settings.uv_tool = 'TWIST'
+    settings.uv_repack = False
+    settings.uv_twist_snap = True
+    top = side_faces(box, 2, 0.1)
+    top_loops = loops_of(me, top)
+    before = uvs(box).copy()
+    dir0 = surface_direction(box, top)
+    point = (0.02, 0.03, 0.11)
+
+    # The controller points down at the top side, seen from above: rolling it counterclockwise (seen from
+    # behind the hand, from above) by 30 degrees turns the texture counterclockwise by 30 degrees.
+    op, r = hold(ctx, ss, 1, (point, Quaternion()), [(point, q) for q in rolled(32.0)])
+    check(type(op.handler).__name__ == "TwistIsland" and r == {'FINISHED'}, f"the trigger twists ({r})")
+    check(abs(op.handler.angle - math.radians(30.0)) < 1e-6, f"32 degrees snaps to 30 ({math.degrees(op.handler.angle):.1f})")
+    check(op.handler.faces[top].all() and op.handler.faces.sum() == top.sum(), "it takes the whole island, only")
+    after = uvs(box)
+    check(np.abs(after[~top_loops] - before[~top_loops]).max() < 1e-6, "the other islands stay")
+    dir1 = surface_direction(box, top)
+    cross = dir0[0] * dir1[1] - dir0[1] * dir1[0]
+    angle = math.degrees(math.atan2(cross, float(dir0 @ dir1)))
+    check(abs(angle - 30.0) < 0.1, f"on the surface, the texture turned 30 degrees the hand's way ({angle:.2f})")
+    check(me.get(uv.ORIENTED) and "Turned 30" in uv.message(), f"remembered, and said ({uv.message()!r})")
+
+    # An island flipped in the UV map still turns the hand's way.
+    u = uvs(box).copy()
+    tl = u[top_loops]
+    u[top_loops] = tl * np.array((-1.0, 1.0)) + np.array((tl[:, 0].max() + tl[:, 0].min(), 0.0))
+    me.uv_layers.active.data.foreach_set("uv", u.ravel())
+    uv.changed()
+    dir0 = surface_direction(box, top)
+    op, r = hold(ctx, ss, 1, (point, Quaternion()), [(point, q) for q in rolled(45.0)])
+    dir1 = surface_direction(box, top)
+    cross = dir0[0] * dir1[1] - dir0[1] * dir1[0]
+    angle = math.degrees(math.atan2(cross, float(dir0 @ dir1)))
+    check(op.handler.sign == -1.0 and abs(angle - 45.0) < 0.1, f"a flipped island too ({op.handler.sign}, {angle:.2f})")
+
+    # Past half a turn, in small steps.
+    settings.uv_twist_snap = False
+    op, r = hold(ctx, ss, 1, (point, Quaternion()), [(point, q) for q in rolled(170.0, 20)])
+    check(abs(math.degrees(op.handler.angle) - 170.0) < 0.1, f"no snap: exact ({math.degrees(op.handler.angle):.2f})")
+    # Roll adds up: past the half turn a single pose can tell.
+    grab = uv.TwistIsland(bpy.context, box, 0, uv.island_labels(me, use_seams=False), tm.actions.HANDS[1],
+                          Matrix.Identity(4))
+    for deg in range(20, 261, 20):
+        grab.update(bpy.context, Quaternion((0.0, 0.0, 1.0), math.radians(deg)).to_matrix().to_4x4(), None, 1.0)
+    check(abs(math.degrees(grab.total) - 260.0) < 1e-3, f"three quarters of a turn adds up ({math.degrees(grab.total):.1f})")
+    grab.abandon()
+    check(uv._grab[0] is None, "abandoned: no preview left")
+
+    # Nothing rolled: nothing happens. A controller held off-axis but not rolled counts nothing.
+    before = uvs(box).copy()
+    tilt = Quaternion((1.0, 0.0, 0.0), math.radians(40.0))
+    op, r = hold(ctx, ss, 1, (point, Quaternion()), [(point, Quaternion()), (point, tilt)])
+    check(r == {'CANCELLED'} and not op.handler.changed and np.abs(uvs(box) - before).max() == 0.0,
+          f"a tilt isn't a roll ({r})")
+
+    # Nothing under the tip: no cube made, nothing grabbed.
+    count = len(bpy.data.objects)
+    op, r = hold(ctx, ss, 1, ((2.0, 2.0, 2.0), Quaternion()), [((2.0, 2.0, 2.0), Quaternion())])
+    check(type(op.handler).__name__ == "NoIsland" and r == {'CANCELLED'} and len(bpy.data.objects) == count,
+          "away from the surface: nothing happens")
+    check("Touch" in uv.message(), f"and it says so ({uv.message()!r})")
+
+    # Pack keeps a hand-turned island where it points.
+    settings.uv_repack = True
+    settings.uv_twist_snap = True
+    before = surface_direction(box, top)
+    op, r = hold(ctx, ss, 1, (point, Quaternion()), [(point, q) for q in rolled(45.0)])
+    check(r == {'FINISHED'} and uv.message().startswith("Turned 45"), f"repacked after the stroke ({uv.message()!r})")
+    u = uvs(box)
+    check(u.min() >= -1e-6 and u.max() <= 1 + 1e-6, f"in the UV square ({u.min():.3f}..{u.max():.3f})")
+    after = surface_direction(box, top)
+    cross = before[0] * after[1] - before[1] * after[0]
+    angle = math.degrees(math.atan2(cross, float(before @ after)))
+    check(abs(angle - 45.0) < 0.5, f"the repack keeps the turn ({angle:.2f})")
+    check(box.mode == 'OBJECT' and bpy.context.view_layer.objects.active == box, "back in Object Mode")
+    turned = surface_direction(box, top)
+    check(uv.pack(bpy.context, box), "the Pack button")
+    after = surface_direction(box, top)
+    check(np.abs(after - turned).max() < 1e-3, "Pack leaves a turned island turned")
+    check(uv.average_scale(bpy.context, box), "Even out")
+    after = surface_direction(box, top)
+    check(np.abs(after - turned).max() < 1e-3, "and Even out")
+    check(uv.unwrap(bpy.context, box) and uv.ORIENTED not in me, "a new unwrap starts over")
+
+    # The left hand does the same, a right-handed user's off hand.
+    settings.uv_repack = False
+    op, r = hold(ctx, ss, 0, (point, Quaternion()), [(point, q) for q in rolled(15.0, 3)])
+    check(type(op.handler).__name__ == "TwistIsland" and r == {'FINISHED'}, "either hand twists")
+    settings.uv_tool = 'NONE'
+
+
+def test_size():
+    print("== Size: raising the hand gives an island more of the UV square")
+    clear()
+    ss, ctx, settings = setup()
+    box = seamed_cube("Size")
+    me = box.data
+    settings.uv_tool = 'SIZE'
+    settings.uv_repack = False
+    top = side_faces(box, 2, 0.1)
+    side = side_faces(box, 0, 0.1)
+    start = (0.02, 0.03, 0.11)
+    a0, b0 = island_area(box, top), island_area(box, side)
+    center0 = uvs(box)[loops_of(me, top)]
+    center0 = (center0.max(0) + center0.min(0)) / 2
+
+    # Up by one doubling.
+    up = (start[0], start[1], start[2] + uv.SIZE_DOUBLE)
+    op, r = hold(ctx, ss, 1, (start, Quaternion()), [(up, Quaternion())])
+    check(type(op.handler).__name__ == "SizeIsland" and r == {'FINISHED'}, f"the trigger sizes ({r})")
+    check(abs(op.handler.factor - 2.0) < 1e-3, f"10 cm up: twice as big ({op.handler.factor:.3f})")
+    a1, b1 = island_area(box, top), island_area(box, side)
+    check(abs(a1 / a0 - 4.0) < 0.01 and abs(b1 / b0 - 1.0) < 1e-6, f"four times the area, the rest as they were "
+          f"({a1 / a0:.3f}, {b1 / b0:.3f})")
+    loops = uvs(box)[loops_of(me, top)]
+    check(np.abs((loops.max(0) + loops.min(0)) / 2 - center0).max() < 1e-5, "about its center")
+    check(uv.ORIENTED not in me, "nothing turned")
+
+    # Down, and back to where it started.
+    down = (start[0], start[1], start[2] - uv.SIZE_DOUBLE)
+    op, r = hold(ctx, ss, 1, (start, Quaternion()), [(down, Quaternion())])
+    check(abs(op.handler.factor - 0.5) < 1e-3 and abs(island_area(box, top) / a0 - 1.0) < 0.01, "down halves it again")
+
+    # A small shake isn't a change; nor does the range run away.
+    op, r = hold(ctx, ss, 1, (start, Quaternion()), [(start, Quaternion())])
+    check(r == {'CANCELLED'}, "no move: no change")
+    grab = uv.SizeIsland(bpy.context, box, 0, uv.island_labels(me, use_seams=False),
+                         Matrix.Translation((0.0, 0.0, 0.0)), 1.0)
+    grab.update(bpy.context, None, Matrix.Translation((0.0, 0.0, 5.0)), 1.0)
+    check(grab.factor == uv.SIZE_MAX, f"kept in range ({grab.factor})")
+    grab.update(bpy.context, None, Matrix.Translation((0.0, 0.0, -5.0)), 1.0)
+    check(grab.factor == uv.SIZE_MIN, f"both ways ({grab.factor})")
+    grab.abandon()
+
+    # With the viewer scaled, a move of the same size on the headset's scale.
+    ss.viewer_scale = 2.0
+    far = (start[0], start[1], start[2] + 2.0 * uv.SIZE_DOUBLE)
+    op, r = hold(ctx, ss, 1, (start, Quaternion()), [(far, Quaternion())])
+    check(abs(op.handler.factor - 2.0) < 1e-3, f"hand-space distance ({op.handler.factor:.3f})")
+    ss.viewer_scale = 1.0
+
+    # Repack: its share against the others survives, in the UV square, and nobody turns.
+    settings.uv_repack = True
+    uv.unwrap(bpy.context, box)
+    dirs = surface_direction(box, side)
+    a0, b0 = island_area(box, top), island_area(box, side)
+    op, r = hold(ctx, ss, 1, (start, Quaternion()), [(up, Quaternion())])
+    a1, b1 = island_area(box, top), island_area(box, side)
+    ratio = (a1 / b1) / (a0 / b0)
+    check(r == {'FINISHED'} and abs(ratio - 4.0) < 0.05, f"repacked: four times the others' share ({ratio:.3f})")
+    u = uvs(box)
+    check(u.min() >= -1e-6 and u.max() <= 1 + 1e-6, f"in the UV square ({u.min():.3f}..{u.max():.3f})")
+    check(np.abs(surface_direction(box, side) - dirs).max() < 1e-3, "and the others didn't turn")
+    check("size" in uv.message(), f"said ({uv.message()!r})")
+
+    # The only island: packing would size it back.
+    clear()
+    ball = sphere("OneIsland")
+    segs = edge_world(ball)
+    uv.set_seams(ball.data, (np.abs(segs[:, :, 1]) < 1e-6).all(1) & (segs[:, :, 0] > -1e-6).all(1))
+    uv.unwrap(bpy.context, ball)
+    bpy.context.view_layer.update()
+    before = uvs(ball).copy()
+    op, r = hold(ctx, ss, 1, ((0.0, -0.1, 0.0), Quaternion()), [((0.0, -0.1, 0.1), Quaternion())])
+    check(type(op.handler).__name__ == "NoIsland" and r == {'CANCELLED'} and "one island" in uv.message(),
+          f"one island: says so ({uv.message()!r})")
+    check(np.abs(uvs(ball) - before).max() == 0.0, "and leaves it")
+
+    # No UVs yet.
+    bare = cube(0.2, (1.0, 0.0, 0.0), "Bare", subdivisions=1)
+    primitives.make_active(bpy.context, bare)
+    if len(bare.data.uv_layers):
+        bare.data.uv_layers.active.data.foreach_set("uv", np.zeros(len(bare.data.loops) * 2))
+    bpy.context.view_layer.update()
+    op, r = hold(ctx, ss, 1, ((1.0, 0.0, 0.11), Quaternion()), [((1.0, 0.0, 0.11), Quaternion())])
+    check(type(op.handler).__name__ == "NoIsland" and "No UVs" in uv.message(), f"no UVs: says so ({uv.message()!r})")
+    settings.uv_tool = 'NONE'
+    settings.uv_repack = True
+
+
+def test_hover():
+    print("== the island under the tip")
+    clear()
+    ss, ctx, settings = setup()
+    box = seamed_cube("Hover")
+    top = side_faces(box, 2, 0.1)
+    settings.uv_tool = 'TWIST'
+    settings.model_page = 'UV'
+    menus.open_sheet('OBJECT')
+    uv.tick(bpy.context)
+    labels = uv._hover["labels"]
+    check(labels is not None and len(np.unique(labels)) == 6, f"labels from the UVs: six islands "
+          f"({len(np.unique(labels)) if labels is not None else None})")
+    face = uv.face_under(box, Vector((0.02, 0.03, 0.11)), uv.ISLAND_REACH, uv._hover["centers"])
+    check(face is not None and top[face], "the tip finds the side it's on")
+    check(uv.face_under(box, Vector((0.02, 0.03, 0.5)), uv.ISLAND_REACH, None) is None, "not from far away")
+    pos, u, color, tris = uv._island_arrays(box, top, (*uv.ISLAND_COLOR, uv.HOVER_ALPHA))
+    check(len(tris) == 2 * top.sum() and tris.max() < len(pos) == len(u) == len(color),
+          f"one island's arrays ({len(tris)} triangles, {len(pos)} corners)")
+    # Under a modifier that remakes the faces, the face is still one of the mesh's.
+    box.modifiers.new("Sub", 'SUBSURF').levels = 1
+    bpy.context.view_layer.update()
+    centers = uv._centers_if_remade(box)
+    face = uv.face_under(box, Vector((0.02, 0.03, 0.11)), uv.ISLAND_REACH, centers)
+    check(centers is not None and face is not None and face < len(box.data.polygons) and top[face],
+          "under a Subsurf, it's found by position")
+    box.modifiers.clear()
+    bpy.context.view_layer.update()
+    settings.uv_tool = 'NONE'
+    uv.tick(bpy.context)
+    check(uv._hover["labels"] is None, "dropped with the tool")
     menus.close_sheet(bpy.context)
     settings.model_page = 'SHAPE'
 
@@ -321,11 +724,24 @@ def test_panel():
     menus.set_more('OBJECT_UV', True)
     widgets, _h = menus.layout(ctx)
     ids = {w.id: w for w in widgets if w.id}
-    want = ("page_uv", "uv_tool_seam", "uv_tool_fix", "uv_view_checker", "uv_view_stretch", "uv_unwrap", "uv_smart",
-            "uv_pack", "uv_method_conformal", "uv_live", "uv_checker", "uv_fix_radius", "uv_from_sharp",
-            "uv_average", "uv_clear_seams")
+    want = ("page_uv", "uv_tool_seam", "uv_tool_fix", "uv_tool_twist", "uv_tool_size", "uv_view_checker",
+            "uv_view_stretch", "uv_view_islands", "uv_unwrap", "uv_smart", "uv_pack", "uv_method_conformal", "uv_live",
+            "uv_repack", "uv_twist_snap", "uv_checker", "uv_fix_radius", "uv_from_sharp", "uv_average",
+            "uv_clear_seams")
     missing = [k for k in want if k not in ids]
     check(not missing, f"UV page widgets ({missing or 'all there'})")
+    settings.uv_view = 'NONE'
+    ids["uv_tool_twist"].on_press()
+    check(settings.uv_tool == 'TWIST' and settings.uv_view == 'CHECKER', "Twist shows a checker if nothing's shown")
+    settings.uv_tool = 'NONE'
+    settings.uv_view = 'STRETCH'
+    widgets, _h = menus.layout(ctx)
+    {w.id: w for w in widgets if w.id}["uv_tool_size"].on_press()
+    check(settings.uv_tool == 'SIZE' and settings.uv_view == 'STRETCH', "and leaves another view alone")
+    settings.uv_tool = 'NONE'
+    settings.uv_view = 'CHECKER'
+    widgets, _h = menus.layout(ctx)
+    ids = {w.id: w for w in widgets if w.id}
     ids["uv_tool_seam"].on_press()
     check(settings.uv_tool == 'SEAM', "Seams turns the tool on")
     widgets, _h = menus.layout(ctx)
@@ -362,7 +778,8 @@ def test_panel():
 def main():
     vr_sculpt.register()
     try:
-        for test in (test_seams, test_fix, test_buttons, test_stretch, test_view, test_primitive_rebuild, test_panel):
+        for test in (test_seams, test_fix, test_buttons, test_stretch, test_view, test_islands, test_islands_view,
+                     test_twist, test_size, test_hover, test_primitive_rebuild, test_panel):
             try:
                 test()
             except Exception:

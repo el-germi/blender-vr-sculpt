@@ -111,12 +111,13 @@ def _draw_cursors(context, ss, settings, xr):
     else:
         marking = model and (settings.model_mark != 'NONE' or settings.uv_tool == 'SEAM')
         fixing = model and settings.uv_tool == 'FIX'
+        island = model and settings.uv_tool in uv.ISLAND_TOOLS
         # Stamping, the ring is half the spacing: stamps go where neighboring rings would touch.
         stamping = model and settings.kit_stamp and kit.is_key(settings.primitive)
         radius = (settings.weight_radius if weights else pose_mode.REACH if posing else rig.REACH if rigging else
                   physics.HAND_RADIUS if simulating and settings.physics_hands else
                   interactions.TOUCH_MARGIN if simulating else settings.uv_fix_radius if fixing else
-                  shading.MARK_REACH if marking else settings.kit_spacing / 2 if stamping else
+                  uv.ISLAND_REACH if island else shading.MARK_REACH if marking else settings.kit_spacing / 2 if stamping else
                   interactions.TOUCH_MARGIN if model or tools else
                   settings.paint_radius if painting else settings.radius) * scale
     if settings.mode == 'RETOPO':
@@ -148,7 +149,7 @@ def _draw_cursors(context, ss, settings, xr):
                 if near is not None:
                     _draw_bounds(shader, near, (*color, 0.9))
         elif model and settings.uv_tool != 'NONE':
-            color = uv.SEAM_COLOR if settings.uv_tool == 'SEAM' else uv.FIX_COLOR
+            color = uv.TOOL_STYLES[settings.uv_tool][0]
             if idx == off and settings.uv_tool == 'SEAM':
                 color = (1.0, 1.0, 1.0)  # The off hand clears.
         elif model and settings.model_mark != 'NONE':

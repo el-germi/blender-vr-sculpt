@@ -213,10 +213,28 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     and nothing outside it moves. A brushed whole island is unwrapped in
     place. The cost goes with the patch (about 60 ms for 50 faces on a
     32k-face mesh), not the sculpt.
+  - **Twist** turns one island's texture on the surface: touch it (the island
+    in reach is tinted), hold the trigger and roll your wrist. The texture
+    turns the way your hand does, for grain and fabric directions. **Snap 15°**
+    (More) turns it in steps, with a tick on each.
+  - **Size** gives one island more or less of the UV square: hold the trigger
+    on it and raise your hand (10 cm doubles it: a finer texture there) or
+    lower it. For giving the face more resolution than the underside.
+  - Twist and Size preview a checker on the island as you move, and write the
+    UVs when you let go. With **Repack** on (More, the default) the layout is
+    then packed, so nothing overlaps; off, the rest of the layout stays where
+    it is and the island can overlap it (pink past the UV square's edge). Pack
+    and Even out don't turn islands on a mesh with a twisted one. A new Unwrap
+    or Smart UV starts over.
   - **View**: a **Checker** on the UVs (squares should stay square and even;
-    pink outside the UV square) or **Stretch**, each face colored from blue
+    pink outside the UV square), **Stretch**, each face colored from blue
     (true to the surface) to red (twice or half the typical face's size, or
-    skewed as much).
+    skewed as much), or **Islands**, each island in its own color. Islands
+    follow the seams while you trace them, before any unwrap, so you see the
+    moment a cut closes and splits one. Seams with the same island on both
+    sides are amber instead of red: they don't separate anything, which is
+    what you want from a relief cut and not from a loop you meant to close.
+    The panel counts both.
   - **Unwrap** (with the method under More: Angle, Conformal, Min Stretch),
     **Smart UV** (which also marks seams along its islands), **Pack**, and
     under More: **From sharp** (seams on edges that shade sharp, marked soft
@@ -681,9 +699,17 @@ With Triggers" is on. The setting applies when the VR session starts.
   Mode alone and comes back, with its selection, the other selected objects
   and pins put back. Fix copies the brushed faces (with their seams and the
   border pins) into a temporary mesh, unwraps that and copies the UVs back.
-  The checker / stretch view is built from the evaluated mesh in the app
-  timer when the geometry changes (a depsgraph handler counts changes) and
-  drawn with a small shader on the surface, like the rig's heat map.
+  The checker / stretch / island view is built from the evaluated mesh in the
+  app timer when the geometry changes (a depsgraph handler counts changes) and
+  drawn with a small shader on the surface, like the rig's heat map. Islands
+  are connected components over the edges whose UVs match on both sides and
+  that aren't seams. During a seam stroke only the seams change, so it keeps
+  the slow part (which faces meet where: ~190 ms at 135k faces) and redoes the
+  rest (~5 ms), and rebuilds the colors only when an island really splits.
+  Twist and Size don't touch the mesh during the stroke: the shader transforms
+  the island's UVs from two uniforms, so they cost nothing per frame on a dense
+  mesh. The write and the pack happen on release (~1.4 s at 135k faces; Repack
+  off skips the pack).
   Surface snapping ([snapping.py](vr_sculpt/snapping.py)) builds BVH trees
   of the meshes near a grabbed object on first use and keeps them for the
   grab.
@@ -1215,6 +1241,9 @@ Found with [tests/probe_uv.py](tests/probe_uv.py):
   Sculpt doesn't run it then and says why.
 - `uv.minimize_stretch` with pins still moved UVs outside the selection a
   little, so Fix doesn't use it.
+- `uv.pack_islands` turns islands by default (`rotate=True`, any angle), which
+  would undo a Twist. It scales them all alike, so an island's share against
+  the others survives a pack: Size relies on that.
 
 ### What we learned about controller models over OpenXR (5.4.0 Alpha, SteamVR 2.18)
 
@@ -1385,8 +1414,9 @@ puppet take while the timeline really plays, and draws the Pose page and
 bones (`probe_pose.py` checked the pose API).
 `kit_preview.py` draws the Kit sheet (`kit_panels.png`) and a box dressed
 with dropped, stamped and cut starter parts (`kit_scene.png`).
-`uv_preview.py` draws the UV page and a seamed sphere with the checker and
-stretch views (`uv_preview_checker.png`, `uv_preview_stretch.png`).
+`uv_preview.py` draws the UV page and a seamed sphere with the checker,
+stretch and island views, the island under a tip and a Twist stroke's preview
+(`uv_preview_checker.png`, `_stretch`, `_islands`, `_hover`, `_twist`).
 `retopo_preview.py` lays mirrored strips, a center-line strip and an open
 quad on a subdivided Suzanne and draws the Retopo pages
 (`retopo_panels.png`) and the headset drawing (`retopo_scene.png`).
@@ -1457,10 +1487,12 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
 - UV page: it works on the selected object in Model mode, so to fix UVs
   after sculpting, switch to Model (that leaves Sculpt Mode). Live unwrap
   and Unwrap redo the whole mesh, about 0.6 s at 131k faces, and they lay
-  the islands out again (hand-moved islands move). Only the active UV map
-  is used. Arranging islands by hand (moving, rotating, stitching) is a
-  desktop job. Seams and UVs survive a primitive's settings changing only
-  while its edges stay the same (a resize, not more segments).
+  the islands out again (hand-moved islands move, and Twist and Size are
+  lost). Only the active UV map is used. Moving and stitching islands by hand
+  is a desktop job. Under a modifier that changes the faces, Twist and Size find
+  the island by the nearest face of the object's own mesh, and their preview
+  shows on that mesh. Seams and UVs survive a primitive's settings changing
+  only while its edges stay the same (a resize, not more segments).
 - Geometry-node asset primitives in Add > Mesh aren't listed yet.
 - Kit parts: only mesh objects and collections are parts (no curves,
   geometry-node assets or materials). A collection part can't be a cutter.

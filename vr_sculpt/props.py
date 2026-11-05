@@ -432,6 +432,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('NONE', "Off", "The trigger grabs and creates"),
             ('SEAM', "Seams", "Touched edges become UV seams (other hand clears them)"),
             ('FIX', "Fix", "Brushed faces unwrap again, stitched to the rest of the layout"),
+            ('TWIST', "Twist", "Hold on an island and roll the wrist: its texture turns on the surface"),
+            ('SIZE', "Size", "Hold on an island and raise or lower the hand: it gets more or less of the UV square"),
         ),
         default='NONE',
     )
@@ -442,6 +444,7 @@ class VRSculptSettings(bpy.types.PropertyGroup):
             ('NONE', "Off", "Nothing"),
             ('CHECKER', "Checker", "A checker on the UVs: squares should stay square and even"),
             ('STRETCH', "Stretch", "Faces colored by UV stretch: blue is true to the surface, red twice off"),
+            ('ISLANDS', "Islands", "Each island in its own color, from the UVs and the seams traced since"),
         ),
         default='CHECKER',
     )
@@ -458,6 +461,13 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     uv_live: BoolProperty(
         name="Live Unwrap", default=True,
         description="Unwrap the mesh again each time a Seams stroke ends")
+    uv_repack: BoolProperty(
+        name="Repack", default=True,
+        description="Pack the islands (without turning them) each time a Twist or Size stroke ends. Off, the "
+                    "layout stays and the island can overlap the others")
+    uv_twist_snap: BoolProperty(
+        name="Snap Twist", default=True,
+        description="Twist turns in steps of 15 degrees")
     uv_checker: IntProperty(
         name="Checker Squares", default=16, min=2, max=64,
         description="Squares per side of the UV square in the checker view")

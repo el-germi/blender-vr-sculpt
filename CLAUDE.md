@@ -136,7 +136,7 @@ a cutter is identified by the Boolean modifiers pointing at it. `shading.py` own
 are mesh / collection assets from the asset libraries plus the starter kit in `vr_sculpt/assets/kit`
 (rebuilt by `tests/make_starter_kit.py`); `settings.primitive` holds `kit:<blend>|<type>|<name>` for
 one, and `interactions.PlaceAsset` (drop) / `StampAssets` (stamp) place them. `uv.py` is the UV page (seams traced
-with the tip, Fix brush, checker / stretch view); Blender's UV operators need Edit Mode, so it takes the
+with the tip, Fix brush, Twist / Size on one island, checker / stretch / island view); Blender's UV operators need Edit Mode, so it takes the
 object in and out alone (`uv._editing`), and Fix unwraps a temporary copy of the brushed faces with their
 border pinned (a partial unwrap without pins repacks the patch). Libraries are listed by
 `kit_worker.py` in a background Blender into an on-disk cache (`kit.tick()` from `live.py` picks results

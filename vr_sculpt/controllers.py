@@ -147,6 +147,10 @@ def _trigger(s, info):
             return ("seam", "Mark seams")
         if s.uv_tool == 'FIX':
             return ("fix", "Fix UVs")
+        if s.uv_tool == 'TWIST':
+            return ("gizmo_turn", "Twist island")
+        if s.uv_tool == 'SIZE':
+            return ("gizmo_size", "Size island")
         if s.model_mark != 'NONE':
             return ("edit", {'HARD': "Mark hard", 'SOFT': "Mark soft"}.get(s.model_mark, "Clear marks"))
         if s.model_add_as != 'OBJECT' and info.cut_target:
@@ -197,7 +201,7 @@ def _left_trigger(s, info, right):
         return ("trash", "Delete")
     if mode == 'MODEL' and s.uv_tool == 'SEAM':
         return ("seam", "Clear seams")
-    if mode == 'MODEL' and s.uv_tool == 'FIX':
+    if mode == 'MODEL' and s.uv_tool in {'FIX', 'TWIST', 'SIZE'}:
         return right
     if mode == 'MODEL' and s.model_mark != 'NONE':
         return ("edit", "Clear marks")

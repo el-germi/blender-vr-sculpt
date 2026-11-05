@@ -1,6 +1,6 @@
 """One app timer for the things that update while VR runs, outside of any operator:
 tracking objects, desktop window captures, camera preview redraws, puppet bindings and takes, the
-weight heat map's geometry, the UV checker / stretch view, kit listings coming in from their background worker, and physics (the
+weight heat map's geometry, the UV checker / stretch / island view, kit listings coming in from their background worker, and physics (the
 hands' colliders and spring bones, which also run while the timeline plays outside VR). Dyntopo
 sessions (rest.py) are closed from here too, VR or not, however Sculpt Mode was left."""
 
@@ -58,7 +58,7 @@ def _tick():
                 if region is not None:
                     region.tag_redraw()
         busy = (settings.tracking or camera.wanted(context) or desktop.interactive(context)
-                or settings.onion or settings.show_paths or puppet.active() or physics_busy)
+                or settings.onion or settings.show_paths or puppet.active() or physics_busy or uv.busy(context))
         return FAST if busy else IDLE
     except Exception:
         if not _errors:

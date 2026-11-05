@@ -51,6 +51,8 @@ MARK_INFO = {
 UV_INFO = {
     'SEAM': ("Mark Seams", "Trace edges to cut the UV map along them. Other hand clears"),
     'FIX': ("Fix UVs", "Brush over stretched faces: they unwrap again, stitched to the rest"),
+    'TWIST': ("Twist Island", "Hold on an island and roll your wrist: its texture turns with your hand"),
+    'SIZE': ("Size Island", "Hold on an island and raise your hand for finer texture, lower it for coarser"),
 }
 CUT_INFO = {
     'DIFFERENCE': ("Cut with", "Drag on the selected object to cut into it. Other hand selects a cutter"),
@@ -190,8 +192,7 @@ def card_content(settings, sculpt_brush):
         if settings.uv_tool != 'NONE':
             from . import uv
             title, desc = UV_INFO[settings.uv_tool]
-            content = (title, desc, uv.SEAM_COLOR if settings.uv_tool == 'SEAM' else uv.FIX_COLOR,
-                       settings.uv_tool.lower())
+            content = (title, desc, *uv.TOOL_STYLES[settings.uv_tool])
         elif settings.model_mark != 'NONE':
             title, desc = MARK_INFO[settings.model_mark]
             color = {'HARD': shading.HARD_COLOR, 'SOFT': shading.SOFT_COLOR}.get(settings.model_mark, (1.0, 1.0, 1.0))
