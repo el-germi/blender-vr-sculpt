@@ -246,17 +246,17 @@ def _draw_cursors(context, ss, settings, xr):
         hud.draw_tag(Vector((center.x, center.y, top.z)) + Vector((0.0, 0.0, 0.012 * scale)), viewer, scale,
                      selected.name, SELECT_COLOR)
     camera_tool = tools and settings.tool == 'CAMERA'
+    up = hud.view_up(ss)
     if settings.show_brush_card:
         # The tip status: a slim line above the main hand, facing the headset.
-        anchor = Vector(ss.controller_grip_location_get(context, actions.main_index(context))) + Vector((0.0, 0.0, 0.05 * scale))
+        anchor = Vector(ss.controller_grip_location_get(context, actions.main_index(context))) + up * 0.05 * scale
         held = gizmo.status(context)  # Holding a gizmo handle: what it does and how far, instead of the tool.
         content, size = held if held is not None else             (hud.card_content(settings, sculpt_brush), hud.status_size(context, settings))
         hud.draw_status(anchor, viewer, scale, content, size)
     if xr and camera_tool and context.scene.camera is not None:
         # A viewfinder above the status: the controller is the camera.
-        anchor = Vector(ss.controller_grip_location_get(context, actions.main_index(context))) + \
-            Vector((0.0, 0.0, 0.075 * scale))
-        camera.draw_preview(hud.billboard(anchor, viewer, scale), context.scene)
+        anchor = Vector(ss.controller_grip_location_get(context, actions.main_index(context))) + up * 0.075 * scale
+        camera.draw_preview(hud.billboard(anchor, viewer, scale, up), context.scene)
     _draw_panel(context, ss, settings, xr)
 
 

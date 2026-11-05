@@ -468,6 +468,40 @@ def test_held_dim():
         presence.reset()
 
 
+def test_view_up():
+    print("== up, when a Free grab has tilted the world")
+    ctx = bpy.context
+    z = Vector((0.0, 0.0, 1.0))
+    check((hud.view_up() - z).length < 1e-6, "no session: the world's Z")
+    ss = SS()
+    ss.navigation_rotation = Quaternion()
+    check((hud.view_up(ss) - z).length < 1e-6, "level: the same")
+    level = interactions.panel_matrix(ctx, ss)
+    check(abs((level.to_3x3() @ Vector((1, 0, 0))).dot(z)) < 1e-6 and (level.to_3x3() @ Vector((0, 1, 0))).dot(z) > 0.0,
+          "the panel's sides are level, its top up")
+
+    # The world on its side: the room's up is the world's +X.
+    ss.navigation_rotation = Quaternion((0, 1, 0), math.radians(90))
+    up = hud.view_up(ss)
+    check((up - Vector((1, 0, 0))).length < 1e-6, f"tilted 90 degrees: up is +X ({up[:]})")
+    head = Vector(ss.viewer_pose_location)
+    m = interactions.panel_matrix(ctx, ss)
+    top = m.to_3x3() @ Vector((0, 1, 0))
+    facing = m.to_3x3() @ Vector((0, 0, 1))
+    grip = Vector(ss.controller_grip_location_get(ctx, actions.off_index(ctx)))
+    check((m.translation - grip).normalized().dot(up) > 0.999, "the panel sits above the hand, by that up")
+    to_head = (head - m.translation).normalized()
+    check(facing.normalized().dot(to_head) > 0.999, "faces the headset")
+    check(top.normalized().dot(up) > 0.5 and abs(top.normalized().dot(to_head)) < 1e-6, "its top as near up as that allows")
+    side = (m.to_3x3() @ Vector((1, 0, 0))).normalized()
+    check(abs(side.dot(up)) < 1e-6, "and its sides level: no roll")
+
+    # Looking straight along up doesn't break it.
+    b = hud.billboard(Vector((0, 0, 0)), Vector((1, 0, 0)), 1.0, up)
+    axes = b.to_3x3()
+    check(abs(axes.determinant() - 1.0) < 1e-5, "straight along up: still a proper frame")
+
+
 def test_ghost():
     print("== the hidden panel's ghost")
     m = vr_ui.panel_matrix(Vector((0, 0, 1)), Vector((0, -1, 1)), 1.0)
@@ -1156,7 +1190,7 @@ def main():
     try:
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o)
-        for t in (test_disclosure, test_sheets, test_layout, test_stepper_and_detents, test_presence, test_held_dim, test_ghost,
+        for t in (test_disclosure, test_sheets, test_layout, test_stepper_and_detents, test_presence, test_held_dim, test_view_up, test_ghost,
                   test_controller_hints, test_controller_inputs, test_controller_fetched, test_controller_visibility,
                   test_status, test_brush_icons,
                   test_dyntopo, test_left_handed):

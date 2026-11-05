@@ -240,16 +240,17 @@ def screen_size(context, width):
 def place_in_front(context, ss):
     """Put the screen in front of the headset, facing it, a little below eye level."""
     viewer = Vector(ss.viewer_pose_location)
+    up = hud.view_up(ss)
     forward = Quaternion(ss.viewer_pose_rotation) @ Vector((0.0, 0.0, -1.0))
-    forward.z = 0.0
+    forward -= up * forward.dot(up)
     if forward.length < 1e-6:
-        forward = Vector((0.0, 1.0, 0.0))
+        forward = up.orthogonal()
     forward.normalize()
     scale = ss.viewer_scale
     size = screen_size(context, context.scene.vr_sculpt.desktop_size)
-    drop = Vector((0.0, 0.0, (0.1 + size[1] / 2) * scale))
+    drop = up * (0.1 + size[1] / 2) * scale
     anchor = viewer + forward * DISTANCE * scale - drop
-    state["pose"] = navigation_matrix(ss).inverted_safe() @ hud.billboard(anchor, viewer - drop, scale)
+    state["pose"] = navigation_matrix(ss).inverted_safe() @ hud.billboard(anchor, viewer - drop, scale, up)
 
 
 def world_matrix(context, ss):

@@ -540,5 +540,5 @@ def draw(context, ss, tips, scale, xr=True):
     in_status = context.scene.vr_sculpt.show_brush_card and status(context) is not None
     if held is not None and held.gate.open and ss is not None and not in_status:
         # The off hand's (the tip status is over the main hand): a tag by its tip.
-        hud.draw_tag(held.tip + Vector((0.0, 0.0, 0.02 * scale)), Vector(ss.viewer_pose_location), scale,
+        hud.draw_tag(held.tip + hud.view_up(ss) * 0.02 * scale, Vector(ss.viewer_pose_location), scale,
                      held.readout(), _rgb((held.kind, held.axis)))

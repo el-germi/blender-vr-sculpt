@@ -32,8 +32,9 @@ TIMELINE_GAP = 0.006
 def panel_matrix(context, ss):
     """The hand panel's matrix, above the off-hand controller."""
     scale = ss.viewer_scale
-    anchor = Vector(ss.controller_grip_location_get(context, actions.off_index(context))) + Vector((0.0, 0.0, 0.07 * scale))
-    return vr_ui.panel_matrix(anchor, Vector(ss.viewer_pose_location), scale)
+    up = vr_ui.hud.view_up(ss)
+    anchor = Vector(ss.controller_grip_location_get(context, actions.off_index(context))) + up * 0.07 * scale
+    return vr_ui.panel_matrix(anchor, Vector(ss.viewer_pose_location), scale, up)
 
 
 def panel_frame(context, ss):

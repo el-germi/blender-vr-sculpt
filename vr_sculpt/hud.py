@@ -9,7 +9,7 @@ import time
 
 import blf
 import gpu
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 DESCRIPTION_SECONDS = 4.0
 DESCRIPTION_FADE = 0.6  # the description's last seconds fade out
@@ -278,15 +278,26 @@ def show_description():
     return time.monotonic() - _last["time"] < DESCRIPTION_SECONDS
 
 
-def billboard(anchor, viewer, scale):
-    """Matrix at anchor whose XY plane faces the viewer, Z up kept vertical."""
+def view_up(ss=None):
+    """Which way is up for whoever wears the headset, in world space: the room's up through the navigation, so
+    it's not the world's Z once a Free grab has tilted the world. Not the headset's own up, or everything would
+    roll when the head tilts. ss None: the session's (no session: Z)."""
+    if ss is None:
+        ss = bpy_context().window_manager.xr_session_state
+    rot = getattr(ss, "navigation_rotation", None)
+    up = Vector((0.0, 0.0, 1.0))
+    return up if rot is None else Quaternion(rot) @ up
+
+
+def billboard(anchor, viewer, scale, up=None):
+    """Matrix at anchor whose XY plane faces the viewer, Y as near up (view_up()) as that allows."""
     z = viewer - anchor
     if z.length < 1e-6:
         z = Vector((0.0, -1.0, 0.0))
     z.normalize()
-    x = Vector((0.0, 0.0, 1.0)).cross(z)
+    x = (view_up() if up is None else up).cross(z)
     if x.length < 1e-6:
-        x = Vector((1.0, 0.0, 0.0))
+        x = z.orthogonal()
     x.normalize()
     y = z.cross(x)
     m = Matrix((x, y, z)).transposed().to_4x4()

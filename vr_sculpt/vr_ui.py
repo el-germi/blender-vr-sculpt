@@ -300,8 +300,8 @@ def find(widgets, id):
     return next((w for w in widgets if w.id == id), None)
 
 
-def panel_matrix(anchor, viewer, scale):
-    return hud.billboard(anchor, viewer, scale)
+def panel_matrix(anchor, viewer, scale, up=None):
+    return hud.billboard(anchor, viewer, scale, up)
 
 
 def ray_hit(matrix, origin, direction, height, scale, width=WIDTH):
