@@ -12,6 +12,7 @@ import sys
 import time
 import traceback
 
+import bmesh
 import bpy
 import numpy as np
 from mathutils import Matrix, Quaternion, Vector
@@ -21,7 +22,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 import vr_sculpt  # noqa: E402
-from vr_sculpt import menus, operators, primitives, shading, uv  # noqa: E402
+from vr_sculpt import hud, menus, operators, primitives, shading, uv  # noqa: E402
 import test_model as tm  # noqa: E402  (fakes and the press() helper)
 
 failures = []
@@ -962,6 +963,21 @@ def tube_seams(obj, height=0.4):
     return rings, line
 
 
+def stretch_of(obj):
+    """Per face, log2 of how far its UVs are from the surface's shape (uv.face_stretch())."""
+    me = obj.data
+    me.calc_loop_triangles()
+    co = np.empty(len(me.vertices) * 3)
+    me.vertices.foreach_get("co", co)
+    loop_v = np.empty(len(me.loops), dtype=np.int64)
+    me.loops.foreach_get("vertex_index", loop_v)
+    tris = np.empty(len(me.loop_triangles) * 3, dtype=np.int32)
+    me.loop_triangles.foreach_get("loops", tris)
+    tri_f = np.empty(len(me.loop_triangles), dtype=np.int64)
+    me.loop_triangles.foreach_get("polygon_index", tri_f)
+    return uv.face_stretch(co.reshape(-1, 3), loop_v, uv._uvs(me), tris.reshape(-1, 3), tri_f, len(me.polygons))
+
+
 def test_tidy_keeps():
     print("== Tidy keeps the seams that do something, though they've the same island on both sides")
     clear()
@@ -1043,7 +1059,8 @@ def test_tidy_keeps():
         check(twig.any() and (uv.dead_ends(me, uv.island_labels(me)) == twig).all(), "a second, smaller cut is the stray")
         check(uv.clear_dead_ends(ball) and (uv.seams(me) == meridian).all(), "and it's the one removed")
 
-        # A tube's cut follows the boundary it ends on, pushed away from the tube's end.
+        # A tube's cut follows the boundary it ends on, when that moves away from it (here without the brush
+        # crossing the cut, which would take the cut along itself).
         clear()
         obj = tube()
         me = obj.data
@@ -1057,18 +1074,85 @@ def test_tidy_keeps():
         uv.changed()
         labels = uv.island_labels(me)
         check(len(np.unique(labels)) == 3 and not uv.dead_ends(me, labels).any(), "a tube, its cut up to the skirt")
-        settings.uv_fix_radius = 0.03
-        op, r = hold(ctx, ss, 1, ((0.1, 0.0, 0.08), Quaternion()),
-                     [((0.1, 0.0, z), Quaternion()) for z in (0.09, 0.11, 0.13, 0.15)])
+        stroke = uv.TidySeams(bpy.context, obj, 1.0)
+        fc = centers(obj)
+        grown = stroke.labels.copy()
+        below = stroke.labels[np.argmin(np.linalg.norm(fc - np.array((0.1, 0.01, 0.09)), axis=1))]
+        grown[(np.abs(fc[:, 2] - 0.11) < 0.012) & (np.linalg.norm(fc[:, :2] - np.array((0.1, 0.0)), axis=1) < 0.05)] = below
+        stroke._write(grown, stroke.marked)
         labels = uv.island_labels(me)
-        check(r == {'FINISHED'} and len(np.unique(labels)) == 3, f"pushed up into the skirt ({r})")
+        check(stroke.changed and len(np.unique(labels)) == 3, "the boundary moved past the cut's end")
         s = uv.seams(me)
-        check(not (s & ~line & (edge_world(obj)[:, :, 2] < 0.1 - 1e-5).all(1) & ~low_ring).any(), "nothing new below")
         check(s[short].all(), f"the cut's all there ({s[short].sum()} of {short.sum()})")
         check(not uv.dead_ends(me, labels).any(), "and it reaches the boundary again, wherever that went")
+        uv.changed()
         hold(ctx, ss, 0, ((0.1, 0.0, 0.11), Quaternion()), [((0.1, 0.0, 0.11), Quaternion())] * 4)
+        check(not uv.dead_ends(me, uv.island_labels(me)).any(), "smoothing there doesn't leave it loose")
+
+        # Moving a cut with the same island on both sides: start on one side, drag across.
+        clear()
+        obj = tube()
+        me = obj.data
+        rings, line = tube_seams(obj)
+        uv.set_seams(me, rings | line)
+        uv.changed()
+        settings.uv_fix_radius = 0.03
+        side = lambda a, z: (0.1 * math.cos(a), 0.1 * math.sin(a), z)
+        op, r = hold(ctx, ss, 1, (side(-0.45, 0.0), Quaternion()),
+                     [(side(a, 0.0), Quaternion()) for a in (-0.35, -0.2, -0.05, 0.1, 0.25, 0.4)])
+        labels = uv.island_labels(me)
         s = uv.seams(me)
-        check(s[short].all() and not uv.dead_ends(me, uv.island_labels(me)).any(), "smoothing there doesn't eat it")
+        segs = edge_world(obj)
+        check(type(op.handler).__name__ == "TidySeams" and r == {'FINISHED'}, f"the main hand pushes it ({r})")
+        check(len(np.unique(labels)) == 3, f"still the three islands, the tube in one ({len(np.unique(labels))})")
+        near = line & (np.abs(segs[:, :, 2]) < 0.02).all(1)
+        check(near.any() and not s[near].any(), "it's gone from where the brush crossed it")
+        far = line & (np.abs(segs[:, :, 2]) > 0.1).all(1)
+        check(far.any() and s[far].all(), "and is where it was outside the brush")
+        moved_to = s & (np.abs(segs[:, :, 2]) < 0.02).all(1) & (np.arctan2(segs[:, :, 1], segs[:, :, 0]) > 0.3).all(1)
+        check(moved_to.any(), "it's further round the tube, ahead of the brush")
+        check(not uv.dead_ends(me, labels).any(), "and still goes from end to end")
+        uv.unwrap(bpy.context, obj, 'ANGLE_BASED')
+        check(len(np.unique(uv.island_labels(me, use_seams=False))) == 3, "and it unwraps to the three")
+        check(stretch_of(obj).max() < 0.5, f"flat, no squeezing ({stretch_of(obj).max():.2f})")
+
+        # Smoothing one: a bump in the cut goes, and it's the same cut, end to end.
+        clear()
+        obj = tube(segments=64, rings=40)
+        me = obj.data
+        rings, line = tube_seams(obj)
+        segs = edge_world(obj)
+        st = uv._Stitching(me)
+        fc = centers(obj)
+        ang = np.arctan2(fc[:, 1], fc[:, 0])
+        bump = (ang > 0) & (ang < 0.2) & (np.abs(fc[:, 2]) < 0.03)  # Two faces out, six long.
+        bumped = (rings | line).copy()
+        toggle = st.edges[bump[st.face_a] != bump[st.face_b]]
+        bumped[toggle] = ~bumped[toggle]
+        uv.set_seams(me, bumped)
+        uv.changed()
+        labels = uv.island_labels(me)
+        check(len(np.unique(labels)) == 3 and not uv.dead_ends(me, labels).any(), "a cut with a bump in it")
+        settings.uv_fix_radius = 0.06
+        op, r = hold(ctx, ss, 0, ((0.1, 0.0, 0.0), Quaternion()), [((0.1, 0.0, 0.0), Quaternion())] * 6)
+        s = uv.seams(me)
+        labels = uv.island_labels(me)
+        check(r == {'FINISHED'} and s.sum() < bumped.sum(), f"the off hand smooths it ({bumped.sum()} edges, now {s.sum()})")
+        check(len(np.unique(labels)) == 3 and not uv.dead_ends(me, labels).any(), "and it still goes from end to end")
+
+        # One island, no seams at all, has nothing to push; one with a cut does.
+        clear()
+        obj = tube(caps=False)
+        me = obj.data
+        _rings, line = tube_seams(obj)
+        uv.set_seams(me, line)
+        uv.changed()
+        op, r = hold(ctx, ss, 1, (side(-0.45, 0.0), Quaternion()),
+                     [(side(a, 0.0), Quaternion()) for a in (-0.3, -0.1, 0.1, 0.3)])
+        labels = uv.island_labels(me)
+        check(r == {'FINISHED'} and not uv.seams(me)[line & (np.abs(edge_world(obj)[:, :, 2]) < 0.01).all(1)].any(),
+              f"one island with a cut: it moves ({uv.message()!r})")
+        check(len(np.unique(labels)) == 1 and not uv.dead_ends(me, labels).any(), "and stays border to border")
 
         # A branch that hung off a boundary doesn't get carried along: it went nowhere before.
         clear()
@@ -1176,6 +1260,178 @@ def test_tidy_uvs():
     settings.uv_tool = 'NONE'
 
 
+def foot(toes=5, rows=4):
+    """A block with toes rising from its top in a line along x, 0.02 a row, starting at z = 0.1."""
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=0.2)
+    along_x = [e for e in bm.edges if abs(e.verts[0].co.x - e.verts[1].co.x) > 1e-6]
+    bmesh.ops.subdivide_edges(bm, edges=along_x, cuts=2 * toes - 2, use_grid_fill=True)
+    bm.normal_update()
+    top = sorted((f for f in bm.faces if f.normal.z > 0.9), key=lambda f: f.calc_center_median().x)
+    for face in top[::2]:
+        for _ in range(rows):
+            face = bmesh.ops.extrude_discrete_faces(bm, faces=[face])["faces"][0]
+            for v in face.verts:
+                v.co.z += 0.02
+    me = bpy.data.meshes.new("Foot")
+    bm.to_mesh(me)
+    bm.free()
+    obj = bpy.data.objects.new("Foot", me)
+    bpy.context.collection.objects.link(obj)
+    primitives.make_active(bpy.context, obj)
+    bpy.context.view_layer.update()
+    return obj
+
+
+def across(tilt=0.0):
+    """An aim rotation whose blade lies across the z axis, tilted this many degrees."""
+    return Quaternion((0.0, 1.0, 0.0), math.radians(90.0 + tilt))
+
+
+def slice_at(obj, loc, rot, reach=0.03, clear=False):
+    """A Slice stroke's edges at one pose, without letting go: bool per edge."""
+    bpy.context.scene.vr_sculpt.uv_fix_radius = reach
+    stroke = uv.SliceSeams(bpy.context, obj, clear, 1.0)
+    pose = Quaternion(rot).to_matrix().to_4x4()
+    pose.translation = Vector(loc)
+    stroke.update(bpy.context, pose, pose, 1.0)
+    out = np.zeros(len(obj.data.edges), dtype=bool)
+    out[stroke.edges] = True
+    stroke.abandon()
+    return out
+
+
+def closed(obj, edges):
+    """Every vertex on these edges has an even number of them, away from the mesh's own border: no loose ends."""
+    segs = np.array([e.vertices[:] for e in obj.data.edges])[edges]
+    st = uv._Stitching(obj.data)
+    odd = np.bincount(segs.ravel(), minlength=len(obj.data.vertices)) % 2 == 1
+    return not (odd & ~st.rim_verts).any()
+
+
+def test_slice():
+    print("== Slice: a blade that marks the closest edge loop")
+    clear()
+    ss, ctx, settings = setup()
+    settings.uv_tool = 'SLICE'
+    settings.uv_live = False
+    settings.uv_fix_radius = 0.03
+
+    # A tube's rows are 0.02 apart, one at z = 0.
+    obj = tube()
+    me = obj.data
+    segs = edge_world(obj)
+
+    def row(z):
+        return (np.abs(segs[:, :, 2] - z) < 1e-5).all(1)
+
+    op, r = hold(ctx, ss, 1, ((0.1, 0.0, 0.006), across()), [((0.1, 0.0, 0.006), across())] * 2)
+    check(type(op.handler).__name__ == "SliceSeams" and r == {'FINISHED'}, f"the main hand slices ({r})")
+    s = uv.seams(me)
+    check(s.sum() == 32 and s[row(0.0)].all(), f"the closest row goes all the way round, and nothing else ({s.sum()})")
+    check(uv._slicing[0] is None, "the preview's gone with the stroke")
+    check(len(np.unique(uv.island_labels(me))) == 2, "and it splits the tube")
+    uv.clear_seams(obj)
+    check(slice_at(obj, (0.1, 0.0, 0.014), across())[row(0.02)].sum() == 32, "nearer the next row, that one")
+    for tilt in (4.0, 8.0):
+        cut = slice_at(obj, (0.1, 0.0, 0.0), across(tilt))  # It pivots on the tip: the next row can be the closer.
+        check(cut.sum() == 32 and (cut[row(0.0)].all() or cut[row(0.02)].all()),
+              f"off true by {tilt:.0f} degrees, still a straight loop")
+    cut = slice_at(obj, (0.1, 0.0, 0.0), across(45.0))
+    mids = segs[cut].mean(1)
+    check(closed(obj, cut) and mids[:, 2].max() - mids[:, 2].min() > 0.1,
+          "tilted well over, it follows the plane across the rows, and closes")
+
+    # What's held shows, and what's shown is what's cut.
+    stroke = uv.SliceSeams(bpy.context, obj, False, 1.0)
+    pose = across().to_matrix().to_4x4()
+    pose.translation = Vector((0.1, 0.0, 0.006))
+    stroke.update(bpy.context, pose, pose, 1.0)
+    check(uv._slicing[0] is stroke and len(stroke.preview()) == 64, f"held, it shows the loop ({len(stroke.preview())})")
+    check(not uv.seams(me).any(), "and doesn't cut it yet")
+    stroke.abandon()
+    check(uv._slicing[0] is None, "an undo while it's held drops it")
+
+    # Away from the mesh there's nothing to cut: the way to change your mind.
+    op, r = hold(ctx, ss, 1, ((0.3, 0.0, 0.0), across()), [((0.3, 0.0, 0.0), across())] * 2)
+    check(r == {'CANCELLED'} and not uv.seams(me).any(), f"let go away from it: nothing ({r})")
+
+    # The off hand clears along the loop, whichever row is closer, and leaves what crosses it.
+    rings, line = tube_seams(obj)
+    uv.set_seams(me, row(0.0) | line)
+    op, r = hold(ctx, ss, 0, ((0.1, 0.0, 0.014), across()), [((0.1, 0.0, 0.014), across())] * 2)
+    s = uv.seams(me)
+    check(r == {'FINISHED'} and not s[row(0.0)].any(), f"the off hand clears the loop that's there ({r})")
+    check(s[line].all(), "and not the cut across it")
+    op, r = hold(ctx, ss, 0, ((0.1, 0.0, 0.1), across()), [((0.1, 0.0, 0.1), across())] * 2)
+    check(r == {'CANCELLED'}, f"no seam on the loop: nothing to do ({r})")
+    uv.clear_seams(obj)
+
+    # Toes: the plane goes through them all, the blade cuts what it touches.
+    clear()
+    obj = foot()
+    me = obj.data
+    fc = centers(obj)
+    toes = sorted({round(float(c[0]), 3) for c, n in zip(fc, (p.normal for p in me.polygons)) if abs(n.x) < 0.1 and c[2] > 0.1})
+    toe = toes[2]
+    at = (toe, 0.1, 0.139)
+    one = slice_at(obj, at, across(), reach=0.01)
+    mids = edge_world(obj)[one].mean(1)
+    check(one.any() and closed(obj, one), "one toe: closed")
+    check((np.abs(mids[:, 0] - toe) < 0.02).all(), f"and only that toe ({mids[:, 0].min():.3f} to {mids[:, 0].max():.3f})")
+    check((np.abs(mids[:, 2] - 0.14) < 1e-5).all(), "on its closest row")
+    every = slice_at(obj, at, across(), reach=0.2)
+    check(closed(obj, every) and every.sum() == 5 * one.sum(), f"a longer blade: all five ({every.sum()} edges)")
+    settings.uv_fix_radius = 0.01
+    op, r = hold(ctx, ss, 1, (at, across()), [(at, across())] * 2)
+    check(r == {'FINISHED'} and len(np.unique(uv.island_labels(me))) == 2, "cut, the toe's tip is an island of its own")
+    uv.clear_seams(obj)
+    settings.uv_live = True
+    op, r = hold(ctx, ss, 1, (at, across()), [(at, across())] * 2)
+    check(r == {'FINISHED'} and len(np.unique(uv.island_labels(me, use_seams=False))) == 2, "Live unwraps it on release")
+    settings.uv_live = False
+
+    # Whatever the mesh, it closes up or ends on a border.
+    clear()
+    obj = tube(segments=24, rings=16)
+    me = obj.data
+    rng = np.random.default_rng(3)
+    co = np.empty(len(me.vertices) * 3)
+    me.vertices.foreach_get("co", co)
+    me.vertices.foreach_set("co", co + rng.uniform(-0.003, 0.003, len(co)))
+    me.update()
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.quads_convert_to_tris()
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bad = 0
+    for tilt in (0.0, 10.0, 25.0, 40.0, 60.0):
+        cut = slice_at(obj, (0.1, 0.0, 0.003), across(tilt))
+        far = np.abs(edge_world(obj)[cut] @ np.array(across(tilt).to_matrix().col[0][:]) -
+                     np.array((0.1, 0.0, 0.003)) @ np.array(across(tilt).to_matrix().col[0][:]))
+        if not cut.any() or not closed(obj, cut) or far.max() > 0.05:
+            bad += 1
+    check(not bad, f"rough triangles, any tilt: closed and near the plane ({bad} wrong)")
+
+    clear()
+    obj = grid()
+    me = obj.data
+    cut = slice_at(obj, (0.003, 0.0, 0.0), Quaternion())
+    mids = edge_world(obj)[cut].mean(1)
+    check(cut.sum() == 40 and (np.abs(mids[:, 0]) < 1e-5).all(), f"a flat grid: straight across ({cut.sum()})")
+    uv.set_seams(me, cut)
+    check(not uv.dead_ends(me, uv.island_labels(me)).any() and closed(obj, cut), "from border to border")
+
+    clear()
+    bpy.ops.mesh.primitive_cube_add(size=0.2)
+    obj = bpy.context.active_object
+    primitives.make_active(bpy.context, obj)
+    bpy.context.view_layer.update()
+    cut = slice_at(obj, (0.1, 0.0, 0.02), across())
+    check(cut.sum() == 4 and (edge_world(obj)[cut][:, :, 2] > 0.09).all(), f"a cube: its closest ring, from mid-face ({cut.sum()})")
+    settings.uv_tool = 'NONE'
+
+
 def test_primitive_rebuild():
     print("== seams and UVs survive a resize")
     clear()
@@ -1201,7 +1457,8 @@ def test_panel():
     menus.set_more('OBJECT_UV', True)
     widgets, _h = menus.layout(ctx)
     ids = {w.id: w for w in widgets if w.id}
-    want = ("page_uv", "uv_tool_seam", "uv_tool_tidy", "uv_tool_fix", "uv_tool_twist", "uv_tool_size",
+    check(all(i in uv.TOOL_STYLES and i in hud.UV_INFO for i, _name in menus.UV_TOOLS), "every tool has a style and a card")
+    want = ("page_uv", "uv_tool_seam", "uv_tool_slice", "uv_tool_tidy", "uv_tool_fix", "uv_tool_twist", "uv_tool_size",
             "uv_view_checker", "uv_view_stretch", "uv_view_islands", "uv_unwrap", "uv_smart", "uv_pack",
             "uv_method_conformal", "uv_live", "uv_repack", "uv_twist_snap", "uv_checker", "uv_fix_radius",
             "uv_from_sharp", "uv_clear_ends", "uv_average", "uv_clear_seams")
@@ -1267,7 +1524,7 @@ def main():
     try:
         for test in (test_seams, test_fix, test_buttons, test_stretch, test_view, test_islands, test_islands_view,
                      test_twist, test_size, test_hover, test_tidy_push, test_tidy_clean, test_tidy_keeps, test_tidy_uvs,
-                     test_primitive_rebuild, test_panel):
+                     test_slice, test_primitive_rebuild, test_panel):
             try:
                 test()
             except Exception:

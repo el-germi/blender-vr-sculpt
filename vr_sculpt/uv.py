@@ -9,6 +9,8 @@ headset.
 - Fix: the faces the tip brushes over unwrap again, and only those: their corners on the border of the
   brushed patch are pinned for the unwrap (and unpinned after), so the patch stays stitched into the
   layout and nothing outside it moves. For where sculpting has stretched or scrambled the UVs.
+- Slice: a blade in the hand, the plane through the tip along the controller. The edge loop closest to it, where
+  it crosses the part of the mesh the blade touches, becomes a seam on release, so a toe takes one cut.
 - Tidy: a brush for seams already traced, working on islands as regions of faces, with the seams wherever
   regions meet (so they stay on edges and junctions need no special case). The main hand starts in an island
   and drags its boundary out across the others; the off hand smooths the boundaries in the brush and removes
@@ -65,8 +67,11 @@ TIDY_COLOR = (0.95, 0.55, 0.9)
 TIDY_FACING = -0.1  # the brush leaves faces turned further from the surface it's on than this (the far side)
 TIDY_SMOOTH_EVERY = 0.1  # seconds between the off hand's smoothing passes
 TIDY_STEPS_MAX = 40  # diffusion steps in a smoothing pass, at most
+SLICE_COLOR = (1.0, 0.62, 0.2)
+SLICE_CLOSENESS = 0.15  # how much an edge a typical edge's length from the plane costs on top of its own length
+SLICE_FOLLOW = 0.1  # what an existing seam costs the off hand, as a share: it clears the loop that's there
 TOOL_STYLES = {'SEAM': (SEAM_COLOR, "seam"), 'FIX': (FIX_COLOR, "fix"), 'TWIST': (ISLAND_COLOR, "gizmo_turn"),
-               'SIZE': (ISLAND_COLOR, "gizmo_size"), 'TIDY': (TIDY_COLOR, "seam")}
+               'SIZE': (ISLAND_COLOR, "gizmo_size"), 'TIDY': (TIDY_COLOR, "seam"), 'SLICE': (SLICE_COLOR, "cut")}
 HOVER_TOOLS = ISLAND_TOOLS | {'TIDY'}
 
 ORIENTED = "vrs_uv_oriented"  # On a mesh with an island turned by hand: packing mustn't turn islands.
@@ -418,6 +423,144 @@ def relaxed_labels(labels, a, b, weight, free, steps):
     out = labels.copy()
     out[faces[movable]] = names[mask[movable].argmax(1)]
     return out
+
+
+def _min_cut(n, a, b, weight, from_source, to_sink):
+    """Bool per node (of n, joined in pairs a[i], b[i] as strongly as weight[i]): on the source's side of the
+    cheapest cut between the source and the sink, which hold each node as strongly as from_source and to_sink.
+    Dinic's max flow. Python, so it's only for the few thousand nodes of a band of faces."""
+    source, sink = n, n + 1
+    arcs = [[] for _ in range(n + 2)]
+    head, room = [], []
+
+    def join(v, w, there, back):
+        arcs[v].append(len(head))
+        head.append(w)
+        room.append(there)
+        arcs[w].append(len(head))
+        head.append(v)
+        room.append(back)
+
+    for v, w, c in zip(a.tolist(), b.tolist(), weight.tolist()):
+        join(v, w, c, c)
+    for v in np.flatnonzero(from_source).tolist():
+        join(source, v, float(from_source[v]), 0.0)
+    for v in np.flatnonzero(to_sink).tolist():
+        join(v, sink, float(to_sink[v]), 0.0)
+    tiny = 1e-9 * max(float(weight.max()) if len(weight) else 0.0, 1e-12)
+    while True:
+        level = [-1] * (n + 2)
+        level[source] = 0
+        queue = deque((source,))
+        while queue:
+            v = queue.popleft()
+            for arc in arcs[v]:
+                w = head[arc]
+                if level[w] < 0 and room[arc] > tiny:
+                    level[w] = level[v] + 1
+                    queue.append(w)
+        if level[sink] < 0:
+            return np.array(level[:n]) >= 0
+        tried = [0] * (n + 2)
+        path = []
+        v = source
+        while True:
+            if v == sink:
+                flow = min(room[arc] for arc in path)
+                for arc in path:
+                    room[arc] -= flow
+                    room[arc ^ 1] += flow
+                for i, arc in enumerate(path):
+                    if room[arc] <= tiny:  # Back to before the first arc that's full.
+                        v = head[arc ^ 1]
+                        del path[i:]
+                        break
+                continue
+            out = arcs[v]
+            at = tried[v]
+            while at < len(out):
+                arc = out[at]
+                if room[arc] > tiny and level[head[arc]] == level[v] + 1:
+                    break
+                at += 1
+            tried[v] = at
+            if at < len(out):
+                path.append(out[at])
+                v = head[out[at]]
+            elif v == source:
+                break
+            else:
+                level[v] = -1  # Nothing more through here in this round.
+                v = head[path.pop() ^ 1]
+
+
+def plane_cut(st, world, centers, point, normal, reach, follow=None):
+    """The edges (their indices in st.edges, or none) of the edge loops closest to a plane, along each curve where
+    the plane crosses the mesh that passes within reach of point. So only that toe, not the others in line with it.
+
+    The faces the curve crosses, and those one ring out when there's something beyond them to hold on to, are
+    split between the plane's two sides by a minimum cut, with the faces around them as what's fixed. An edge costs
+    its length, and more the further it is from the plane. That makes it a straight loop where the mesh has one
+    running near the plane, even with the plane a little off true, and the shortest way close along the plane where
+    it hasn't. It's the outline of a set of faces, so it closes up or ends on the mesh's border, whatever the
+    mesh. follow (bool per edge): edges that cost next to nothing."""
+    none = np.zeros(0, dtype=np.int64)
+    a, b, verts = st.face_a, st.face_b, st.pair_verts
+    dist = (world - point) @ normal
+    d0, d1 = dist[verts[:, 0]], dist[verts[:, 1]]
+    crossing = np.flatnonzero((d0 >= 0.0) != (d1 >= 0.0))
+    if not len(crossing):
+        return none
+    t = (d0[crossing] / (d0[crossing] - d1[crossing]))[:, None]
+    at = world[verts[crossing, 0]] * (1.0 - t) + world[verts[crossing, 1]] * t
+    # The curve's pieces: across each face, from one crossed edge to the next. On a cube those are far longer than
+    # the reach, and the edges they end on can all be out of it with the tip right on the face.
+    owners = np.concatenate((a[crossing], b[crossing]))
+    ends = np.concatenate((at, at))
+    order = np.argsort(owners, kind='stable')
+    same = np.flatnonzero(owners[order[1:]] == owners[order[:-1]])
+    start, stop = ends[order[same]], ends[order[same + 1]]
+    along = stop - start
+    t = np.clip(((point - start) * along).sum(1) / np.maximum((along * along).sum(1), 1e-18), 0.0, 1.0)
+    touched = np.linalg.norm(start + along * t[:, None] - point, axis=1) <= reach
+    if not touched.any():
+        return none
+    curves = _components(st.n_faces, a[crossing], b[crossing])
+    wanted = np.zeros(st.n_faces, dtype=bool)
+    wanted[curves[owners[order[same[touched]]]]] = True
+    crossing = crossing[wanted[curves[a[crossing]]]]
+    crossed = np.zeros(st.n_faces, dtype=bool)
+    crossed[a[crossing]] = crossed[b[crossing]] = True
+
+    def around(faces):
+        out = np.zeros(st.n_faces, dtype=bool)
+        out[b[faces[a]]] = out[a[faces[b]]] = True
+        return out
+
+    ring = around(crossed) & ~crossed
+    free = crossed | (ring & around(around(ring) & ~ring & ~crossed))
+    band = np.flatnonzero(free[a] | free[b])
+    index = np.flatnonzero(free)
+    high = (centers - point) @ normal >= 0.0
+    d0, d1 = d0[band], d1[band]
+    lengths = np.linalg.norm(world[verts[band, 0]] - world[verts[band, 1]], axis=1)
+    far = (d0 * d0 + d0 * d1 + d1 * d1) / 3.0  # Its squared distance from the plane, on average along it.
+    cost = lengths * (1.0 + SLICE_CLOSENESS * far / max(float(lengths.mean()) ** 2, 1e-18))
+    if follow is not None:
+        cost[follow[st.edges[band]]] *= SLICE_FOLLOW
+    fa, fb = a[band], b[band]
+    both = free[fa] & free[fb]
+    from_a, from_b = free[fa] & ~free[fb], free[fb] & ~free[fa]
+    local = len(index)
+    hold_high, hold_low = np.zeros(local), np.zeros(local)
+    for mine, other, held in ((fa[from_a], fb[from_a], cost[from_a]), (fb[from_b], fa[from_b], cost[from_b])):
+        here = np.searchsorted(index, mine)
+        np.add.at(hold_high, here[high[other]], held[high[other]])
+        np.add.at(hold_low, here[~high[other]], held[~high[other]])
+    sides = high.copy()
+    sides[index] = _min_cut(local, np.searchsorted(index, fa[both]), np.searchsorted(index, fb[both]), cost[both],
+                            hold_high, hold_low)
+    return np.unique(st.edges[band[sides[fa] != sides[fb]]])
 
 
 def island_colors(labels):
@@ -957,8 +1100,9 @@ _fixing = [None]  # the Fix stroke in progress, for its preview
 class TidySeams:
     """Trigger handler for the Tidy tool. The stroke keeps every face's island (self.labels) and rewrites the
     seams from them as faces change hands: the main hand's brush gives the faces it passes to the island it
-    started in (label), the off hand's smooths the boundaries under it and removes the seams there that go
-    nowhere (_Stitching.dead_ends()). Those stay where only the main hand goes. Unwraps on release when live."""
+    started in (label) and moves the cuts it crosses in that island, the off hand's smooths the boundaries and
+    cuts under it and removes the seams there that go nowhere (_Stitching.dead_ends()). Those stay where only the
+    main hand goes. Unwraps on release when live."""
     smooth = True  # The trigger operator stabilizes the tip (smoothing.py).
 
     def __init__(self, context, obj, scale, label=None):
@@ -987,6 +1131,8 @@ class TidySeams:
         self.normals = normals / np.maximum(np.linalg.norm(normals, axis=1), 1e-12)[:, None]
         self.weight = self.apart = None  # The smoothing's, on its first pass.
         self.next_pass = 0.0
+        self.start = None  # The main hand's: the face it started on, and those it's been over.
+        self.swept = np.zeros(stitching.n_faces, dtype=bool)
         self.changed = False
 
     def _brushed(self, point):
@@ -998,13 +1144,16 @@ class TidySeams:
             near &= self.normals @ np.array(hit[1][:]) > TIDY_FACING
         return near
 
-    def _write(self, labels, marked):
+    def _write(self, labels, marked, flip=None):
         """New islands and seams, from these labels and marked, the seams that had the same island on both
         sides staying: a boundary that's gone leaves nothing, but a relief cut isn't a boundary, and one that
-        reached the boundary still does (_Stitching.carried_on())."""
+        reached the boundary still does (_Stitching.carried_on()). flip (bool per face): those faces go over to
+        the far side of the cuts around them, which moves a cut with the same island on both sides without
+        loosening its ends: seams change along those faces' outline, within an island."""
         st = self.stitching
         moved = labels != self.labels
-        if moved.any():
+        any_moved = moved.any()
+        if any_moved:
             was_marked = marked
             kept = st.open_seams(self.labels, marked)
             touched = moved[st.face_a] | moved[st.face_b]
@@ -1014,7 +1163,11 @@ class TidySeams:
             marked |= kept
             marked = st.carried_on(marked, was_marked, self.labels, labels)
             self.labels = labels
-        elif (marked == self.marked).all():
+        if flip is not None and flip.any():
+            toggle = st.edges[(flip[st.face_a] != flip[st.face_b]) & (labels[st.face_a] == labels[st.face_b])]
+            marked = marked.copy()
+            marked[toggle] = ~marked[toggle]
+        if not any_moved and (marked == self.marked).all():
             return
         self.marked = marked
         if self.adopt:
@@ -1039,6 +1192,38 @@ class TidySeams:
         self.weight = np.maximum(lengths, 1e-9) / apart
         self.apart = apart
 
+    def _regions(self, faces, marked):
+        """Per face, the lowest face it can reach without crossing a seam or leaving faces (bool per face): the
+        sides of what's cut there, though a cut with the same island on both sides has only one side overall.
+        Outside faces, each face on its own."""
+        st = self.stitching
+        pairs = np.flatnonzero(faces[st.face_a] & faces[st.face_b])
+        a, b = st.face_a[pairs], st.face_b[pairs]
+        joined = ~marked[st.edges[pairs]] & (self.labels[a] == self.labels[b])
+        index = np.flatnonzero(faces)
+        comps = _components(len(index), np.searchsorted(index, a[joined]), np.searchsorted(index, b[joined]))
+        out = np.arange(st.n_faces)
+        out[index] = index[comps]
+        return out
+
+    def _across(self):
+        """Bool per face, or None: what the main hand has swept on the far side of a cut from where it started,
+        in its own island. Asked of the swept faces alone, so a cut with that island on both sides has two sides
+        here, and the brush going round a cut's loose end finds none."""
+        st = self.stitching
+        pairs = np.flatnonzero(self.swept[st.face_a] & self.swept[st.face_b] & self.marked[st.edges])
+        a, b = st.face_a[pairs], st.face_b[pairs]
+        cut = (self.labels[a] == self.label) & (self.labels[b] == self.label)
+        if not cut.any():
+            return None
+        regions = self._regions(self.swept, self.marked)
+        ra, rb = regions[a[cut]], regions[b[cut]]
+        home = regions[self.start]
+        far = np.zeros(st.n_faces, dtype=bool)
+        far[rb[ra == home]] = far[ra[rb == home]] = True
+        far[home] = False
+        return self.swept & far[regions] if far.any() else None
+
     def _clean(self, point):
         st = self.stitching
         brushed = self._brushed(point)
@@ -1050,16 +1235,29 @@ class TidySeams:
         marked = self.marked & ~(st.dead_ends(self.labels, self.marked) & reach)
         spacing = float(self.apart[touching].mean()) if touching.any() else self.radius
         steps = int(min(max((self.radius / spacing) ** 2 / 2.0, 2.0), TIDY_STEPS_MAX))
-        self._write(relaxed_labels(self.labels, st.face_a, st.face_b, self.weight, brushed, steps), marked)
+        # The sides of each cut around the brush, as far past it as the brush is wide so what's cut stays cut
+        # where it leaves. One that goes all the way round in there (a tube thinner than that) has no sides.
+        near = brushed | (np.linalg.norm(self.centers - np.array(point[:]), axis=1) <= 2.0 * self.radius)
+        near[st.face_b[near[st.face_a]]] = True
+        near[st.face_a[near[st.face_b]]] = True
+        regions = self._regions(near, marked)
+        relaxed = relaxed_labels(regions, st.face_a, st.face_b, self.weight, brushed, steps)
+        labels = self.labels[relaxed]
+        self._write(labels, marked, (relaxed != regions) & (labels == self.labels))
 
     def update(self, context, pose, tip_pose, value):
         point = tip_pose.translation
         if self.label is not None:
-            take = self._brushed(point) & (self.labels != self.label)
+            brushed = self._brushed(point)
+            self.swept |= brushed
+            take = brushed & (self.labels != self.label)
             if take.any():
                 labels = self.labels.copy()
                 labels[take] = self.label
                 self._write(labels, self.marked)
+            flip = self._across()  # Once the boundary's gone from around what was just taken.
+            if flip is not None:
+                self._write(self.labels, self.marked, flip)
             return
         now = time.monotonic()
         if now >= self.next_pass:
@@ -1076,6 +1274,70 @@ class TidySeams:
         else:
             say("Seams tidied")
         tick(context)
+
+
+class SliceSeams:
+    """Trigger handler for the Slice tool: the hand holds a blade, the plane through the tip along the controller
+    (roll the wrist to turn it). While the trigger is held the edge loop it would cut shows, and it's cut on
+    release; pulled away from the mesh, there's nothing to cut. The off hand clears along the loop instead."""
+
+    def __init__(self, context, obj, clear, scale):
+        settings = context.scene.vr_sculpt
+        self.obj = obj
+        self.value = not clear
+        self.reach = settings.uv_fix_radius * scale
+        self.live = settings.uv_live
+        self.method = settings.uv_method
+        me = obj.data
+        self.stitching = _stitching_of(obj)
+        self.marked = seams(me)
+        self.world = _world(obj)
+        self.centers = _face_centers(me, self.world)
+        ev = np.empty(len(me.edges) * 2, dtype=np.int64)
+        me.edges.foreach_get("vertices", ev)
+        self.ev = ev.reshape(-1, 2)
+        self.edges = np.zeros(0, dtype=np.int64)  # What the last update found: what's shown is what gets cut.
+        self.next = 0.0
+        self.changed = False
+        _slicing[0] = self
+
+    def update(self, context, pose, tip_pose, value):
+        now = time.monotonic()
+        if now < self.next:
+            return
+        normal = np.array(pose.col[0][:3])
+        edges = plane_cut(self.stitching, self.world, self.centers, np.array(tip_pose.translation[:]), normal,
+                          self.reach, None if self.value else self.marked)
+        self.edges = edges if self.value else edges[self.marked[edges]]
+        self.next = time.monotonic() + FOLLOW_SHARE * (time.monotonic() - now)
+
+    def preview(self):
+        """(n, 3) float32 world line ends of what would be cut."""
+        return self.world[self.ev[self.edges]].reshape(-1, 3).astype(np.float32)
+
+    def finish(self, context):
+        _slicing[0] = None
+        if not len(self.edges):
+            say("Hold the blade to the mesh to slice it")
+            return
+        me = self.obj.data
+        self.marked = seams(me)
+        if (self.marked[self.edges] == self.value).all():
+            return
+        self.marked[self.edges] = self.value
+        set_seams(me, self.marked)
+        self.changed = True
+        if self.live:
+            unwrap(context, self.obj, self.method)  # Which says how it went.
+        else:
+            say(f"{'Sliced' if self.value else 'Cleared'} {len(self.edges)} edges")
+        tick(context)
+
+    def abandon(self):
+        _slicing[0] = None
+
+
+_slicing = [None]  # the Slice stroke in progress, for its preview
 
 
 def _stitching_of(obj):
@@ -1317,9 +1579,11 @@ def _pick_tidy(context, settings, off, tip_pose, scale):
     if face is None:
         return NoIsland("Start on the island to push out")
     stroke = TidySeams(context, obj, scale, None)
-    if (stroke.labels == stroke.labels[0]).all():
-        return NoIsland("Only one island: there's no boundary to push")
+    if (stroke.labels == stroke.labels[0]).all() and not stroke.marked.any():
+        return NoIsland("Only one island, and no seams to push")
     stroke.label = stroke.labels[face]
+    stroke.start = face
+    stroke.swept[face] = True
     return stroke
 
 
@@ -1345,6 +1609,10 @@ def pick(context, settings, left, scale, hand, pose, tip_pose):
         return _pick_island(context, settings, hand, pose, tip_pose, scale)
     if settings.uv_tool == 'TIDY':
         return _pick_tidy(context, settings, left, tip_pose, scale)
+    if settings.uv_tool == 'SLICE':
+        obj = fix_target(context)
+        if obj is not None and len(obj.data.polygons):
+            return SliceSeams(context, obj, left, scale)
     return None
 
 
@@ -1372,6 +1640,7 @@ def forget_caches():
     _view["next"] = 0.0
     _hover.update(key=None, labels=None, centers=None, batches={})
     _fixing[0] = None
+    _slicing[0] = None
     _grab[0] = None
 
 
@@ -1679,6 +1948,8 @@ def draw(shader, context, tips, scale):
         if settings.uv_tool == 'SEAM':
             for tip in tips:
                 reach_pts.append(segs[shading._near(segs, np.array(tip[:]), shading.MARK_REACH * scale)].reshape(-1, 3))
+    if _slicing[0] is not None:
+        reach_pts.append(_slicing[0].preview())
     gpu.state.line_width_set(3.0)
     for pts, color in ((seam_pts, (*SEAM_COLOR, 0.95)), (open_pts, (*OPEN_SEAM_COLOR, 0.95)),
                        (reach_pts, (1.0, 1.0, 1.0, 0.8))):

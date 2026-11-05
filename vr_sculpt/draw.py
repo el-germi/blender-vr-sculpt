@@ -34,6 +34,8 @@ def _unit_rings():
 
 
 _RINGS = _unit_rings()
+_BLADE = _RINGS[:2 * _SEGMENTS]  # The ring around the controller's X: the Slice tool's plane.
+_BLADE_FAN = [q for i in range(0, len(_BLADE), 2) for q in ((0.0, 0.0, 0.0), _BLADE[i], _BLADE[i + 1])]
 
 
 def _draw(xr):
@@ -110,7 +112,7 @@ def _draw_cursors(context, ss, settings, xr):
             settings.draw_tool, settings.draw_width / 2) * scale
     else:
         marking = model and (settings.model_mark != 'NONE' or settings.uv_tool == 'SEAM')
-        fixing = model and settings.uv_tool in {'FIX', 'TIDY'}
+        fixing = model and settings.uv_tool in {'FIX', 'TIDY', 'SLICE'}
         island = model and settings.uv_tool in uv.ISLAND_TOOLS
         # Stamping, the ring is half the spacing: stamps go where neighboring rings would touch.
         stamping = model and settings.kit_stamp and kit.is_key(settings.primitive)
@@ -150,7 +152,7 @@ def _draw_cursors(context, ss, settings, xr):
                     _draw_bounds(shader, near, (*color, 0.9))
         elif model and settings.uv_tool != 'NONE':
             color = uv.TOOL_STYLES[settings.uv_tool][0]
-            if idx == off and settings.uv_tool in {'SEAM', 'TIDY'}:
+            if idx == off and settings.uv_tool in {'SEAM', 'TIDY', 'SLICE'}:
                 color = (1.0, 1.0, 1.0)  # The off hand clears.
         elif model and settings.model_mark != 'NONE':
             color = {'HARD': shading.HARD_COLOR, 'SOFT': shading.SOFT_COLOR}.get(settings.model_mark, (1.0, 1.0, 1.0))
@@ -189,7 +191,12 @@ def _draw_cursors(context, ss, settings, xr):
         alpha = 1.0 if idx in operators.active_hands else 0.6
 
         m = Matrix.Translation(tip) @ pose.to_3x3().to_4x4() @ Matrix.Scale(radius, 4)
-        coords = [m @ Vector(p) for p in _RINGS]
+        blade = model and settings.uv_tool == 'SLICE'
+        if blade:
+            batch = batch_for_shader(shader, 'TRIS', {"pos": [m @ Vector(p) for p in _BLADE_FAN]})
+            shader.uniform_float("color", (*color, 0.3 * alpha))
+            batch.draw(shader)
+        coords = [m @ Vector(p) for p in (_BLADE if blade else _RINGS)]
         # Stick from the controller to the tip.
         coords += [pose.translation, tip]
         batch = batch_for_shader(shader, 'LINES', {"pos": coords})

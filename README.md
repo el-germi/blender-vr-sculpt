@@ -207,6 +207,18 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     edge path between them, so a fast sweep leaves no gaps and no stray cuts
     across the line. With **Live** on (More), the mesh unwraps again when you
     let go. It works on the object and its visible cutters.
+  - **Slice** cuts a whole loop at once, so a toe doesn't have to be traced all
+    the way round. The hand holds a blade, the disc at the tip, along the
+    controller; roll the wrist to turn it. Hold the trigger with the blade
+    across the part: the loop it would cut shows in white, and it's cut when you
+    let go (or pull away first, and nothing is). The plane is endless, but only
+    where it crosses the mesh within the blade's reach counts: one toe, not the
+    ones in line with it. Make the blade longer with **Radius** (More) to take
+    them all in one go. It marks the closest edges, so a mesh with clean loops
+    gets the straight loop even with your hand a little off, and a dense or
+    triangulated one gets the shortest way along the plane. The cut always
+    closes up or ends on the mesh's border. The off hand clears along the loop
+    in the same way, following a seam that's there.
   - **Fix** is a brush for UVs that sculpting stretched or scrambled: brush
     over the bad patch and, on release, only those faces unwrap again. The
     patch's border is pinned for the unwrap, so it stays stitched to the rest
@@ -218,18 +230,20 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     main hand, start inside an island (it's tinted) and drag across its border:
     the faces you pass join it and the boundary moves out with you. You can
     push through a thin island, which splits it, or into its own other side,
-    which closes the gap. With the off hand, brush over seams: boundaries
-    smooth out (bumps and notches go, straight runs and junctions stay, and a
-    speck of an island smaller than the brush is absorbed) and seams that go
-    nowhere (amber in the Islands view) are removed. Those are the ones with a
-    loose end, as far back as they reach a border or a boundary. A seam that
-    does a job stays, though it has the same island on both sides: a tube's cut
-    from one end to the other, or the one cut that opens a closed shape (a
-    sphere's meridian, with any branches). The Seams tool's off hand still
-    removes those. Pushing a boundary leaves dead ends alone, and a tube's cut
-    follows the boundary it ends on. Seams stay on edges, so on quads a
-    diagonal is still a staircase. With **Live** on the mesh unwraps when you
-    let go. **Clear ends** (More) removes every seam that goes nowhere at once.
+    which closes the gap. The same goes for a cut with the island on both sides,
+    like a tube's: start beside it and drag across, and it moves ahead of the
+    brush while its ends stay on what they reach. With the off hand, brush over
+    seams: boundaries and cuts smooth out (bumps and notches go, straight runs
+    and junctions stay, and a speck of an island smaller than the brush is
+    absorbed) and seams that go nowhere (amber in the Islands view) are removed.
+    Those are the ones with a loose end, as far back as they reach a border or
+    a boundary. A seam that does a job stays, though it has the same island on
+    both sides: a tube's cut from one end to the other, or the one cut that
+    opens a closed shape (a sphere's meridian, with any branches). The Seams
+    tool's off hand still removes those. A tube's cut also follows the boundary
+    it ends on. Seams stay on edges, so on quads a diagonal is still a
+    staircase. With **Live** on the mesh unwraps when you let go. **Clear ends**
+    (More) removes every seam that goes nowhere at once.
   - **Twist** turns one island's texture on the surface: touch it (the island
     in reach is tinted), hold the trigger and roll your wrist. The texture
     turns the way your hand does, for grain and fabric directions. **Snap 15°**
@@ -732,6 +746,15 @@ With Triggers" is on. The setting applies when the VR session starts.
   outside holding still, and each face goes to the strongest. During a stroke
   it writes the seam attribute without `mesh.update()`, which it does once on
   release: the headset's seams read the attribute.
+  Slice finds where the plane crosses the mesh, one connected curve per toe,
+  and keeps those passing within the blade's reach. The faces they cross (and
+  the ring around them) are split between the plane's two sides by a minimum
+  cut, each edge costing its length plus a little for its distance from the
+  plane. Short straight loops beat staircases that hug the plane, and the
+  result is the outline of a set of faces, so it can't have a loose end. The
+  max flow is plain Python, but only on that band of faces: 12 to 40 ms per
+  update at 135k faces, and the preview skips frames to stay under a share of
+  them.
   Twist and Size don't touch the mesh during the stroke: the shader transforms
   the island's UVs from two uniforms, so they cost nothing per frame on a dense
   mesh. The write and the pack happen on release (~1.4 s at 135k faces; Repack

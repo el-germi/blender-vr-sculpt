@@ -431,6 +431,8 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         items=(
             ('NONE', "Off", "The trigger grabs and creates"),
             ('SEAM', "Seams", "Touched edges become UV seams (other hand clears them)"),
+            ('SLICE', "Slice", "Hold a blade across the mesh: the closest edge loop becomes a seam on release (other "
+                               "hand clears it)"),
             ('FIX', "Fix", "Brushed faces unwrap again, stitched to the rest of the layout"),
             ('TIDY', "Tidy", "Drag an island's boundary out from inside it; the other hand smooths boundaries and "
                              "removes seams that separate nothing"),
@@ -475,7 +477,7 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         description="Squares per side of the UV square in the checker view")
     uv_fix_radius: FloatProperty(
         name="Brush Radius", default=0.03, min=0.005, max=0.2, unit='LENGTH', subtype='DISTANCE',
-        description="Reach of the Fix and Tidy brushes (hand-space meters)")
+        description="Reach of the Fix and Tidy brushes and the Slice blade (hand-space meters)")
     model_mark: EnumProperty(
         name="Mark Edges",
         description="While on, the trigger marks the edges it touches on the selected object instead of grabbing "

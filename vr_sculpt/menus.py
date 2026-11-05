@@ -837,7 +837,8 @@ def _finish_rows(context, settings, obj):
     return rows, more, "Edge marks" + (", segments" if on else "")
 
 
-UV_TOOLS = (('SEAM', "Seams"), ('TIDY', "Tidy"), ('FIX', "Fix"), ('TWIST', "Twist"), ('SIZE', "Size"))
+UV_TOOLS = (('SEAM', "Seams"), ('SLICE', "Slice"), ('TIDY', "Tidy"), ('FIX', "Fix"), ('TWIST', "Twist"),
+            ('SIZE', "Size"))
 UV_VIEWS = (('NONE', "Off"), ('CHECKER', "Checker"), ('STRETCH', "Stretch"), ('ISLANDS', "Islands"))
 
 

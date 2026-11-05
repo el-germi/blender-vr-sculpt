@@ -214,8 +214,9 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Every modifier (ours and others): show / hide, apply (with those above it), Apply all | **chip** > Stack |
 | A modifier's settings (paged), move up / down, remove | **chip** > Stack > the modifier's row |
 | Mark / clear UV seams (trace edges; left hand clears) | **chip** > UV > Tool: Seams (leaving the page or sheet turns it off) |
-| Push an island's boundary (main hand, drag out from inside it) | **chip** > UV > Tool: Tidy |
-| Smooth boundaries, remove seams that go nowhere (off hand, brush) | **chip** > UV > Tool: Tidy; *More* > Radius |
+| Cut or clear a whole edge loop at once (hold a blade across it, let go; left hand clears) | **chip** > UV > Tool: Slice; *More* > Radius (the blade's reach) |
+| Push an island's boundary or a cut inside it (main hand, drag across it) | **chip** > UV > Tool: Tidy |
+| Smooth boundaries and cuts, remove seams that go nowhere (off hand, brush) | **chip** > UV > Tool: Tidy; *More* > Radius |
 | Remove all seams that go nowhere | **chip** > UV > *More* > Clear ends |
 | Fix stretched UVs (brush faces: they unwrap again, stitched in) | **chip** > UV > Tool: Fix; *More* > Radius |
 | Turn an island's texture on the surface (hold on it, roll the wrist) | **chip** > UV > Tool: Twist; *More* > Snap 15° |

@@ -50,6 +50,7 @@ MARK_INFO = {
 }
 UV_INFO = {
     'SEAM': ("Mark Seams", "Trace edges to cut the UV map along them. Other hand clears"),
+    'SLICE': ("Slice Seam", "Hold the blade across the mesh and let go: the closest edge loop is cut. Other hand clears"),
     'FIX': ("Fix UVs", "Brush over stretched faces: they unwrap again, stitched to the rest"),
     'TIDY': ("Tidy Seams", "Drag from inside an island to push its boundary. Other hand smooths, removes dead-end cuts"),
     'TWIST': ("Twist Island", "Hold on an island and roll your wrist: its texture turns with your hand"),
