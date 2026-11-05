@@ -1,17 +1,19 @@
 """Windowed check of the UV page: the hand panel's UV page, and a seamed sphere with the checker view, then
-the stretch view (the custom shader compiles and draws). Saves tests/uv_preview_checker.png and
-tests/uv_preview_stretch.png.
+the stretch view, the island view (one more seam around the middle, one open line), the island under a tip
+(Twist on), and a Twist stroke's preview (the custom shader compiles and draws). Saves
+tests/uv_preview_checker.png, _stretch, _islands, _hover and _twist.
 
 blender --factory-startup some.blend --python tests/uv_preview.py
 """
 
+import math
 import os
 import sys
 import traceback
 
 import bpy
 import numpy as np
-from mathutils import Quaternion, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -47,7 +49,7 @@ def draw():
         for m, widgets, height, hover in panels:
             vr_ui.draw_panel(m, widgets, height, hover)
         shader = gpu.shader.from_builtin('UNIFORM_COLOR')
-        uv.draw(shader, bpy.context, [Vector((0.0, -0.1, 0.0))], 1.0)
+        uv.draw(shader, bpy.context, [Vector((0.12, -0.13, 0.05))], 1.0)
     except Exception:
         log(traceback.format_exc())
 
@@ -117,6 +119,36 @@ def shoot(win, area, region, name):
             uv.tick(bpy.context)
             log("stretch arrays:", uv._view["arrays"] is not None)
             bpy.app.timers.register(lambda: (shoot(win, area, region, "stretch"), None)[1], first_interval=0.5)
+            return
+        ctx = bpy.context
+        s = ctx.scene.vr_sculpt
+        ball = ctx.active_object
+        if name == "stretch":
+            from vr_sculpt import shading
+            segs = shading._edge_segments(ball)
+            marked = uv.seams(ball.data)
+            ring = (np.abs(segs[:, :, 2]) < 1e-5).all(1)
+            line = (np.abs(segs[:, :, 1]) < 1e-5).all(1) & (segs[:, :, 0] < 0.18 - 1e-5).all(1) & (segs[:, :, 2] > 0.04).all(1)
+            uv.set_seams(ball.data, marked | ring | line)
+            log("unwrap with the ring:", uv.unwrap(ctx, ball), uv.message())
+            s.uv_view = 'ISLANDS'
+            uv.tick(ctx)
+            log("island note:", uv.island_note(s), "| dead-end edges:", int(uv._view["dead"].sum()))
+            bpy.app.timers.register(lambda: (shoot(win, area, region, "islands"), None)[1], first_interval=0.5)
+            return
+        if name == "islands":
+            s.uv_tool = 'TWIST'
+            uv.tick(ctx)
+            log("hover labels:", uv._hover["labels"] is not None)
+            bpy.app.timers.register(lambda: (shoot(win, area, region, "hover"), None)[1], first_interval=0.5)
+            return
+        if name == "hover":
+            s.uv_view = 'CHECKER'
+            uv.tick(ctx)
+            labels = uv._hover["labels"]
+            grab = uv.TwistIsland(ctx, ball, int(np.argmax(labels != labels[0])), labels, None, Matrix.Identity(4))
+            grab.angle = math.radians(30.0)
+            bpy.app.timers.register(lambda: (shoot(win, area, region, "twist"), None)[1], first_interval=0.5)
             return
     except Exception:
         log(traceback.format_exc())

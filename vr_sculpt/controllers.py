@@ -145,8 +145,16 @@ def _trigger(s, info):
     if mode == 'MODEL':
         if s.uv_tool == 'SEAM':
             return ("seam", "Mark seams")
+        if s.uv_tool == 'SLICE':
+            return ("cut", "Slice a seam")
         if s.uv_tool == 'FIX':
             return ("fix", "Fix UVs")
+        if s.uv_tool == 'TIDY':
+            return ("seam", "Push boundary")
+        if s.uv_tool == 'TWIST':
+            return ("gizmo_turn", "Twist island")
+        if s.uv_tool == 'SIZE':
+            return ("gizmo_size", "Size island")
         if s.model_mark != 'NONE':
             return ("edit", {'HARD': "Mark hard", 'SOFT': "Mark soft"}.get(s.model_mark, "Clear marks"))
         if s.model_add_as != 'OBJECT' and info.cut_target:
@@ -197,7 +205,11 @@ def _left_trigger(s, info, right):
         return ("trash", "Delete")
     if mode == 'MODEL' and s.uv_tool == 'SEAM':
         return ("seam", "Clear seams")
-    if mode == 'MODEL' and s.uv_tool == 'FIX':
+    if mode == 'MODEL' and s.uv_tool == 'SLICE':
+        return ("cut", "Clear a seam loop")
+    if mode == 'MODEL' and s.uv_tool == 'TIDY':
+        return ("seam", "Smooth, clean seams")
+    if mode == 'MODEL' and s.uv_tool in {'FIX', 'TWIST', 'SIZE'}:
         return right
     if mode == 'MODEL' and s.model_mark != 'NONE':
         return ("edit", "Clear marks")
@@ -706,6 +718,7 @@ def draw(context, ss, xr=True):
         _log_poses(context, ss)
     shader = _shader()
     head = Vector(ss.viewer_pose_location)
+    up = hud.view_up(ss)
     gpu.state.blend_set('ALPHA')
     gpu.state.depth_test_set('LESS_EQUAL')
     gpu.state.depth_mask_set(True)
@@ -724,7 +737,7 @@ def draw(context, ss, xr=True):
         m = controller_matrix(ss, context, idx)
         to_local = m.to_3x3().inverted_safe()
         toward_head = (head - m.translation).normalized()
-        shader.uniform_float("light", (to_local @ (Vector((0.0, 0.0, LIGHT_UP)) + toward_head * LIGHT_HEAD)).normalized())
+        shader.uniform_float("light", (to_local @ (up * LIGHT_UP + toward_head * LIGHT_HEAD)).normalized())
         shader.uniform_float("eye", (to_local @ toward_head).normalized())
         shader.uniform_float("alpha", 1.0)
         for name, batch in mdl.batches.items():

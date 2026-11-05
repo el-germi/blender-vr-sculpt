@@ -81,8 +81,9 @@ def update(context, ss, using=False, now=None):
     head_rot = getattr(ss, "viewer_pose_rotation", None)
     rot = Quaternion(ss.controller_aim_rotation_get(context, off))
     s["wrist"] = wrist_turned(rot, hand, head, s["wrist"], -1.0 if off == 0 else 1.0)
+    from . import hud
     s["gaze"] = looking_at(head, Quaternion(head_rot) if head_rot is not None else None,
-                           hand + Vector((0.0, 0.0, 0.12 * ss.viewer_scale)), s["gaze"])
+                           hand + hud.view_up(ss) * 0.12 * ss.viewer_scale, s["gaze"])
     pinned = settings.panel_pin
     wants = settings.show_panel and (pinned or using or rule(settings, s["wrist"], s["gaze"]))
     if wants:

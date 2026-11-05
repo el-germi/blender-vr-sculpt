@@ -255,6 +255,20 @@ def run():
             check(paint.undo_last(bpy.context), "B / Undo stroke")
             check(np.allclose(pixels(img), base, atol=1e-3), "takes the whole stroke back")
 
+            # With the experimental 3D Texture Paint on, these strokes used to paint nothing (and answer FINISHED).
+            experimental = bpy.context.preferences.experimental
+            experimental.use_3d_texture_paint = True
+            try:
+                s3d = stroke(bpy.context, settings, ball, poses)
+                still_on = experimental.use_3d_texture_paint
+            finally:
+                experimental.use_3d_texture_paint = False
+            moved = np.any(np.abs(pixels(img)[..., :3] - base[..., :3]) > 0.2, axis=2)
+            check(abs(int(moved.sum()) - int(changed.sum())) < 0.1 * changed.sum(),
+                  f"3D Texture Paint on: the same stroke paints the same ({int(moved.sum())} texels, was {int(changed.sum())})")
+            check(s3d is not None and still_on, "and the preference stays on")
+            check(paint.undo_last(bpy.context) and np.allclose(pixels(img), base, atol=1e-3), "and it undoes")
+
             # Left hand: second color, at the top.
             poses = []
             for a in np.linspace(-0.4, 0.4, 20):

@@ -156,7 +156,7 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         if obj is not None and obj.type == 'MESH':
             return interactions.SelectTarget(context, obj)
     if settings.mode == 'MODEL' and settings.uv_tool != 'NONE':
-        handler = uv.pick(context, settings, off, scale)
+        handler = uv.pick(context, settings, off, scale, hand, pose, tip_pose)
         if handler is not None:
             return handler
     if settings.mode == 'MODEL' and settings.model_mark != 'NONE' and shading.mark_targets(context):

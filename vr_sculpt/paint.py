@@ -12,10 +12,12 @@ Findings from tests/probe_texpaint*.py on 5.4.0 Alpha:
 - Each call is its own undo step. Most of a call's cost is setting up the projection for the whole
   mesh, so all the dabs of a frame go into one call (one stroke element each). The add-on keeps its own per-stroke
   undo (changed tiles only, see below), so B (or Undo stroke) takes back a whole stroke.
+- All of this is projection painting: the experimental 3D Texture Paint preference swaps it out, see projection_paint().
 """
 
 import colorsys
 import time
+from contextlib import contextmanager
 
 import bpy
 import numpy as np
@@ -764,6 +766,25 @@ def pressure_from(value):
     return min(max((value - TRIGGER_THRESHOLD) / (1.0 - TRIGGER_THRESHOLD), 0.05), 1.0)
 
 
+@contextmanager
+def projection_paint():
+    """Blender's projection painting for what's inside, whatever the preferences say.
+
+    With the experimental 3D Texture Paint on, paint.image_paint gives the Draw brushes another engine. It finds
+    each dab by the element's location in object space and doesn't follow its size; the strokes built here
+    are for projection painting (see the top of this file), and that engine answers FINISHED and paints nothing
+    with them. The preference is only read during the call, so the user keeps it for painting on the desktop."""
+    experimental = bpy.context.preferences.experimental
+    was_on = getattr(experimental, "use_3d_texture_paint", False)
+    if was_on:
+        experimental.use_3d_texture_paint = False
+    try:
+        yield
+    finally:
+        if was_on:
+            experimental.use_3d_texture_paint = True
+
+
 class PaintStroke:
     """Trigger handler: paint while the trigger is held. Same interface as interactions' handlers."""
     smooth = True  # The trigger operator stabilizes the tip (smoothing.py).
@@ -899,7 +920,8 @@ class PaintStroke:
             with bpy.context.temp_override(window=self.window, area=area, region=region):
                 if not self._can_paint():
                     return
-                bpy.ops.paint.image_paint(stroke=elems, mode='INVERT' if self.invert else 'NORMAL')
+                with projection_paint():
+                    bpy.ops.paint.image_paint(stroke=elems, mode='INVERT' if self.invert else 'NORMAL')
             self.dabs += len(targets)
             self.changed = True
             self.last = (targets[-1][0], targets[-1][1])
@@ -924,11 +946,13 @@ class PaintStroke:
             pose, tip_pose, value = self.pending
             self.last_call = 0.0
             self.update(context, pose, tip_pose, value)
+        # The paint call answers FINISHED even when it paints nothing: the tiles say what really landed.
+        tiles = 0
+        if self.changed and self.image is not None and commit(self.image):
+            tiles = len(_history[-1]["tiles"])
         if self.ms:
             print(f"VR Paint stroke: {self.dabs} dabs in {len(self.ms)} calls, avg {sum(self.ms) / len(self.ms):.1f} ms "
-                  f"per call, max {max(self.ms):.1f} ms", flush=True)
-        if self.changed and self.image is not None:
-            commit(self.image)
+                  f"per call, max {max(self.ms):.1f} ms, {tiles} tiles changed", flush=True)
 
 
 class PickColor:

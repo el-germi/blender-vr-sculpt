@@ -837,17 +837,25 @@ def _finish_rows(context, settings, obj):
     return rows, more, "Edge marks" + (", segments" if on else "")
 
 
-UV_TOOLS = (('SEAM', "Seams", "seam"), ('FIX', "Fix", "fix"))
-UV_VIEWS = (('NONE', "Off"), ('CHECKER', "Checker"), ('STRETCH', "Stretch"))
+UV_TOOLS = (('SEAM', "Seams"), ('SLICE', "Slice"), ('TIDY', "Tidy"), ('FIX', "Fix"), ('TWIST', "Twist"),
+            ('SIZE', "Size"))
+UV_VIEWS = (('NONE', "Off"), ('CHECKER', "Checker"), ('STRETCH', "Stretch"), ('ISLANDS', "Islands"))
+
+
+def _press_uv_tool(settings, ident):
+    settings.uv_tool = 'NONE' if settings.uv_tool == ident else ident
+    if settings.uv_tool in uv.ISLAND_TOOLS and settings.uv_view == 'NONE':
+        settings.uv_view = 'CHECKER'  # Their effect shows on a texture.
+    if settings.uv_tool == 'TIDY' and settings.uv_view in {'NONE', 'CHECKER'}:
+        settings.uv_view = 'ISLANDS'  # Its work is the islands.
 
 
 def _uv_rows(context, settings, obj):
     rows = [
-        [vr_ui.label("Tool", fixed=LABEL_W)] + [
-            vr_ui.segment("uv_tool_" + ident.lower(), name,
-                          (lambda i=ident: setattr(settings, "uv_tool", 'NONE' if settings.uv_tool == i else i)),
-                          settings.uv_tool == ident, "uv_tool", icon=icon)
-            for ident, name, icon in UV_TOOLS],
+        [
+            vr_ui.segment("uv_tool_" + ident.lower(), name, (lambda i=ident: _press_uv_tool(settings, i)),
+                          settings.uv_tool == ident, "uv_tool")
+            for ident, name in UV_TOOLS],
         [vr_ui.label("View", fixed=LABEL_W)] + _segments(
             "uv_view_", "uv_view", [(i.lower(), n) for i, n in UV_VIEWS], settings.uv_view.lower(),
             lambda v: setattr(settings, "uv_view", v.upper())),
@@ -857,7 +865,8 @@ def _uv_rows(context, settings, obj):
                       tip="Cut and unwrap by angle, with seams along the islands"),
          vr_ui.button("uv_pack", "Pack", lambda: uv.pack(context, obj), tip="Pack the islands into the UV square")],
     ]
-    note = uv.message() or ("" if uv.has_uvs(obj) else "No UVs yet: Unwrap, Smart UV or trace seams")
+    note = (uv.message() or uv.island_note(settings) or
+            ("" if uv.has_uvs(obj) else "No UVs yet: Unwrap, Smart UV or trace seams"))
     if note:
         rows.append([vr_ui.label(note, align='CENTER')])
     more = [
@@ -868,11 +877,17 @@ def _uv_rows(context, settings, obj):
                       tip="Unwrap again after each seam stroke"),
          vr_ui.stepper("uv_checker", "Checker", settings.uv_checker, 2, 64,
                        lambda v: setattr(settings, "uv_checker", int(v)), weight=1.6)],
-        [vr_ui.slider("uv_fix_radius", "Fix radius", settings.uv_fix_radius, 0.005, 0.2,
+        [vr_ui.toggle("uv_repack", "Repack", settings.uv_repack, _toggle(settings, "uv_repack"), icon="islands",
+                      tip="Pack the islands after Twist and Size (without turning them)"),
+         vr_ui.toggle("uv_twist_snap", "Snap 15\u00b0", settings.uv_twist_snap, _toggle(settings, "uv_twist_snap"),
+                      icon="gizmo_turn", tip="Twist turns in steps")],
+        [vr_ui.slider("uv_fix_radius", "Radius", settings.uv_fix_radius, 0.005, 0.2,
                       lambda v: setattr(settings, "uv_fix_radius", v), fmt=_meters)],
-        [vr_ui.button("uv_from_sharp", "From sharp", lambda: uv.seams_from_sharp(obj), icon="seam",
+        [vr_ui.button("uv_from_sharp", "From sharp", lambda: uv.seams_from_sharp(obj),
                       tip="Seams on the edges that shade sharp"),
-         vr_ui.button("uv_average", "Even out", lambda: uv.average_scale(context, obj), icon="islands",
+         vr_ui.button("uv_clear_ends", "Clear ends", lambda: uv.clear_dead_ends(obj),
+                      tip="Remove the seams that go nowhere, everywhere"),
+         vr_ui.button("uv_average", "Even out", lambda: uv.average_scale(context, obj),
                       tip="Scale islands to their share of the surface, then pack"),
          vr_ui.icon_button("uv_clear_seams", "trash", lambda: uv.clear_seams(obj), "Clear seams", danger=True)],
     ]

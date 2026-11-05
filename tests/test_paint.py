@@ -489,6 +489,29 @@ def test_height():
     bpy.data.objects.remove(obj)
 
 
+def test_projection_paint():
+    """The strokes are made for projection painting: the experimental 3D Texture Paint is off only during the call."""
+    experimental = bpy.context.preferences.experimental
+    was = experimental.use_3d_texture_paint
+    try:
+        experimental.use_3d_texture_paint = True
+        with paint.projection_paint():
+            check(not experimental.use_3d_texture_paint, "3D Texture Paint is off during the paint call")
+        check(experimental.use_3d_texture_paint, "and the user's preference is back after it")
+        try:
+            with paint.projection_paint():
+                raise ValueError
+        except ValueError:
+            pass
+        check(experimental.use_3d_texture_paint, "also when the call fails")
+        experimental.use_3d_texture_paint = False
+        with paint.projection_paint():
+            check(not experimental.use_3d_texture_paint, "off stays off during the call")
+        check(not experimental.use_3d_texture_paint, "and after it")
+    finally:
+        experimental.use_3d_texture_paint = was
+
+
 def main():
     vr_sculpt.register()
     try:
@@ -502,6 +525,7 @@ def main():
         test_undo(obj, img)
         test_panel(obj)
         test_height()
+        test_projection_paint()
     except Exception:
         traceback.print_exc()
         failures.append("raised")

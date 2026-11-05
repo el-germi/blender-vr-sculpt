@@ -207,16 +207,68 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     edge path between them, so a fast sweep leaves no gaps and no stray cuts
     across the line. With **Live** on (More), the mesh unwraps again when you
     let go. It works on the object and its visible cutters.
+  - **Slice** cuts a whole loop at once, so a toe doesn't have to be traced all
+    the way round. The hand holds a blade, the disc at the tip, along the
+    controller; roll the wrist to turn it. Hold the trigger with the blade
+    across the part: the loop it would cut shows in white, and it's cut when you
+    let go (or pull away first, and nothing is). The plane is endless, but only
+    where it crosses the mesh within the blade's reach counts: one toe, not the
+    ones in line with it. Make the blade longer with **Radius** (More) to take
+    them all in one go. It marks the closest edges, so a mesh with clean loops
+    gets the straight loop even with your hand a little off, and a dense or
+    triangulated one gets the shortest way along the plane. The cut always
+    closes up or ends on the mesh's border. The off hand clears along the loop
+    in the same way, following a seam that's there.
   - **Fix** is a brush for UVs that sculpting stretched or scrambled: brush
     over the bad patch and, on release, only those faces unwrap again. The
     patch's border is pinned for the unwrap, so it stays stitched to the rest
     and nothing outside it moves. A brushed whole island is unwrapped in
     place. The cost goes with the patch (about 60 ms for 50 faces on a
     32k-face mesh), not the sculpt.
+  - **Tidy** is a brush for cleaning up seams once they're traced (it brings up
+    the Islands view, and shares the **Radius** under More with Fix). With the
+    main hand, start inside an island (it's tinted) and drag across its border:
+    the faces you pass join it and the boundary moves out with you. You can
+    push through a thin island, which splits it, or into its own other side,
+    which closes the gap. The same goes for a cut with the island on both sides,
+    like a tube's: start beside it and drag across, and it moves ahead of the
+    brush while its ends stay on what they reach. With the off hand, brush over
+    seams: boundaries and cuts smooth out (bumps and notches go, straight runs
+    and junctions stay, and a speck of an island smaller than the brush is
+    absorbed) and seams that go nowhere (amber in the Islands view) are removed.
+    Those are the ones with a loose end, as far back as they reach a border or
+    a boundary. A seam that does a job stays, though it has the same island on
+    both sides: a tube's cut from one end to the other, or the one cut that
+    opens a closed shape (a sphere's meridian, with any branches). The Seams
+    tool's off hand still removes those. A tube's cut also follows the boundary
+    it ends on. Seams stay on edges, so on quads a diagonal is still a
+    staircase. With **Live** on the mesh unwraps when you let go. **Clear ends**
+    (More) removes every seam that goes nowhere at once.
+  - **Twist** turns one island's texture on the surface: touch it (the island
+    in reach is tinted), hold the trigger and roll your wrist. The texture
+    turns the way your hand does, for grain and fabric directions. **Snap 15°**
+    (More) turns it in steps, with a tick on each.
+  - **Size** gives one island more or less of the UV square: hold the trigger
+    on it and raise your hand (10 cm doubles it: a finer texture there) or
+    lower it. For giving the face more resolution than the underside.
+  - Twist and Size preview a checker on the island as you move, and write the
+    UVs when you let go. With **Repack** on (More, the default) the layout is
+    then packed, so nothing overlaps; off, the rest of the layout stays where
+    it is and the island can overlap it (pink past the UV square's edge). Pack
+    and Even out don't turn islands on a mesh with a twisted one. A new Unwrap
+    or Smart UV starts over.
   - **View**: a **Checker** on the UVs (squares should stay square and even;
-    pink outside the UV square) or **Stretch**, each face colored from blue
+    pink outside the UV square), **Stretch**, each face colored from blue
     (true to the surface) to red (twice or half the typical face's size, or
-    skewed as much).
+    skewed as much), or **Islands**, each island in its own color. Islands
+    follow the seams while you trace or tidy them, before any unwrap, so you
+    see the moment a cut closes and splits one. They're the islands the next
+    unwrap will cut: once we've unwrapped a mesh only its seams count (a UV
+    split without a seam is left over), and on UVs from elsewhere the UV
+    splits count too, until a Tidy stroke makes seams of them. Seams with the same island on both
+    sides are amber instead of red: they don't separate anything, which is
+    what you want from a relief cut and not from a loop you meant to close.
+    The panel counts both.
   - **Unwrap** (with the method under More: Angle, Conformal, Min Stretch),
     **Smart UV** (which also marks seams along its islands), **Pack**, and
     under More: **From sharp** (seams on edges that shade sharp, marked soft
@@ -681,9 +733,32 @@ With Triggers" is on. The setting applies when the VR session starts.
   Mode alone and comes back, with its selection, the other selected objects
   and pins put back. Fix copies the brushed faces (with their seams and the
   border pins) into a temporary mesh, unwraps that and copies the UVs back.
-  The checker / stretch view is built from the evaluated mesh in the app
-  timer when the geometry changes (a depsgraph handler counts changes) and
-  drawn with a small shader on the surface, like the rig's heat map.
+  The checker / stretch / island view is built from the evaluated mesh in the
+  app timer when the geometry changes (a depsgraph handler counts changes) and
+  drawn with a small shader on the surface, like the rig's heat map. Islands
+  are connected components over the edges whose UVs match on both sides and
+  that aren't seams. During a seam stroke only the seams change, so it keeps
+  the slow part (which faces meet where: ~190 ms at 135k faces) and redoes the
+  rest (~5 ms), and rebuilds the colors only when an island really splits.
+  Tidy keeps every face's island and rewrites seams from them, so boundaries
+  stay on edges and any number of islands can meet. Smoothing is threshold
+  dynamics: each island's mask is blurred across the brushed faces, faces
+  outside holding still, and each face goes to the strongest. During a stroke
+  it writes the seam attribute without `mesh.update()`, which it does once on
+  release: the headset's seams read the attribute.
+  Slice finds where the plane crosses the mesh, one connected curve per toe,
+  and keeps those passing within the blade's reach. The faces they cross (and
+  the ring around them) are split between the plane's two sides by a minimum
+  cut, each edge costing its length plus a little for its distance from the
+  plane. Short straight loops beat staircases that hug the plane, and the
+  result is the outline of a set of faces, so it can't have a loose end. The
+  max flow is plain Python, but only on that band of faces: 12 to 40 ms per
+  update at 135k faces, and the preview skips frames to stay under a share of
+  them.
+  Twist and Size don't touch the mesh during the stroke: the shader transforms
+  the island's UVs from two uniforms, so they cost nothing per frame on a dense
+  mesh. The write and the pack happen on release (~1.4 s at 135k faces; Repack
+  off skips the pack).
   Surface snapping ([snapping.py](vr_sculpt/snapping.py)) builds BVH trees
   of the meshes near a grabbed object on first use and keeps them for the
   grab.
@@ -1111,6 +1186,16 @@ Found with [tests/probe_lookdev.py](tests/probe_lookdev.py) and
 - The colors come from the unified paint settings even when Unified Color is
   off.
 - A material's paint-slot list is only refreshed by Texture Paint mode.
+- With the experimental **3D Texture Paint** preference
+  (`use_3d_texture_paint`) on, the Draw-type brushes (Hard, Soft, Airbrush,
+  Erase) go to another engine: it finds each dab by the element's `location`
+  in **object space** and doesn't follow its `size`, and with a world-space
+  `location` it answers `FINISHED` and paints nothing. Blur and Smear aren't
+  affected. Painting from the desktop works either way, since mouse strokes
+  are built for it. So Paint mode turns the preference off for the length of
+  each call (`paint.projection_paint`, about 1.5 microseconds) and the user
+  keeps it. The tests' `--factory-startup` hides this: run a check with the
+  user's preferences too when something only fails on their machine.
 - The brush colors are scene linear (`UnifiedPaintSettings.color` is a
   `COLOR`, not `COLOR_GAMMA`): 0.5 paints 0.737 into an 8-bit sRGB image. So
   a color picked from a byte image is converted from sRGB first, or it
@@ -1195,7 +1280,10 @@ Found with [tests/probe_dyntopo.py](tests/probe_dyntopo.py) and
 
 Found with [tests/probe_uv.py](tests/probe_uv.py):
 
-- Seams are `MeshEdge.use_seam`, stored as an edge attribute `uv_seam`.
+- Seams are `MeshEdge.use_seam`, stored as an edge attribute `uv_seam`, which
+  only exists once a seam has been set. Go through the attribute: on 274k edges
+  `attributes["uv_seam"].data.foreach_get` takes 0.01 ms and
+  `edges.foreach_get("use_seam")` 27 ms (setting: 0.04 ms against 32 ms).
   Pins are a corner attribute `.pn.<UV map name>`; `MeshUVLoopLayer.pin` is
   empty until it exists.
 - `uv.unwrap` (methods `ANGLE_BASED`, `CONFORMAL`, `MINIMUM_STRETCH`),
@@ -1215,6 +1303,9 @@ Found with [tests/probe_uv.py](tests/probe_uv.py):
   Sculpt doesn't run it then and says why.
 - `uv.minimize_stretch` with pins still moved UVs outside the selection a
   little, so Fix doesn't use it.
+- `uv.pack_islands` turns islands by default (`rotate=True`, any angle), which
+  would undo a Twist. It scales them all alike, so an island's share against
+  the others survives a pack: Size relies on that.
 
 ### What we learned about controller models over OpenXR (5.4.0 Alpha, SteamVR 2.18)
 
@@ -1385,8 +1476,9 @@ puppet take while the timeline really plays, and draws the Pose page and
 bones (`probe_pose.py` checked the pose API).
 `kit_preview.py` draws the Kit sheet (`kit_panels.png`) and a box dressed
 with dropped, stamped and cut starter parts (`kit_scene.png`).
-`uv_preview.py` draws the UV page and a seamed sphere with the checker and
-stretch views (`uv_preview_checker.png`, `uv_preview_stretch.png`).
+`uv_preview.py` draws the UV page and a seamed sphere with the checker,
+stretch and island views, the island under a tip and a Twist stroke's preview
+(`uv_preview_checker.png`, `_stretch`, `_islands`, `_hover`, `_twist`).
 `retopo_preview.py` lays mirrored strips, a center-line strip and an open
 quad on a subdivided Suzanne and draws the Retopo pages
 (`retopo_panels.png`) and the headset drawing (`retopo_scene.png`).
@@ -1457,10 +1549,12 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
 - UV page: it works on the selected object in Model mode, so to fix UVs
   after sculpting, switch to Model (that leaves Sculpt Mode). Live unwrap
   and Unwrap redo the whole mesh, about 0.6 s at 131k faces, and they lay
-  the islands out again (hand-moved islands move). Only the active UV map
-  is used. Arranging islands by hand (moving, rotating, stitching) is a
-  desktop job. Seams and UVs survive a primitive's settings changing only
-  while its edges stay the same (a resize, not more segments).
+  the islands out again (hand-moved islands move, and Twist and Size are
+  lost). Only the active UV map is used. Moving and stitching islands by hand
+  is a desktop job. Under a modifier that changes the faces, Twist and Size find
+  the island by the nearest face of the object's own mesh, and their preview
+  shows on that mesh. Seams and UVs survive a primitive's settings changing
+  only while its edges stay the same (a resize, not more segments).
 - Geometry-node asset primitives in Add > Mesh aren't listed yet.
 - Kit parts: only mesh objects and collections are parts (no curves,
   geometry-node assets or materials). A collection part can't be a cutter.

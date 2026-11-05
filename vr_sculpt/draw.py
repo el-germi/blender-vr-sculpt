@@ -34,6 +34,8 @@ def _unit_rings():
 
 
 _RINGS = _unit_rings()
+_BLADE = _RINGS[:2 * _SEGMENTS]  # The ring around the controller's X: the Slice tool's plane.
+_BLADE_FAN = [q for i in range(0, len(_BLADE), 2) for q in ((0.0, 0.0, 0.0), _BLADE[i], _BLADE[i + 1])]
 
 
 def _draw(xr):
@@ -110,13 +112,14 @@ def _draw_cursors(context, ss, settings, xr):
             settings.draw_tool, settings.draw_width / 2) * scale
     else:
         marking = model and (settings.model_mark != 'NONE' or settings.uv_tool == 'SEAM')
-        fixing = model and settings.uv_tool == 'FIX'
+        fixing = model and settings.uv_tool in {'FIX', 'TIDY', 'SLICE'}
+        island = model and settings.uv_tool in uv.ISLAND_TOOLS
         # Stamping, the ring is half the spacing: stamps go where neighboring rings would touch.
         stamping = model and settings.kit_stamp and kit.is_key(settings.primitive)
         radius = (settings.weight_radius if weights else pose_mode.REACH if posing else rig.REACH if rigging else
                   physics.HAND_RADIUS if simulating and settings.physics_hands else
                   interactions.TOUCH_MARGIN if simulating else settings.uv_fix_radius if fixing else
-                  shading.MARK_REACH if marking else settings.kit_spacing / 2 if stamping else
+                  uv.ISLAND_REACH if island else shading.MARK_REACH if marking else settings.kit_spacing / 2 if stamping else
                   interactions.TOUCH_MARGIN if model or tools else
                   settings.paint_radius if painting else settings.radius) * scale
     if settings.mode == 'RETOPO':
@@ -148,8 +151,8 @@ def _draw_cursors(context, ss, settings, xr):
                 if near is not None:
                     _draw_bounds(shader, near, (*color, 0.9))
         elif model and settings.uv_tool != 'NONE':
-            color = uv.SEAM_COLOR if settings.uv_tool == 'SEAM' else uv.FIX_COLOR
-            if idx == off and settings.uv_tool == 'SEAM':
+            color = uv.TOOL_STYLES[settings.uv_tool][0]
+            if idx == off and settings.uv_tool in {'SEAM', 'TIDY', 'SLICE'}:
                 color = (1.0, 1.0, 1.0)  # The off hand clears.
         elif model and settings.model_mark != 'NONE':
             color = {'HARD': shading.HARD_COLOR, 'SOFT': shading.SOFT_COLOR}.get(settings.model_mark, (1.0, 1.0, 1.0))
@@ -188,7 +191,12 @@ def _draw_cursors(context, ss, settings, xr):
         alpha = 1.0 if idx in operators.active_hands else 0.6
 
         m = Matrix.Translation(tip) @ pose.to_3x3().to_4x4() @ Matrix.Scale(radius, 4)
-        coords = [m @ Vector(p) for p in _RINGS]
+        blade = model and settings.uv_tool == 'SLICE'
+        if blade:
+            batch = batch_for_shader(shader, 'TRIS', {"pos": [m @ Vector(p) for p in _BLADE_FAN]})
+            shader.uniform_float("color", (*color, 0.3 * alpha))
+            batch.draw(shader)
+        coords = [m @ Vector(p) for p in (_BLADE if blade else _RINGS)]
         # Stick from the controller to the tip.
         coords += [pose.translation, tip]
         batch = batch_for_shader(shader, 'LINES', {"pos": coords})
@@ -245,17 +253,17 @@ def _draw_cursors(context, ss, settings, xr):
         hud.draw_tag(Vector((center.x, center.y, top.z)) + Vector((0.0, 0.0, 0.012 * scale)), viewer, scale,
                      selected.name, SELECT_COLOR)
     camera_tool = tools and settings.tool == 'CAMERA'
+    up = hud.view_up(ss)
     if settings.show_brush_card:
         # The tip status: a slim line above the main hand, facing the headset.
-        anchor = Vector(ss.controller_grip_location_get(context, actions.main_index(context))) + Vector((0.0, 0.0, 0.05 * scale))
+        anchor = Vector(ss.controller_grip_location_get(context, actions.main_index(context))) + up * 0.05 * scale
         held = gizmo.status(context)  # Holding a gizmo handle: what it does and how far, instead of the tool.
         content, size = held if held is not None else             (hud.card_content(settings, sculpt_brush), hud.status_size(context, settings))
         hud.draw_status(anchor, viewer, scale, content, size)
     if xr and camera_tool and context.scene.camera is not None:
         # A viewfinder above the status: the controller is the camera.
-        anchor = Vector(ss.controller_grip_location_get(context, actions.main_index(context))) + \
-            Vector((0.0, 0.0, 0.075 * scale))
-        camera.draw_preview(hud.billboard(anchor, viewer, scale), context.scene)
+        anchor = Vector(ss.controller_grip_location_get(context, actions.main_index(context))) + up * 0.075 * scale
+        camera.draw_preview(hud.billboard(anchor, viewer, scale, up), context.scene)
     _draw_panel(context, ss, settings, xr)
 
 
