@@ -8,8 +8,8 @@ import time
 
 import bpy
 
-from . import (camera, controllers, desktop, kit, native, onion, operators, paths, physics, puppet, rest, rig, tracking,
-               uv)
+from . import (camera, controllers, desktop, kit, lookdev, native, onion, operators, paths, physics, puppet, rest, rig,
+               tracking, uv)
 
 FAST = 1.0 / 90.0
 IDLE = 0.25
@@ -35,6 +35,7 @@ def _tick():
             camera.release_base_pose(context)  # And the base pose, if aiming a camera pinned it.
             physics.end_session(context)
             return FAST if physics.tick(context, None) else IDLE  # Springs while the timeline plays.
+        lookdev.guard_view(context)  # First: a failure further down mustn't leave Cycles drawing the VR view.
         ss = context.window_manager.xr_session_state
         if settings.mode == 'SCULPT' and settings.engine == 'NATIVE':
             native.auto_texture(context, settings, bool(operators.active_hands))
@@ -58,7 +59,8 @@ def _tick():
                 if region is not None:
                     region.tag_redraw()
         busy = (settings.tracking or camera.wanted(context) or desktop.interactive(context)
-                or settings.onion or settings.show_paths or puppet.active() or physics_busy or uv.busy(context))
+                or settings.onion or settings.show_paths or puppet.active() or physics_busy or uv.busy(context)
+                or lookdev.shading(context).type == 'RENDERED')  # So guard_view catches an engine change at once.
         return FAST if busy else IDLE
     except Exception:
         if not _errors:

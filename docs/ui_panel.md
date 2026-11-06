@@ -340,7 +340,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Light to edit (the selected one, or the settings for new lights), duplicate, delete | **Edit** select > picker (lights, None); icons beside it |
 | Color, power (a sun's strength), radius / size / sun angle / spot cone | swatches; sliders (power is logarithmic) |
 | Color temperature, shadow; spot blend and radius | *More* (a light selected) |
-| The VR view's shading: Solid / Material Preview / Rendered | segmented control at the bottom of every Tools page |
+| The VR view's shading: Solid / Material Preview / Rendered (EEVEE and Workbench only; with another engine a label replaces Render) | segmented control at the bottom of every Tools page |
 | Solid: Studio / Matcap / Flat, studio light or matcap (previewed tiles), color by material / object / random | **Look** icon > sheet; select > tiles |
 | Cavity, shadow, outline (Solid) | **Look** > *More* |
 | Material / Rendered: World HDRI or Scene, HDRI (mirror-ball tiles), turn, strength, scene lights | **Look** > sheet |

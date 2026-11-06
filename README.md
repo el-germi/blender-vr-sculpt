@@ -1563,8 +1563,14 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   onto each other (the surfaces are the ones there when the sweep starts).
   Assets without a stored preview show an icon. A library of thousands of
   files is listed in part (the first 2000).
-- Look dev: Rendered in the headset renders with the scene's engine (Cycles
-  would be slow in VR; the Look sheet names the engine). Light gizmos show
+- Look dev: Rendered in the headset renders with the scene's engine, which
+  must be EEVEE or Workbench (the Look sheet names it). Cycles and other
+  external engines are blocked: for them Blender starts a new render session
+  per eye on every XR draw and never frees it, and runs out of memory within
+  moments (`std::bad_alloc`, 252 live Cycles sessions in the crash log). The
+  panel shows "No Cycles render" instead of the Render button, and a file
+  saved in Rendered, or an engine changed during a session, falls back to
+  Material Preview. Use the desktop for Cycles. Light gizmos show
   only with the Light tool on; lights are picked within 3 cm of their
   center, so a big area light is grabbed at its middle. The Light page edits
   power, size, color, temperature, shadow and spot blend; a light's type,

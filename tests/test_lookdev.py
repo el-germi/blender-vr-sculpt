@@ -18,8 +18,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import vr_sculpt  # noqa: E402
-from vr_sculpt import (actions, controllers, hud, interactions, lookdev, menus, operators, primitives,  # noqa: E402
-                       vr_ui)
+from vr_sculpt import (actions, controllers, hud, interactions, live, lookdev, menus, operators,  # noqa: E402
+                       primitives, vr_ui)
 
 failures = []
 
@@ -422,6 +422,72 @@ def test_look():
     menus.reset()
 
 
+class OtherEngine(bpy.types.RenderEngine):
+    """A third-party external engine, which the guard knows nothing about."""
+    bl_idname = "VRS_TEST_ENGINE"
+    bl_label = "Other"
+
+
+def test_render_guard():
+    print("== Rendered stays off with external engines (Blender leaks a session per XR draw)")
+    clear_scene()
+    ctx, s = light_tool()
+    sh = ctx.window_manager.xr_session_settings.shading
+    render = ctx.scene.render
+    kept = render.engine
+    running = operators.session_running
+    bpy.utils.register_class(OtherEngine)
+    try:
+        render.engine = 'BLENDER_EEVEE'
+        sh.type = 'SOLID'
+        check(lookdev.render_view_ok(ctx) and "view_rendered" in widgets(), "EEVEE: Render is offered")
+        press("view_rendered")
+        check(sh.type == 'RENDERED', "EEVEE: Render sets Rendered")
+        check(not lookdev.guard_view(ctx) and sh.type == 'RENDERED', "EEVEE: the guard leaves it alone")
+        render.engine = 'BLENDER_WORKBENCH'
+        check(lookdev.render_view_ok(ctx), "Workbench can draw it too")
+
+        for engine, name in (('CYCLES', "Cycles"), ('VRS_TEST_ENGINE', "Vrs_Test_Engine")):
+            render.engine = engine
+            sh.type = 'SOLID'
+            row = menus.layout(ctx)[0]
+            check(not lookdev.render_view_ok(ctx) and "view_rendered" not in widgets(), f"{engine}: no Render segment")
+            check({"view_solid", "view_material"} <= set(widgets()), f"{engine}: Solid and Material remain")
+            check(any(w.kind == 'label' and w.text == f"No {name} render" for w in row), f"{engine}: the panel says why")
+            lookdev.set_view(ctx, 'RENDERED')
+            check(sh.type == 'SOLID', f"{engine}: set_view refuses Rendered")
+            lookdev.set_view(ctx, 'MATERIAL')
+            check(sh.type == 'MATERIAL', f"{engine}: set_view still sets the others")
+            sh.type = 'RENDERED'
+            check(lookdev.guard_view(ctx) and sh.type == 'MATERIAL', f"{engine}: the guard leaves Rendered")
+            check(not lookdev.guard_view(ctx), f"{engine}: and has nothing more to do")
+
+        # A file saved in Rendered: the session must not draw one frame of it.
+        render.engine = 'CYCLES'
+        sh.type = 'RENDERED'
+        actions.on_xr_session_start_pre(None)
+        check(sh.type == 'MATERIAL', "session start leaves Rendered")
+        sh.type = 'SOLID'
+        actions.on_xr_session_start_pre(None)
+        check(sh.type == 'SOLID', "session start keeps any other shading")
+
+        # The engine changes during a session.
+        operators.session_running = lambda _context: True
+        render.engine = 'BLENDER_EEVEE'
+        sh.type = 'RENDERED'
+        check(live._tick() == live.FAST and sh.type == 'RENDERED', "EEVEE Rendered: the timer runs fast, view kept")
+        render.engine = 'CYCLES'
+        live._tick()
+        check(sh.type == 'MATERIAL', "switching to Cycles mid-session leaves Rendered on the next tick")
+        check(not live._errors, "the timer ran without errors")
+    finally:
+        operators.session_running = running
+        sh.type = 'SOLID'
+        render.engine = kept
+        bpy.utils.unregister_class(OtherEngine)
+        menus.reset()
+
+
 def test_previews():
     print("== previews")
     ctx = bpy.context
@@ -759,8 +825,8 @@ def test_undo_guard():
 def main():
     vr_sculpt.register()
     try:
-        for t in (test_place, test_grab_select, test_panel, test_gizmos, test_look, test_previews, test_world,
-                  test_material, test_undo_guard):
+        for t in (test_place, test_grab_select, test_panel, test_gizmos, test_look, test_render_guard, test_previews,
+                  test_world, test_material, test_undo_guard):
             try:
                 t()
             except Exception:

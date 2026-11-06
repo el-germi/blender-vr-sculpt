@@ -411,6 +411,10 @@ def draw(context, ss, tips, scale):
 # --- the VR view's look -------------------------------------------------------------
 
 VIEW_TYPES = (('SOLID', "Solid"), ('MATERIAL', "Material"), ('RENDERED', "Render"))
+# The engines Blender draws itself. Any other (Cycles, Hydra) is an external engine, which the VR view must
+# never use: each XR draw gets a throwaway RegionView3D, so Blender starts a new render session per eye per
+# frame and never frees them, until memory runs out and it crashes (std::bad_alloc, 252 live Cycles sessions).
+INTERNAL_ENGINES = {'BLENDER_EEVEE', 'BLENDER_EEVEE_NEXT', 'BLENDER_WORKBENCH'}
 SOLID_LIGHTS = (('STUDIO', "Studio"), ('MATCAP', "Matcap"), ('FLAT', "Flat"))
 COLOR_TYPES = (('MATERIAL', "Material"), ('OBJECT', "Object"), ('RANDOM', "Random"))
 WORLD_NAME = "VR Look"
@@ -425,8 +429,26 @@ def shading(context):
     return context.window_manager.xr_session_settings.shading
 
 
+def render_view_ok(context):
+    """Whether the VR view can be Rendered with the scene's engine (see INTERNAL_ENGINES)."""
+    scene = context.scene
+    return scene is None or scene.render.engine in INTERNAL_ENGINES
+
+
 def set_view(context, kind):
-    shading(context).type = kind
+    if kind != 'RENDERED' or render_view_ok(context):
+        shading(context).type = kind
+
+
+def guard_view(context):
+    """Take the VR view out of Rendered if the scene's engine can't draw it: the shading is saved in the file,
+    and the engine can change under it (desktop, undo, another scene). True if it did."""
+    sh = shading(context)
+    if sh.type != 'RENDERED' or render_view_ok(context):
+        return False
+    sh.type = 'MATERIAL'
+    print(f"VR Sculpt: {engine_name(context)} can't draw the VR view, showing Material Preview instead", flush=True)
+    return True
 
 
 def studio_lights(context, kind):

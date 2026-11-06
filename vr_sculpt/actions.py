@@ -119,6 +119,10 @@ def _patch(session_state):
 def on_xr_session_start_pre(_context):
     global last_status
     context = bpy.context
+    # Before anything can return or fail: the file may have been saved in Rendered, and an engine like Cycles
+    # would crash Blender within seconds of the session's first frames.
+    from . import lookdev
+    lookdev.guard_view(context)
     session_state = context.window_manager.xr_session_state
     if not session_state:
         return

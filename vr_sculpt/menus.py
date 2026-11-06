@@ -1883,8 +1883,12 @@ def _light_rows(context, settings):
 def _view_row(context, look=False):
     """The VR view's shading (the session's, not the desktop's); look: with the Look sheet's button."""
     from . import lookdev
-    row = _segments("view_", "xr_view", [(i.lower(), n) for i, n in lookdev.VIEW_TYPES],
+    can_render = lookdev.render_view_ok(context)
+    row = _segments("view_", "xr_view", [(i.lower(), n) for i, n in lookdev.VIEW_TYPES
+                                         if can_render or i != 'RENDERED'],
                     lookdev.shading(context).type.lower(), lambda v: lookdev.set_view(context, v.upper()))
+    if not can_render:
+        row.append(vr_ui.label(f"No {lookdev.engine_name(context)} render", weight=2.0, align='CENTER'))
     if look:
         row.append(vr_ui.icon_button("look", "look", lambda: open_look(), "Look: lighting, HDRI, world"))
     return row
