@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "vr_sculpt"
-version = "0.10.1"
+version = "0.11.0"
 name = "VR Sculpt (prototype)"
 tagline = "Sculpt meshes with VR controllers during a VR session"
 maintainer = "el-germi"
