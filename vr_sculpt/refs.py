@@ -236,7 +236,7 @@ def face_me(context, obj):
     """Turn a reference to face the headset (upright), where it is."""
     if obj is None:
         return False
-    size = obj.matrix_world.to_scale()
+    size = primitives.axis_scale(obj.matrix_world)
     m = facing(obj.matrix_world.translation, viewer(context)) @ Matrix.Diagonal((*size, 1.0))
     obj.matrix_world = m
     return True
@@ -404,5 +404,5 @@ def draw_pin(context, panel_matrix):
 def status(context):
     """The tip status's size for the Refs tool: the selected picture's size, or new ones'."""
     obj = selected_ref(context)
-    size = obj.empty_display_size * max(obj.matrix_world.to_scale()) if obj else context.scene.vr_sculpt.ref_size
+    size = obj.empty_display_size * max(primitives.axis_scale(obj.matrix_world)) if obj else context.scene.vr_sculpt.ref_size
     return f"{size * 100:.0f} cm" if size < 1.0 else f"{size:.2f} m"

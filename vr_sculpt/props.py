@@ -199,6 +199,28 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         default=False,
     )
     # Look dev.
+    hand_light: BoolProperty(
+        name="Hand Light",
+        description="While sculpting in Material Preview or Rendered, a shadowless light on your other hand that "
+                    "lights only the selected mesh, to read its forms by moving the highlights",
+        default=False,
+    )
+    hand_light_power: FloatProperty(
+        name="Hand Light Power", description="Power of the hand light (watts at normal viewer scale)",
+        default=1.0, min=0.0, max=10.0, unit='POWER')
+    hand_lines: BoolProperty(
+        name="Hand Lines",
+        description="While sculpting in Material Preview or Rendered, the selected mesh reflects a board of lines held "
+                    "in your other hand, as in paintless dent repair: dents and bumps bend the lines. Other objects "
+                    "turn plain gray meanwhile",
+        default=False,
+    )
+    hand_lines_density: FloatProperty(
+        name="Line Density", description="How many lines the board reflects: a higher number shows smaller dents",
+        default=40.0, min=10.0, max=100.0)
+    hand_lines_width: FloatProperty(
+        name="Line Width", description="How much of the board is white", default=0.5, min=0.1, max=0.7,
+        subtype='FACTOR')
     light_type: EnumProperty(
         name="New Light",
         description="What the Light tool places",

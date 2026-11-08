@@ -1080,7 +1080,7 @@ def test_dyntopo():
     widgets, height = menus.layout(ctx)
     overlap = any(a is not b and a.rect[0] < b.rect[2] - 1e-9 and b.rect[0] < a.rect[2] - 1e-9 and
                   a.rect[1] < b.rect[3] - 1e-9 and b.rect[1] < a.rect[3] - 1e-9 for a in widgets for b in widgets)
-    check(not overlap and height < 0.32, f"the panel fits with every dyntopo row open ({height:.3f} m)")
+    check(not overlap and height < 0.335, f"the panel fits with every dyntopo row open ({height:.3f} m)")
     vr_ui.find(menus.layout(ctx)[0], "dyntopo").on_press()
     check(not ball.use_dynamic_topology_sculpting and "detail_brush" not in ids(), "one press turns it off")
 

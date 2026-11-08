@@ -150,7 +150,7 @@ selects / moves (`MoveObject`, `Deselect`) and the main one only creates.
 `drawing.py` for Draw, `pencil.py` for its Pencil style (Grease Pencil v3 strokes); `refs.py` for Tools' Refs
 (image empties, drawn in VR since the headset skips empties); `retopo.py` for Retopo (quads traced onto a reference mesh's BVH, edited with
 bmesh in Object Mode); `lookdev.py` for Tools' Light tool, the Look sheet (the XR session's own shading,
-not the desktop's) and Model's Material page; `paint.py` paints by temporarily aiming the largest desktop 3D view at each
+not the desktop's), Model's Material page and Sculpt's hand light and PDR (paintless dent repair) lines (exist only while showing, synced by name from the live timer; the lines are a view layer material override); `paint.py` paints by temporarily aiming the largest desktop 3D view at each
 dab; `rig.py` for Rig (edit bones in Edit Mode, Bind via `parent_set` ARMATURE_AUTO, a numpy weight
 brush on vertex groups and a heat map drawn in VR); `pose.py` (FK/IK via CCD, limits) + `puppet.py` (bindings, recorded takes via
 `frame_change_post`); `anim.py`, `paths.py`, `onion.py` for the timeline strip, motion paths and

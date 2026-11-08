@@ -12,7 +12,7 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix
 
-from . import hud, native
+from . import hud, native, primitives
 
 PREVIEW_FPS = 20.0
 PREVIEW_PIXELS = 480  # width of the offscreen image
@@ -121,7 +121,7 @@ class AimCamera:
         if cam is None:
             cam = new_camera(context, pose)
         self.cam = cam
-        self.scale = cam.matrix_world.to_scale()
+        self.scale = primitives.axis_scale(cam.matrix_world)
         self.changed = True
         self.update(context, pose, pose, 1.0)
 

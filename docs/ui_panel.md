@@ -159,6 +159,9 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Radius | slider; **right stick click** cycles 1-16 cm |
 | Strength | slider |
 | Symmetry X / Y / Z | toggles |
+| The VR view Solid / Material / Render | the row under Symmetry (the rest of the look is in Tools > Look) |
+| Hand light: a shadowless light at the other hand's tip, on the selected mesh only, to read forms by moving the highlights (turning it on from Solid switches to Material) | **Light**, beside the view; its power under *More*, beside Invert |
+| Hand lines: a paintless dent repair board in the other hand; dents bend the lines on the selected mesh, other objects turn gray. Roll or slide the hand to move them (one or the other with Light; turning them on smooths a flat mesh) | **Lines**, beside Light; density and width under *More*, beside Invert |
 | Dyntopo on / off (native engine; UVs, corner colors and shape keys come back when the session ends) | *More* > Dyntopo |
 | Dyntopo detail Brush / Constant / Manual, edge size, Fill (Constant, Manual) | *More*, beside Dyntopo; the row under it |
 | Dyntopo refine Split / Collapse / Both | *More* > Refine |
@@ -340,7 +343,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Light to edit (the selected one, or the settings for new lights), duplicate, delete | **Edit** select > picker (lights, None); icons beside it |
 | Color, power (a sun's strength), radius / size / sun angle / spot cone | swatches; sliders (power is logarithmic) |
 | Color temperature, shadow; spot blend and radius | *More* (a light selected) |
-| The VR view's shading: Solid / Material Preview / Rendered | segmented control at the bottom of every Tools page |
+| The VR view's shading: Solid / Material Preview / Rendered (EEVEE and Workbench only; with another engine a label replaces Render) | segmented control at the bottom of every Tools page |
 | Solid: Studio / Matcap / Flat, studio light or matcap (previewed tiles), color by material / object / random | **Look** icon > sheet; select > tiles |
 | Cavity, shadow, outline (Solid) | **Look** > *More* |
 | Material / Rendered: World HDRI or Scene, HDRI (mirror-ball tiles), turn, strength, scene lights | **Look** > sheet |

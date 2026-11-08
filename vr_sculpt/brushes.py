@@ -63,8 +63,9 @@ class MeshState:
         mw = self.obj.matrix_world
         self.world = _mat_np(mw)
         self.world_inv = _mat_np(mw.inverted_safe())
-        # Mean scale, used to convert a world-space radius to local space.
-        self.scale = float(np.mean(mw.to_scale()))
+        # Mean scale, used to convert a world-space radius to local space. Column lengths, not
+        # mw.to_scale(): that's negative for a mirrored object in 5.x, and the radius blew up to 1e8.
+        self.scale = float(np.linalg.norm(self.world[:3, :3], axis=0).mean())
 
     def refresh_normals(self):
         n = len(self.co)

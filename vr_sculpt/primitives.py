@@ -199,6 +199,14 @@ def local_bounds(obj):
             Vector([max(c[i] for c in corners) for i in range(3)]))
 
 
+def axis_scale(matrix):
+    """World length of each local axis (the matrix's column lengths), always positive. Use this, not
+    Matrix.to_scale(), for sizes: 5.x returns to_scale() negated on every axis for a mirrored matrix, so a
+    (-1, 1, 1) object reads as (-1, -1, -1) and max() / mean() of it go negative."""
+    m = matrix.to_3x3()
+    return Vector((m.col[0].length, m.col[1].length, m.col[2].length))
+
+
 def touching(context, point, margin):
     """The visible, selectable mesh object (or collection instance) whose bounds contain point (+margin),
     smallest first, or None."""
@@ -208,11 +216,11 @@ def touching(context, point, margin):
             continue
         inv = obj.matrix_world.inverted_safe()
         p = inv @ Vector(point)
-        scale = max(obj.matrix_world.to_scale())
-        m = margin / max(scale, 1e-9)
+        size = axis_scale(obj.matrix_world)
+        m = margin / max(max(size), 1e-9)
         lo, hi = local_bounds(obj)
         if all(lo[i] - m <= p[i] <= hi[i] + m for i in range(3)):
-            dims = Vector([(hi[i] - lo[i]) * abs(s) for i, s in enumerate(obj.matrix_world.to_scale())])
+            dims = Vector([(hi[i] - lo[i]) * s for i, s in enumerate(size)])
             vol = dims.x * dims.y * dims.z
             if best is None or vol < best_vol:
                 best, best_vol = obj, vol

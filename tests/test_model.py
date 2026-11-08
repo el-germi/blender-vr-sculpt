@@ -78,6 +78,7 @@ class FakeSessionState:
 class FakeWM:
     def __init__(self, ss):
         self.xr_session_state = ss
+        self.xr_session_settings = bpy.context.window_manager.xr_session_settings
         self.timers = set()
         self.windows = bpy.context.window_manager.windows
 

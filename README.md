@@ -68,6 +68,14 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     brushes from the controller tip: Draw, Clay Strips, Smooth,
     Inflate/Deflate, Crease Sharp, Flatten/Contrast. With **Dyntopo**
     (Blender's dynamic topology) on, strokes add and remove detail as they go.
+  - **See it lit while you sculpt**: Solid / Material / Render sit on the
+    Sculpt page, and **Light** puts a shadowless light on your other hand that
+    lights only the selected mesh: move it and the highlights show every dent
+    and wobble. **Lines** is a paintless dent repair board instead: the selected
+    mesh reflects a board of lines in your other hand, whatever its material,
+    and dents and bumps bend them. Roll or slide your hand to move the lines.
+    Neither is left in the file: they exist only while showing, in Sculpt mode
+    during a session, and renders never see them.
 - **Retopo mode**: draw new, clean low-poly topology on the surface of a
   sculpt (or any mesh) with your hands. Choosing Retopo takes the active mesh
   as the reference; the result is a mesh of its own, "<name>.retopo",
@@ -655,6 +663,19 @@ With Triggers" is on. The setting applies when the VR session starts.
   the desktop view, so turning dyntopo on from VR switches it to Brush. It
   refuses a mesh with Multires. The Python engine has no dyntopo: a bmesh
   round trip alone takes ~20 ms on a 50k-vertex mesh, before any splitting.
+- **Shading through dyntopo** ([shading.py](vr_sculpt/shading.py)). Dyntopo's
+  sculpt mesh has no modifiers, so VR Shading doesn't show on it: it draws the
+  mesh's own face shading, and new faces take it from the faces they split.
+  So just before a session starts, from VR, the mesh's faces take the VR
+  shading's look. Auto can only be all smooth there, and hard edges don't show
+  (a box's corners go soft); the modifier decides again when the session ends.
+- **The hand's lines** ([lookdev.py](vr_sculpt/lookdev.py)). A material on the
+  view layer's override, so the mesh and its materials aren't touched: stripes
+  from the angle of the reflection vector against the board's axis (the hand's
+  up), so they read the shading normals and nothing else. The hand's values are
+  node inputs, set from the live timer; changing them doesn't recompile. An
+  object property read by an Attribute node marks the mesh that shows them,
+  and everything else is gray. The override leaves before any save.
 - **UVs through dyntopo** ([rest.py](vr_sculpt/rest.py)). Dyntopo resets
   every face-corner layer and scrambles shape keys (below), but carries point
   attributes onto its new vertices. So before a session each vertex gets its
@@ -1137,8 +1158,41 @@ the way to get one without linking anything):
 
 ### What we learned about look dev (5.4.0 Alpha)
 
-Found with [tests/probe_lookdev.py](tests/probe_lookdev.py) and
-[tests/probe_lookdev_world.py](tests/probe_lookdev_world.py):
+Found with [tests/probe_lookdev.py](tests/probe_lookdev.py),
+[tests/probe_lookdev_world.py](tests/probe_lookdev_world.py),
+[tests/probe_sculpt_lighting.py](tests/probe_sculpt_lighting.py),
+[tests/sculpt_light_preview.py](tests/sculpt_light_preview.py) and
+[tests/lines_preview.py](tests/lines_preview.py):
+
+- A line board can't be made of lights in practice. EEVEE lights take no texture,
+  so it takes one thin area light per line (about 0.5 ms each), and their
+  reflections only read on a near-mirror material (roughness about 0.05; faint at
+  0.2, gone at 0.5), only where the board reflects. Stripes from the reflection
+  vector work on any material, on the whole surface, at no extra cost, and show a
+  dent of 0.2% of the radius. Flat faces can't show them: each is one tone.
+- `ViewLayer.material_override` applies in the viewport in Sculpt Mode, dyntopo
+  included, and can be set and cleared in the middle of a session. An Attribute node
+  of type Object reads an object's custom property under it, so one override can
+  tell objects apart.
+
+- **`GPUOffScreen.draw_view3d` is an image render, the XR draw isn't.** The XR
+  draw passes `is_image_render=false`, so EEVEE renders one sample per redraw
+  and draws the sculpt live. `draw_view3d` passes `true`, so it renders every one
+  of `scene.eevee.taa_samples` in the call, and in a dyntopo session draws the mesh
+  from before the session: strokes don't show. So check sculpts in the real
+  viewport. Through `draw_view3d` with `taa_samples` at 1 (two eyes of 1800 x 1900,
+  41k-163k vertices, RTX 4070 SUPER, Vulkan): Solid 12-15 ms, Material with a
+  light and shadow 12-14 ms, without the shadow 9-10 ms. In the real viewport
+  (917 x 445, 163k vertices, dyntopo, moving each frame): Solid 5.8 ms, a
+  shadowless light 9.2 ms, the hand's lines 9.2 ms, turning 10.2 ms.
+- With a head that never stops, nothing accumulates, so a light's shadow is
+  dotted at its edges in the headset while a shadowless light stays clean.
+- Light linking (`Object.light_linking.receiver_collection`) works on a dyntopo
+  mesh, can be set and cleared in the middle of a session, and costs nothing
+  measurable. The collection needn't be in the scene. Linking a mesh into it adds
+  to `users_collection`, so code that copies those links must not see it (the hand
+  light only exists in Sculpt mode).
+- `object.shade_smooth`'s poll fails in Sculpt Mode, even with an override.
 
 - The VR view has its own shading, `XrSessionSettings.shading` (a whole
   `View3DShading`), saved with the file. It starts Solid / Studio with
@@ -1563,8 +1617,14 @@ Run the overlay one with `test_scene.blend` loaded; create that file with
   onto each other (the surfaces are the ones there when the sweep starts).
   Assets without a stored preview show an icon. A library of thousands of
   files is listed in part (the first 2000).
-- Look dev: Rendered in the headset renders with the scene's engine (Cycles
-  would be slow in VR; the Look sheet names the engine). Light gizmos show
+- Look dev: Rendered in the headset renders with the scene's engine, which
+  must be EEVEE or Workbench (the Look sheet names it). Cycles and other
+  external engines are blocked: for them Blender starts a new render session
+  per eye on every XR draw and never frees it, and runs out of memory within
+  moments (`std::bad_alloc`, 252 live Cycles sessions in the crash log). The
+  panel shows "No Cycles render" instead of the Render button, and a file
+  saved in Rendered, or an engine changed during a session, falls back to
+  Material Preview. Use the desktop for Cycles. Light gizmos show
   only with the Light tool on; lights are picked within 3 cm of their
   center, so a big area light is grabbed at its middle. The Light page edits
   power, size, color, temperature, shadow and spot blend; a light's type,

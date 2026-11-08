@@ -10,7 +10,7 @@ import time
 import numpy as np
 from mathutils import Vector
 
-from . import brushes, strokes
+from . import brushes, primitives, strokes
 
 MIN_SPACING = 0.002  # hand-space meters between samples, at the thinnest
 EDIT_RADIUS = 0.04  # hand-space meters reached by the Edit tool
@@ -216,7 +216,7 @@ class ReshapeStroke:
         self.world = obj.matrix_world.copy()
         self.world_inv = self.world.inverted_safe()
         tip = np.array((self.world_inv @ tip_pose.translation)[:])
-        radius = EDIT_RADIUS * scale / max(max(obj.matrix_world.to_scale()), 1e-9)
+        radius = EDIT_RADIUS * scale / max(max(primitives.axis_scale(obj.matrix_world)), 1e-9)
         # Which copy is the hand closest to? Edits are made on the original through that mirror.
         best = None
         for mask in strokes.mirror_variants(self.samples["sym"]):
