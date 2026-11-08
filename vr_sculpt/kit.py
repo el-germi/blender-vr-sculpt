@@ -578,14 +578,14 @@ def _free_path(folder, name):
 def add_to_kit(context, obj):
     """Save obj, as it looks, as a part in My Kit. Returns the new Asset; raises ValueError for an object
     that can't be a part."""
-    from . import hardsurface
+    from . import hardsurface, primitives
     if obj is None or obj.type != 'MESH':
         raise ValueError("Select a mesh to add it to the kit")
     depsgraph = context.evaluated_depsgraph_get()
     mesh = bpy.data.meshes.new_from_object(obj.evaluated_get(depsgraph), preserve_all_data_layers=True,
                                            depsgraph=depsgraph)
     # The part keeps its own orientation (its local Z sits on surfaces) but the size you see.
-    mesh.transform(Matrix.Diagonal((*obj.matrix_world.to_scale(), 1.0)))
+    mesh.transform(Matrix.Diagonal((*primitives.axis_scale(obj.matrix_world), 1.0)))
     if len(mesh.vertices) == 0:
         bpy.data.meshes.remove(mesh)
         raise ValueError(f"{obj.name} has no geometry to save")

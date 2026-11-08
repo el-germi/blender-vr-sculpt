@@ -14,6 +14,8 @@ import bpy
 import numpy as np
 from mathutils import Vector
 
+from . import primitives
+
 PROP = "vrs_stroke"
 COLLECTION = "VR Strokes"
 NOTES_LAYER = "VR Notes"
@@ -377,7 +379,7 @@ def distance(obj, point_world):
         return math.inf
     inv = obj.matrix_world.inverted_safe()
     p = np.array(inv @ Vector(point_world))
-    scale = max(obj.matrix_world.to_scale())
+    scale = max(primitives.axis_scale(obj.matrix_world))
     best = math.inf
     for mask in mirror_variants(s["sym"]):
         pts = reflect(s["p"], mask, s["c"]) if mask else s["p"]

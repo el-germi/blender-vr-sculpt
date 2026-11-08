@@ -142,6 +142,30 @@ def test_brushes():
     check(brushes.MeshState(obj3).co.shape == before.shape, "fresh state reads the current mesh")
 
 
+def test_mirrored():
+    print("== mirrored object (negative scale)")
+    from vr_sculpt import primitives
+    # 5.4's Matrix.to_scale() reads (-1, 1, 1) as (-1, -1, -1): the brush radius went through max(-1, 1e-9)
+    # and grew to 1e8, so one dab moved every vertex millions of units (and Blender's brush got that size).
+    obj = make_sphere(5)
+    obj.scale = (-2.0, 2.0, 2.0)
+    bpy.context.view_layer.update()
+    check(tuple(primitives.axis_scale(obj.matrix_world)) == (2.0, 2.0, 2.0), "axis_scale is positive when mirrored")
+    st = brushes.MeshState(obj)
+    check(abs(st.scale - 2.0) < 1e-9, f"state scale ignores the mirror ({st.scale})")
+    check(abs(st.local_radius(0.3) - 0.15) < 1e-9, f"local radius ({st.local_radius(0.3)})")
+    before = positions(obj)
+    s = brushes.Stroke(st, "DRAW", 0.3, 1.0)
+    run_line(s, (-0.2, 0, 2.0), (0.2, 0, 2.0))
+    moved = np.linalg.norm(positions(obj) - before, axis=1)
+    world = before * np.array((-2.0, 2.0, 2.0))
+    far = np.linalg.norm(world - np.array((0, 0, 2.0)), axis=1) > 0.8
+    check(moved.max() > 1e-3, f"draw moves verts on a mirrored mesh (max {moved.max():.4f})")
+    check(moved.max() < 0.5 and moved[far].max() < 1e-9,
+          f"draw stays local on a mirrored mesh (max {moved.max():.4f}, far {moved[far].max():.2g})")
+    bpy.data.objects.remove(obj)
+
+
 def test_grid():
     print("== grid selection matches brute force")
     obj = make_sphere(7)
@@ -213,6 +237,7 @@ def main():
         bpy.ops.object.select_all(action='SELECT')
         bpy.ops.object.delete()
         test_brushes()
+        test_mirrored()
         test_grid()
         bench()
         print("== register/unregister")

@@ -88,7 +88,7 @@ class SurfaceSnap:
     def _near_bounds(self, other, point):
         p = other.matrix_world.inverted_safe() @ point
         lo, hi = _bounds(other)
-        m = self.reach / max(max(other.matrix_world.to_scale()), 1e-9)
+        m = self.reach / max(max(primitives.axis_scale(other.matrix_world)), 1e-9)
         return all(lo[i] - m <= p[i] <= hi[i] + m for i in range(3))
 
     def nearest(self, context, point):

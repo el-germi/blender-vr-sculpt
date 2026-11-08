@@ -251,7 +251,7 @@ class GrabLight:
     def __init__(self, context, obj, tip_pose):
         from . import interactions
         self.obj = obj
-        self.scale = obj.matrix_world.to_scale()
+        self.scale = primitives.axis_scale(obj.matrix_world)
         self.offset = obj.matrix_world.translation - tip_pose.translation
         self.gate = interactions.DragGate(context, tip_pose)
         self.changed = False
