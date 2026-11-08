@@ -63,8 +63,9 @@ def to_display(rgb):
 
 
 def lights(context):
-    """The visible light objects."""
-    return [o for o in context.view_layer.objects if o is not None and o.type == 'LIGHT' and o.visible_get()]
+    """The visible light objects (not the hand light, which belongs to the hand)."""
+    return [o for o in context.view_layer.objects
+            if o is not None and o.type == 'LIGHT' and o.visible_get() and o.name != HAND_LIGHT]
 
 
 def selected_light(context):
@@ -289,6 +290,276 @@ def pick(context, settings, off, pose, tip_pose, scale):
     if obj is not None:
         return GrabLight(context, obj, tip_pose)
     return PlaceLight(context, pose, tip_pose)
+
+
+# --- the hand light (Sculpt mode) ---------------------------------------------------
+
+HAND_LIGHT = "VR Hand Light"
+HAND_RECEIVERS = ".VR Hand Light"  # the collection the light is linked to: the mesh being sculpted
+HAND_POWER_RANGE = (0.05, 10.0)  # watts at viewer scale 1, the slider (logarithmic)
+HAND_RADIUS = 0.02  # hand-space meters: how soft its highlights are
+LIT_VIEWS = {'MATERIAL', 'RENDERED'}  # Solid doesn't use scene lights
+
+
+def hand_light_on(context):
+    return context.scene.vr_sculpt.hand_light and shading(context).type in LIT_VIEWS
+
+
+def toggle_hand_light(context):
+    """Off if it's lighting; else on, in a view that shows it."""
+    settings = context.scene.vr_sculpt
+    if hand_light_on(context):
+        settings.hand_light = False
+        return
+    settings.hand_light = True
+    settings.hand_lines = False
+    sh = shading(context)
+    if sh.type not in LIT_VIEWS:
+        sh.type = 'MATERIAL'
+    sh.use_scene_lights = sh.use_scene_lights_render = True
+
+
+def remove_hand_light():
+    obj = bpy.data.objects.get(HAND_LIGHT)
+    if obj is not None:
+        data = obj.data
+        bpy.data.objects.remove(obj)
+        if data is not None and data.users == 0:
+            bpy.data.lights.remove(data)
+    coll = bpy.data.collections.get(HAND_RECEIVERS)
+    if coll is not None:
+        bpy.data.collections.remove(coll)
+
+
+def _new_hand_light(context):
+    data = bpy.data.lights.new(HAND_LIGHT, 'POINT')
+    data.use_shadow = False  # At one sample per XR draw a shadow is only dots, and costs ~3 ms.
+    obj = bpy.data.objects.new(HAND_LIGHT, data)
+    obj.hide_select = True
+    obj.hide_render = True  # Never in a render, even if the file gets saved with it.
+    context.scene.collection.objects.link(obj)
+    return obj
+
+
+def sync_hand_light(context, ss):
+    """The live timer's: the hand light at the off hand's tip, lighting only the active mesh, or gone. It exists only
+    while it lights something (ss None: no session), so files and other modes don't see it. Everything is looked up by
+    name each time, so undo can take it away or bring it back. True while it exists."""
+    settings = context.scene.vr_sculpt
+    target = context.view_layer.objects.active
+    if (ss is None or settings.mode != 'SCULPT' or not hand_light_on(context) or target is None
+            or target.type != 'MESH'):
+        if bpy.data.objects.get(HAND_LIGHT) is not None or bpy.data.collections.get(HAND_RECEIVERS) is not None:
+            remove_hand_light()
+        return False
+    from . import actions, operators
+    obj = bpy.data.objects.get(HAND_LIGHT) or _new_hand_light(context)
+    if context.scene.objects.get(HAND_LIGHT) is None:
+        context.scene.collection.objects.link(obj)  # Another scene now.
+    coll = bpy.data.collections.get(HAND_RECEIVERS) or bpy.data.collections.new(HAND_RECEIVERS)
+    if obj.light_linking.receiver_collection != coll:
+        obj.light_linking.receiver_collection = coll
+    if len(coll.objects) != 1 or coll.objects[0] != target:
+        for other in list(coll.objects):
+            coll.objects.unlink(other)
+        coll.objects.link(target)
+    scale = ss.viewer_scale
+    off = actions.off_index(context)
+    pose = operators.controller_pose(ss.controller_aim_location_get(context, off),
+                                     ss.controller_aim_rotation_get(context, off))
+    where = Matrix.Translation(operators.brush_tip(pose, settings.tip_offset * scale))
+    if obj.matrix_world != where:
+        obj.matrix_world = where
+    # A file can hold a power from when the range was wider. Falls off with distance: the same look at any scale.
+    power = min(settings.hand_light_power, HAND_POWER_RANGE[1]) * scale * scale
+    if abs(obj.data.energy - power) > 1e-6:
+        obj.data.energy = power
+    radius = HAND_RADIUS * scale
+    if abs(obj.data.shadow_soft_size - radius) > 1e-6:
+        obj.data.shadow_soft_size = radius
+    return True
+
+
+# --- the hand's lines (Sculpt mode): a paintless dent repair board -----------------------
+
+LINES_MATERIAL = ".VR Lines"
+LINES_MARK = "vrs_lines"  # object property: 1 on the mesh that shows the lines, read by the material
+LINES_KEPT = "vrs_kept_override"  # material property: the view layer's own override, back when the lines go
+LINES_SLIDE = -2.0 * math.pi / 0.1  # phase per hand-space meter along the board: a line every 10 cm, following the hand
+LINES_EDGE = 0.12  # how soft the lines' edges are (in sine units)
+_lines = {"marked": None, "phase": 0.0, "last": None}
+
+
+def lines_on(context):
+    return context.scene.vr_sculpt.hand_lines and shading(context).type in LIT_VIEWS
+
+
+def toggle_lines(context):
+    """Off if they're showing; else on, in a view that shows them (the hand light goes: it's one or the other)."""
+    settings = context.scene.vr_sculpt
+    if lines_on(context):
+        settings.hand_lines = False
+        return
+    settings.hand_lines = True
+    settings.hand_light = False
+    sh = shading(context)
+    if sh.type not in LIT_VIEWS:
+        sh.type = 'MATERIAL'
+    obj = context.view_layer.objects.active
+    if settings.mode == 'SCULPT' and obj is not None and obj.type == 'MESH':
+        from . import native
+        native.smooth_for_lines(context, obj)
+
+
+def _build_lines():
+    """Stripes from where each pixel reflects to, against the board's axis, so a dent bends them on any material.
+    The hand's values are node inputs: changing them doesn't recompile. Unmarked objects are plain gray."""
+    mat = bpy.data.materials.new(LINES_MATERIAL)
+    nt = mat.node_tree
+    nt.nodes.clear()
+    links = nt.links
+
+    def math_node(op, a=None, b=None):
+        node = nt.nodes.new("ShaderNodeMath")
+        node.operation = op
+        for i, v in enumerate((a, b)):
+            if isinstance(v, float):
+                node.inputs[i].default_value = v
+            elif v is not None:
+                links.new(v, node.inputs[i])
+        return node
+
+    geo = nt.nodes.new("ShaderNodeNewGeometry")
+    view = nt.nodes.new("ShaderNodeVectorMath")
+    view.operation = 'SCALE'
+    view.inputs["Scale"].default_value = -1.0
+    links.new(geo.outputs["Incoming"], view.inputs[0])
+    reflected = nt.nodes.new("ShaderNodeVectorMath")
+    reflected.operation = 'REFLECT'
+    links.new(view.outputs["Vector"], reflected.inputs[0])
+    links.new(geo.outputs["Normal"], reflected.inputs[1])
+    axis = nt.nodes.new("ShaderNodeCombineXYZ")
+    axis.name = "Axis"
+    axis.inputs[2].default_value = 1.0
+    along = nt.nodes.new("ShaderNodeVectorMath")
+    along.operation = 'DOT_PRODUCT'
+    links.new(reflected.outputs["Vector"], along.inputs[0])
+    links.new(axis.outputs[0], along.inputs[1])
+    angle = math_node('ARCSINE', along.outputs["Value"])
+    density = nt.nodes.new("ShaderNodeValue")
+    density.name = "Density"
+    scaled = math_node('MULTIPLY', angle.outputs[0], density.outputs[0])
+    phase = nt.nodes.new("ShaderNodeValue")
+    phase.name = "Phase"
+    wave = math_node('SINE', math_node('ADD', scaled.outputs[0], phase.outputs[0]).outputs[0])
+    level = nt.nodes.new("ShaderNodeValue")
+    level.name = "Level"  # Where the sine crosses into white, from the width.
+    low = math_node('SUBTRACT', level.outputs[0], LINES_EDGE)
+    high = math_node('ADD', level.outputs[0], LINES_EDGE)
+    stripes = nt.nodes.new("ShaderNodeMapRange")
+    stripes.interpolation_type = 'SMOOTHSTEP'
+    links.new(wave.outputs[0], stripes.inputs["Value"])
+    links.new(low.outputs[0], stripes.inputs["From Min"])
+    links.new(high.outputs[0], stripes.inputs["From Max"])
+    mark = nt.nodes.new("ShaderNodeAttribute")
+    mark.attribute_type = 'OBJECT'
+    mark.attribute_name = LINES_MARK
+    white = math_node('MULTIPLY', stripes.outputs[0], mark.outputs["Fac"])
+    base = nt.nodes.new("ShaderNodeMapRange")  # The board's black lines on the mesh, plain gray elsewhere.
+    links.new(mark.outputs["Fac"], base.inputs["Value"])
+    base.inputs["To Min"].default_value = 0.5
+    base.inputs["To Max"].default_value = 0.1
+    diffuse = nt.nodes.new("ShaderNodeBsdfDiffuse")
+    links.new(base.outputs[0], diffuse.inputs["Color"])
+    emission = nt.nodes.new("ShaderNodeEmission")
+    emission.inputs["Strength"].default_value = 0.9
+    mix = nt.nodes.new("ShaderNodeMixShader")
+    links.new(white.outputs[0], mix.inputs[0])
+    links.new(diffuse.outputs[0], mix.inputs[1])
+    links.new(emission.outputs[0], mix.inputs[2])
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    links.new(mix.outputs[0], out.inputs["Surface"])
+    return mat
+
+
+def _unmark(keep=None):
+    for obj in bpy.data.objects:
+        if LINES_MARK in obj and obj != keep:
+            del obj[LINES_MARK]
+            obj.update_tag()
+
+
+def remove_lines():
+    """The material, its override (the view layer's own comes back) and the mark on the mesh."""
+    mat = bpy.data.materials.get(LINES_MATERIAL)
+    if mat is not None:
+        kept = bpy.data.materials.get(mat.get(LINES_KEPT, ""))
+        for scene in bpy.data.scenes:
+            for layer in scene.view_layers:
+                if layer.material_override == mat:
+                    layer.material_override = kept
+        bpy.data.materials.remove(mat)
+    _unmark()
+    _lines.update(marked=None, phase=0.0, last=None)
+
+
+def forget_lines():
+    """Undo or load swapped Blender's data: look for stray marks again on the next sync."""
+    _lines.update(marked=None, last=None)
+
+
+def _set_input(socket, value):
+    if abs(socket.default_value - value) > 1e-6:
+        socket.default_value = value
+
+
+def sync_lines(context, ss):
+    """The live timer's: the board in the off hand, showing on the active mesh, or gone. Like the hand light it exists
+    only while it's showing, and is found by name each time. True while it exists."""
+    settings = context.scene.vr_sculpt
+    target = context.view_layer.objects.active
+    if (ss is None or settings.mode != 'SCULPT' or not lines_on(context) or target is None
+            or target.type != 'MESH'):
+        if bpy.data.materials.get(LINES_MATERIAL) is not None or _lines["marked"] is not None:
+            remove_lines()
+        return False
+    from . import actions, operators
+    mat = bpy.data.materials.get(LINES_MATERIAL) or _build_lines()
+    layer = context.view_layer
+    if layer.material_override != mat:
+        if layer.material_override is not None:
+            mat[LINES_KEPT] = layer.material_override.name
+        layer.material_override = mat
+    if _lines["marked"] != target.name:
+        _unmark(target)
+        _lines["marked"] = target.name
+    if target.get(LINES_MARK) != 1.0:
+        target[LINES_MARK] = 1.0
+        target.update_tag()
+
+    off = actions.off_index(context)
+    pose = operators.controller_pose(ss.controller_aim_location_get(context, off),
+                                     ss.controller_aim_rotation_get(context, off))
+    axis = (pose.to_3x3().normalized() @ Vector((0.0, 1.0, 0.0))).normalized()
+    where = pose.translation / ss.viewer_scale
+    if _lines["last"] is not None:  # Sliding the board moves the lines; only the hand's own movement counts.
+        _lines["phase"] = (_lines["phase"] + (where - _lines["last"]).dot(axis) * LINES_SLIDE) % (2.0 * math.pi)
+    _lines["last"] = where
+    nodes = mat.node_tree.nodes
+    for i in range(3):
+        _set_input(nodes["Axis"].inputs[i], axis[i])
+    _set_input(nodes["Phase"].outputs[0], _lines["phase"])
+    _set_input(nodes["Density"].outputs[0], settings.hand_lines_density)
+    _set_input(nodes["Level"].outputs[0], math.cos(math.pi * settings.hand_lines_width))
+    return True
+
+
+@bpy.app.handlers.persistent
+def _on_save_pre(*_args):
+    """Files never hold the hand's light or lines: an override left in one would stripe its renders. The live timer
+    puts them back."""
+    remove_hand_light()
+    remove_lines()
 
 
 def watts(v):
@@ -1102,8 +1373,11 @@ def sync_viewport(mat, bsdf=None):
 
 
 def register():
-    pass
+    if _on_save_pre not in bpy.app.handlers.save_pre:
+        bpy.app.handlers.save_pre.append(_on_save_pre)
 
 
 def unregister():
+    if _on_save_pre in bpy.app.handlers.save_pre:
+        bpy.app.handlers.save_pre.remove(_on_save_pre)
     clear()  # GPU textures go before Blender's GPU teardown.

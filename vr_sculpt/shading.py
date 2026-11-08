@@ -171,6 +171,25 @@ def set_mode(obj, new_mode):
     obj.update_tag()
 
 
+def match_for_dyntopo(obj):
+    """Dyntopo sculpts and draws a mesh of its own without modifiers, so the VR shading doesn't show there: it uses
+    the mesh's own face shading, and new faces take it from the faces they split. Call this before a session starts:
+    the mesh's faces take the VR shading's look (Auto can only be all smooth there). Once dyntopo ends the modifier
+    decides again. True if the faces changed."""
+    wanted = mode(obj)
+    if wanted is None:
+        return False
+    me = obj.data
+    smooth = wanted != 'FLAT'
+    now = np.zeros(len(me.polygons), dtype=bool)
+    me.polygons.foreach_get("use_smooth", now)
+    if (now == smooth).all():
+        return False
+    me.polygons.foreach_set("use_smooth", np.full(len(me.polygons), smooth))
+    me.update()
+    return True
+
+
 def set_angle(obj, value):
     """The Auto angle (radians)."""
     mod = modifier(obj)

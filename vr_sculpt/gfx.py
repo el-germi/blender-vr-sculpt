@@ -861,6 +861,11 @@ def _linear(p):
     _array(p)
 
 
+def _lines(p):
+    for y in (-0.6, 0.0, 0.6):
+        p.line(-0.8, y, 0.8, y, 0.2)
+
+
 def _shading(p):
     p.circle(0, 0, 0.75)
     p.fill(_arc_pts(0, 0, 0.75, math.radians(-90), math.radians(90), 12))
@@ -1000,7 +1005,7 @@ ICONS = {
     "fly": _fly, "desktop": _desktop, "passthrough": _passthrough, "timeline": _timeline, "tracking": _tracking,
     "fk": _fk, "ik": _ik, "bones": _bones, "bind": _bind, "reset": _reset, "cursor": _cursor, "object": _object,
     "cut": _cut, "union": _union, "intersect": _intersect, "bevel": _bevel, "shell": _shell, "array": _array,
-    "radial": _radial, "linear": _linear, "shading": _shading, "rig": _rig, "weights": _weights, "smooth": _smooth,
+    "radial": _radial, "linear": _linear, "lines": _lines, "shading": _shading, "rig": _rig, "weights": _weights, "smooth": _smooth,
     "retopo": _retopo, "strip": _strip, "quad": _quad, "relax": _relax, "tweak": _tweak, "wrap": _wrap,
     "kit": _kit, "kit_add": _kit_add, "stamp": _stamp, "physics": _physics, "throw": _throw, "force": _force,
     "hands": _hands, "cloth": _cloth, "soft": _soft, "spring": _spring,

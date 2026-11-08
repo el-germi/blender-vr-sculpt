@@ -24,7 +24,7 @@ import numpy as np
 from bpy_extras import view3d_utils
 from mathutils import Vector
 
-from . import brushes, rest
+from . import brushes, rest, shading
 
 # Essentials brushes the "next brush" button cycles through in native mode.
 NATIVE_BRUSHES = ("Draw", "Clay Strips", "Smooth", "Inflate/Deflate", "Crease Sharp", "Flatten/Contrast")
@@ -274,6 +274,7 @@ def toggle_dyntopo(context):
         sculpt = context.tool_settings.sculpt
         if sculpt.detail_type_method == 'RELATIVE':
             sculpt.detail_type_method = 'BRUSH'
+        shading.match_for_dyntopo(obj)
         rest.prepare(obj)
     if _run_in_view(context, bpy.ops.sculpt.dynamic_topology_toggle) is None:
         return _say("Dyntopo needs a 3D viewport in the desktop window")
@@ -320,6 +321,45 @@ def refresh_texture(context):
     print(f"VR Sculpt dyntopo: texture shown in {(time.perf_counter() - t0) * 1000:.0f} ms"
           f" (dyntopo {'on' if obj.use_dynamic_topology_sculpting else 'OFF'})", flush=True)
     return ""
+
+
+def smooth_for_lines(context, obj):
+    """The hand's lines read reflections, which flat faces don't have: each one shows a single tone. A mesh with its
+    own shading and flat faces goes smooth (VR Shading is left to decide). Dyntopo keeps its own mesh, so in a
+    session this leaves Sculpt Mode and comes back, like refresh_texture. True if the faces changed."""
+    me = obj.data
+    if shading.mode(obj) is not None or not len(me.polygons):
+        return False
+    smooth = np.zeros(len(me.polygons), dtype=bool)
+    me.polygons.foreach_get("use_smooth", smooth)
+    if smooth.all():
+        return False
+
+    def set_smooth():
+        me.polygons.foreach_set("use_smooth", np.ones(len(me.polygons), dtype=bool))
+        me.update()
+
+    if obj.mode != 'SCULPT' or not obj.use_dynamic_topology_sculpting:
+        set_smooth()
+    else:
+        undo = not bpy.app.background  # As in refresh_texture.
+
+        def round_trip():
+            bpy.ops.object.mode_set('EXEC_DEFAULT', undo, mode='OBJECT')
+            rest.sync(obj)
+            set_smooth()
+            rest.prepare(obj)
+            if undo:
+                bpy.ops.ed.undo_push(message="Smooth for lines")
+            bpy.ops.object.mode_set('EXEC_DEFAULT', undo, mode='SCULPT')
+            rest.sync(obj)
+            return {'FINISHED'}
+
+        if _run_in_view(context, round_trip) is None:
+            _say("Lines need smooth faces: needs a 3D viewport in the desktop window")
+            return False
+    _say("Faces set smooth for the lines")
+    return True
 
 
 def auto_texture(context, settings, busy):

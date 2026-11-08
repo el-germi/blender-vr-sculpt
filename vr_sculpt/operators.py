@@ -41,6 +41,8 @@ def _on_data_swap(*_args):
     uv.forget_caches()
     refs.forget_caches()
     gizmo.forget_caches()
+    from . import lookdev
+    lookdev.forget_lines()
 
 
 def get_state(obj):

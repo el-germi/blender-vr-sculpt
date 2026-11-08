@@ -50,6 +50,7 @@ def set_object_mode(context, obj, mode):
     if obj.type != 'MESH' and not (obj.type == 'ARMATURE' and mode in {'OBJECT', 'POSE', 'EDIT'}):
         return
     if mode == 'SCULPT' and obj.type == 'MESH' and obj.data.get(rest.DYNTOPO):
+        shading.match_for_dyntopo(obj)
         rest.prepare(obj)  # Blender turns dyntopo back on as it enters: keep UVs and shape keys first.
     window, view = _desktop_view(context)
     if view is None:
@@ -400,13 +401,32 @@ def _sculpt_rows(context, settings):
                                      lambda v: native.set_strength(context, v), fmt=_percent)])
     out.append(_axes_row("Symmetry", "sym_", symmetry.sculpt_axes(context),
                          lambda i: symmetry.sculpt_toggle(context, i)))
+    from . import lookdev
+    light_on, lines_on = lookdev.hand_light_on(context), lookdev.lines_on(context)
+    out.append(_view_row(context) + [
+        vr_ui.toggle("hand_light", "Light", light_on, lambda: lookdev.toggle_hand_light(context), icon="light_point",
+                     tip="A light on your other hand, on this mesh only"),
+        vr_ui.toggle("hand_lines", "Lines", lines_on, lambda: lookdev.toggle_lines(context), icon="lines",
+                     tip="A board of lines in your other hand: dents bend them")])
     more = _dyntopo_rows(context) if is_native else []
+    inverts = vr_ui.toggle("left_inverts", "Invert" if light_on or lines_on else "Other hand inverts",
+                           settings.left_inverts, _toggle(settings, "left_inverts"), icon="swap",
+                           tip="Other hand inverts")
+    # Their sliders share the row, so the panel only grows by the view row.
+    sliders = []
+    if light_on:
+        sliders = [_log_slider("hand_light_power", "Light", settings.hand_light_power, *lookdev.HAND_POWER_RANGE,
+                               lambda v: setattr(settings, "hand_light_power", v), lookdev.watts, weight=2.0)]
+    elif lines_on:
+        sliders = [vr_ui.slider("lines_density", "Lines", settings.hand_lines_density, 10.0, 100.0,
+                                lambda v: setattr(settings, "hand_lines_density", v), fmt=lambda v: f"{v:.0f}"),
+                   vr_ui.slider("lines_width", "Width", settings.hand_lines_width, 0.1, 0.7,
+                                lambda v: setattr(settings, "hand_lines_width", v), fmt=_percent, weight=1.6)]
     more += [
         [vr_ui.label("Engine", fixed=LABEL_W)] + _segments(
             "engine_", "engine", (('python', "Python"), ('native', "Native")), settings.engine.lower(),
             lambda v: set_engine(context, v.upper())),
-        [vr_ui.toggle("left_inverts", "Other hand inverts", settings.left_inverts, _toggle(settings, "left_inverts"),
-                      icon="swap")],
+        sliders + [inverts],
     ]
     return _disclose('SCULPT', out, more, "Dyntopo, engine, other hand" if is_native else "Engine, other hand")
 

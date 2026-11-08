@@ -259,7 +259,7 @@ def test_texture_refresh():
     ids = {w.id for w in menus.layout(ctx)[0]}
     check({"dyntopo_texture", "dyntopo_auto_texture"} <= ids, "dyntopo on a mesh with UVs: Show texture and Auto")
     widgets, height = menus.layout(ctx)
-    check(height < 0.32, f"the panel still fits ({height:.3f} m)")
+    check(height < 0.335, f"the panel still fits ({height:.3f} m)")
     first_source = me[rest.SOURCE]
     vr_ui.find(widgets, "dyntopo_texture").on_press()
     check(obj.mode == 'SCULPT' and obj.use_dynamic_topology_sculpting and rest.is_open(me)

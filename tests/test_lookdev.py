@@ -822,11 +822,382 @@ def test_undo_guard():
         s.tip_offset = 0.04
 
 
+class HandsSession:
+    """A session with the two controllers in different places."""
+    viewer_scale = 1.0
+
+    def __init__(self):
+        self.locs = [Vector((-0.3, 0.0, 1.0)), Vector((0.3, 0.0, 1.0))]
+
+    def controller_aim_location_get(self, context, index):
+        return self.locs[index].copy()
+
+    def controller_aim_rotation_get(self, context, index):
+        return Quaternion()
+
+
+def test_hand_light():
+    print("== the hand light and the Sculpt page's view row")
+    clear_scene()
+    ctx = bpy.context
+    s = ctx.scene.vr_sculpt
+    sh = ctx.window_manager.xr_session_settings.shading
+    sh.type = 'SOLID'
+    sh.use_scene_lights = False
+    bpy.ops.mesh.primitive_plane_add(size=4.0)
+    floor = ctx.active_object
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, location=(0.0, 1.0, 1.0))
+    ball = ctx.active_object
+    s.tip_offset = 0.04
+    s.left_handed = False
+    s.hand_light = False
+    s.engine = 'PYTHON'
+    menus.reset()
+    menus.set_mode(ctx, 'SCULPT')
+    ss = HandsSession()
+    running = operators.session_running
+    try:
+        got = widgets()
+        check({"view_solid", "view_material", "view_rendered", "hand_light"} <= set(got), "Sculpt has the view row")
+        check(not got["hand_light"].active, "the light starts off")
+        press("view_material")
+        check(sh.type == 'MATERIAL', "the view row sets the VR view")
+        press("view_solid")
+
+        check(not lookdev.sync_hand_light(ctx, ss) and bpy.data.objects.get(lookdev.HAND_LIGHT) is None,
+              "off: no light in the file")
+        press("hand_light")
+        check(s.hand_light and sh.type == 'MATERIAL' and sh.use_scene_lights,
+              "on from Solid: Material Preview with scene lights, where it shows")
+        check(widgets()["hand_light"].active, "the toggle shows it's on")
+        check(lookdev.sync_hand_light(ctx, ss), "the timer makes it")
+        light = bpy.data.objects[lookdev.HAND_LIGHT]
+        check(light.type == 'LIGHT' and light.data.type == 'POINT' and not light.data.use_shadow, "a shadowless point")
+        check(light.hide_render and light.hide_select, "never rendered, never selected")
+        check(close(light.matrix_world.translation, operators.brush_tip(
+            operators.controller_pose(ss.locs[0], Quaternion()), s.tip_offset)), "at the off hand's tip (left)")
+        check(light not in lookdev.lights(ctx), "the Light tool doesn't list or draw it")
+        coll = light.light_linking.receiver_collection
+        check(coll is not None and list(coll.objects) == [ball], "it lights only the selected mesh")
+        check(coll.name not in {c.name for c in ctx.scene.collection.children}, "its collection isn't in the scene")
+        check(close((light.data.energy,), (s.hand_light_power,)), "power as set at scale 1")
+
+        ss.locs[0] = Vector((-0.1, 0.2, 1.3))
+        lookdev.sync_hand_light(ctx, ss)
+        check(close(light.matrix_world.translation, operators.brush_tip(
+            operators.controller_pose(ss.locs[0], Quaternion()), s.tip_offset)), "it follows the hand")
+        s.left_handed = True
+        lookdev.sync_hand_light(ctx, ss)
+        check(close(light.matrix_world.translation, operators.brush_tip(
+            operators.controller_pose(ss.locs[1], Quaternion()), s.tip_offset)), "left-handed: the right hand")
+        s.left_handed = False
+
+        ss.viewer_scale = 3.0
+        lookdev.sync_hand_light(ctx, ss)
+        check(close((light.data.energy,), (s.hand_light_power * 9.0,)) and
+              close((light.data.shadow_soft_size,), (lookdev.HAND_RADIUS * 3.0,)), "power and radius follow the scale")
+        ss.viewer_scale = 1.0
+
+        menus.set_more('SCULPT', True)
+        check(abs(s.hand_light_power - 1.0) < 1e-6 and lookdev.HAND_POWER_RANGE == (0.05, 10.0),
+              "it starts at 1 W, on a 0.05-10 W range")
+        w = slide("hand_light_power", math.log10(2.0))
+        check(abs(s.hand_light_power - 2.0) < 1e-3, "the slider under More sets its power (logarithmic)")
+        check(abs(w.max - 1.0) < 1e-6 and abs(w.min - math.log10(0.05)) < 1e-6 and w.fmt(w.max) == "10 W",
+              "the track is logarithmic and ends at 10 W")
+        lookdev.sync_hand_light(ctx, ss)
+        check(close((light.data.energy,), (2.0,)), "and the light takes it")
+        s.hand_light_power = 1.0
+
+        ctx.view_layer.objects.active = floor
+        lookdev.sync_hand_light(ctx, ss)
+        check(list(coll.objects) == [floor] and coll not in ball.users_collection, "another mesh selected: that one only")
+        ctx.view_layer.objects.active = light
+        check(not lookdev.sync_hand_light(ctx, ss) and bpy.data.objects.get(lookdev.HAND_LIGHT) is None,
+              "nothing to light: gone")
+        ctx.view_layer.objects.active = ball
+        lookdev.sync_hand_light(ctx, ss)
+
+        bpy.data.objects.remove(bpy.data.objects[lookdev.HAND_LIGHT])  # What an undo can do.
+        check(lookdev.sync_hand_light(ctx, ss) and bpy.data.objects.get(lookdev.HAND_LIGHT) is not None,
+              "taken away by an undo: back on the next tick")
+        coll = bpy.data.collections[lookdev.HAND_RECEIVERS]
+        check(list(bpy.data.objects[lookdev.HAND_LIGHT].light_linking.receiver_collection.objects) == [ball],
+              "and linked again")
+
+        # The real timer, but with this session (the window manager has none in the background).
+        real_sync = lookdev.sync_hand_light
+        operators.session_running = lambda _context: True
+        lookdev.sync_hand_light = lambda c, _ss: real_sync(c, ss)
+        try:
+            check(live._tick() == live.FAST, "the timer runs fast while it's on")
+            check(bpy.data.objects.get(lookdev.HAND_LIGHT) is not None, "and keeps the light")
+            lookdev.sync_hand_light = lambda c, _ss: real_sync(c, None)
+            operators.session_running = lambda _context: False
+            live._tick()
+            check(bpy.data.objects.get(lookdev.HAND_LIGHT) is None, "out of a session the timer takes it away")
+            lookdev.sync_hand_light = lambda c, _ss: real_sync(c, ss)
+            operators.session_running = lambda _context: True
+            live._tick()
+        finally:
+            lookdev.sync_hand_light = real_sync
+            operators.session_running = running
+        check(not live._errors, "the timer ran without errors")
+
+        sh.type = 'SOLID'
+        check(not lookdev.sync_hand_light(ctx, ss) and bpy.data.objects.get(lookdev.HAND_LIGHT) is None,
+              "Solid: nothing would show it, so it's gone")
+        check(s.hand_light and not widgets()["hand_light"].active, "the setting stays, the toggle shows it isn't lighting")
+        press("hand_light")
+        check(s.hand_light and sh.type == 'MATERIAL', "pressing it in Solid switches to Material instead of off")
+        press("hand_light")
+        check(not s.hand_light and sh.type == 'MATERIAL', "pressing it again turns it off, keeping the view")
+        check(not lookdev.sync_hand_light(ctx, ss) and bpy.data.collections.get(lookdev.HAND_RECEIVERS) is None,
+              "off: light and collection gone")
+        check(len(ball.users_collection) == 1, "the mesh is back in only its own collection")
+
+        press("hand_light")
+        sh.type = 'RENDERED'
+        check(lookdev.sync_hand_light(ctx, ss), "Rendered shows it too")
+        menus.set_mode(ctx, 'MODEL')
+        check(not lookdev.sync_hand_light(ctx, ss) and bpy.data.objects.get(lookdev.HAND_LIGHT) is None,
+              "other modes don't have it")
+        menus.set_mode(ctx, 'SCULPT')
+        check(lookdev.sync_hand_light(ctx, ss), "back in Sculpt it returns")
+        check(not lookdev.sync_hand_light(ctx, None) and bpy.data.objects.get(lookdev.HAND_LIGHT) is None,
+              "the session ended: gone")
+    finally:
+        operators.session_running = running
+        s.hand_light = False
+        s.left_handed = False
+        sh.type = 'SOLID'
+        lookdev.remove_hand_light()
+        menus.set_mode(ctx, 'TOOLS')
+        menus.reset()
+
+
+def test_lines():
+    print("== the hand's lines")
+    from vr_sculpt import native, rest, shading
+    clear_scene()
+    ctx = bpy.context
+    s = ctx.scene.vr_sculpt
+    sh = ctx.window_manager.xr_session_settings.shading
+    sh.type = 'SOLID'
+    layer = ctx.view_layer
+    layer.material_override = None
+    bpy.ops.mesh.primitive_plane_add(size=4.0)
+    floor = ctx.active_object
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, location=(0.0, 1.0, 1.0))
+    ball = ctx.active_object
+    s.tip_offset = 0.04
+    s.left_handed = False
+    s.hand_light = s.hand_lines = False
+    s.engine = 'PYTHON'
+    menus.reset()
+    menus.set_mode(ctx, 'SCULPT')
+    ss = HandsSession()
+    ss.rots = [Quaternion(), Quaternion()]
+    ss.controller_aim_rotation_get = lambda context, index: ss.rots[index].copy()
+    name = lookdev.LINES_MATERIAL
+    try:
+        check("hand_lines" in widgets() and not widgets()["hand_lines"].active, "Sculpt has Lines, off")
+        check(not lookdev.sync_lines(ctx, ss) and name not in bpy.data.materials, "off: nothing in the file")
+        check(smooth_faces(ball) == 0, "the mesh starts flat")
+        press("hand_lines")
+        check(s.hand_lines and sh.type == 'MATERIAL' and widgets()["hand_lines"].active,
+              "on from Solid: Material Preview, where they show")
+        check(smooth_faces(ball) == len(ball.data.polygons), "a flat mesh goes smooth: flat faces can't show lines")
+        check(lookdev.sync_lines(ctx, ss), "the timer makes them")
+        mat = bpy.data.materials[name]
+        check(layer.material_override == mat, "on the view layer's override, so no mesh data changes")
+        check(ball[lookdev.LINES_MARK] == 1.0 and lookdev.LINES_MARK not in floor, "marked on the selected mesh only")
+        check(mat not in list(ball.data.materials), "the mesh keeps its materials")
+
+        press("hand_light")
+        check(s.hand_light and not s.hand_lines and not lookdev.sync_lines(ctx, ss), "Light turns Lines off")
+        check(layer.material_override is None and name not in bpy.data.materials and lookdev.LINES_MARK not in ball,
+              "gone without a trace")
+        press("hand_lines")
+        check(s.hand_lines and not s.hand_light, "and Lines turns Light off")
+        lookdev.sync_hand_light(ctx, ss)
+        check(bpy.data.objects.get(lookdev.HAND_LIGHT) is None, "the light goes with it")
+        lookdev.sync_lines(ctx, ss)
+
+        # The board follows the off hand: its rotation, and sliding along it.
+        nodes = bpy.data.materials[name].node_tree.nodes
+
+        def axis():
+            return [nodes["Axis"].inputs[i].default_value for i in range(3)]
+
+        lookdev.sync_lines(ctx, ss)
+        check(close(axis(), (0.0, 1.0, 0.0)), "the board's axis is the hand's")
+        ss.rots[0] = Quaternion((0.0, 0.0, 1.0), math.pi / 2)
+        ss.rots[1] = Quaternion((1.0, 0.0, 0.0), 1.0)
+        lookdev.sync_lines(ctx, ss)
+        check(close(axis(), (-1.0, 0.0, 0.0)), "rolling the hand turns it; the main hand doesn't")
+        s.left_handed = True
+        lookdev.sync_lines(ctx, ss)
+        check(not close(axis(), (-1.0, 0.0, 0.0)), "left-handed: the other controller")
+        s.left_handed = False
+        lookdev.sync_lines(ctx, ss)
+        before = nodes["Phase"].outputs[0].default_value
+        ss.locs[0] = ss.locs[0] + Vector((0.0, 0.5, 0.0))  # Across the board: no change.
+        lookdev.sync_lines(ctx, ss)
+        check(close((nodes["Phase"].outputs[0].default_value,), (before,)), "moving across the axis doesn't slide them")
+        ss.locs[0] = ss.locs[0] + Vector((-0.025, 0.0, 0.0))  # A quarter of a line along it.
+        lookdev.sync_lines(ctx, ss)
+        moved = (nodes["Phase"].outputs[0].default_value - before) % (2.0 * math.pi)
+        check(min(abs(moved - math.pi / 2), abs(moved - 1.5 * math.pi)) < 1e-3, "2.5 cm along it slides a quarter of a line")
+        kept = nodes["Phase"].outputs[0].default_value
+        ss.viewer_scale = 4.0
+        ss.locs[0] = ss.locs[0] * 4.0
+        operators._on_data_swap()  # Scaling isn't a slide; forget where the hand was, as after an undo.
+        lookdev.sync_lines(ctx, ss)
+        ss.locs[0] = ss.locs[0] + Vector((-0.1, 0.0, 0.0))  # 2.5 cm of hand at scale 4.
+        lookdev.sync_lines(ctx, ss)
+        moved = (nodes["Phase"].outputs[0].default_value - kept) % (2.0 * math.pi)
+        check(min(abs(moved - math.pi / 2), abs(moved - 1.5 * math.pi)) < 1e-3, "the slide follows the hand at any scale")
+        ss.viewer_scale = 1.0
+
+        menus.set_more('SCULPT', True)
+        slide("lines_density", 80.0)
+        slide("lines_width", 0.25)
+        lookdev.sync_lines(ctx, ss)
+        check(close((nodes["Density"].outputs[0].default_value,), (80.0,)), "density reaches the shader")
+        check(close((nodes["Level"].outputs[0].default_value,), (math.cos(math.pi * 0.25),)), "and width")
+        s.hand_lines_density, s.hand_lines_width = 40.0, 0.5
+
+        # Another mesh selected; an undo bringing a stale mark back.
+        ctx.view_layer.objects.active = floor
+        lookdev.sync_lines(ctx, ss)
+        check(lookdev.LINES_MARK in floor and lookdev.LINES_MARK not in ball, "selecting another mesh moves the mark")
+        ball[lookdev.LINES_MARK] = 1.0
+        operators._on_data_swap()
+        lookdev.sync_lines(ctx, ss)
+        check(lookdev.LINES_MARK not in ball, "after an undo a stale mark is cleared")
+        ctx.view_layer.objects.active = ball
+        lookdev.sync_lines(ctx, ss)
+
+        # Never in a saved file, then back on the next tick.
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "lines.blend")
+            bpy.ops.wm.save_as_mainfile(filepath=path, copy=True)
+            with bpy.data.libraries.load(path) as (data_from, _to):
+                saved = list(data_from.materials)
+        check(name not in saved, "the material isn't saved in the file")
+        check(layer.material_override is None and lookdev.LINES_MARK not in ball, "saving took the override off")
+        check(lookdev.sync_lines(ctx, ss) and layer.material_override is not None, "the next tick puts it back")
+
+        # The view layer's own override comes back.
+        lookdev.remove_lines()
+        own = bpy.data.materials.new("Own Override")
+        layer.material_override = own
+        lookdev.sync_lines(ctx, ss)
+        check(layer.material_override.name == name, "the lines take over a view layer override")
+        sh.type = 'SOLID'
+        check(not lookdev.sync_lines(ctx, ss) and layer.material_override == own, "and give it back when they go")
+        check(s.hand_lines and not widgets()["hand_lines"].active, "Solid: the setting stays, not showing")
+        layer.material_override = None
+        bpy.data.materials.remove(own)
+        press("hand_lines")
+        check(sh.type == 'MATERIAL' and s.hand_lines, "pressing it in Solid switches to Material instead of off")
+        press("hand_lines")
+        check(not s.hand_lines, "pressing it again turns it off")
+
+        press("hand_lines")
+        lookdev.sync_lines(ctx, ss)
+        menus.set_mode(ctx, 'MODEL')
+        check(not lookdev.sync_lines(ctx, ss) and layer.material_override is None, "other modes don't have them")
+        menus.set_mode(ctx, 'SCULPT')
+        check(lookdev.sync_lines(ctx, ss), "back in Sculpt they return")
+        check(not lookdev.sync_lines(ctx, None) and name not in bpy.data.materials, "the session ended: gone")
+        s.hand_lines = False
+
+        # VR Shading decides for itself; a flat mesh in a dyntopo session goes through leaving and coming back.
+        clear_scene()
+        bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2)
+        ball = ctx.active_object
+        shading.set_mode(ball, 'FLAT')
+        press("hand_lines")
+        check(smooth_faces(ball) == 0, "VR Shading Flat stays flat: that's a choice")
+        press("hand_lines")
+        s.hand_lines = False
+        shading.set_mode(ball, None)
+        s.engine = 'NATIVE'
+        menus.set_mode(ctx, 'SCULPT')
+        native.toggle_dyntopo(ctx)
+        check(ball.use_dynamic_topology_sculpting, "a flat mesh with dyntopo on")
+        press("hand_lines")
+        check(ball.mode == 'SCULPT' and ball.use_dynamic_topology_sculpting, "turning Lines on keeps the session")
+        s.hand_lines = False
+        menus.set_object_mode(ctx, ball, 'OBJECT')
+        rest.tick(ctx)
+        check(smooth_faces(ball) == len(ball.data.polygons), "and the mesh came out smooth")
+        ball.data[rest.DYNTOPO] = False
+    finally:
+        s.hand_lines = False
+        s.left_handed = False
+        sh.type = 'SOLID'
+        lookdev.remove_lines()
+        ctx.view_layer.material_override = None
+        s.engine = 'PYTHON'
+        menus.set_mode(ctx, 'TOOLS')
+        menus.reset()
+
+
+def smooth_faces(obj):
+    return sum(p.use_smooth for p in obj.data.polygons)
+
+
+def test_dyntopo_shading():
+    print("== the VR shading's look carries into dyntopo")
+    from vr_sculpt import native, rest, shading
+    clear_scene()
+    ctx = bpy.context
+    s = ctx.scene.vr_sculpt
+    s.engine = 'NATIVE'
+    menus.reset()
+    menus.set_mode(ctx, 'TOOLS')
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2)
+    ball = ctx.active_object
+    n = len(ball.data.polygons)
+    check(smooth_faces(ball) == 0, "the mesh starts flat")
+    check(not shading.match_for_dyntopo(ball) and smooth_faces(ball) == 0, "no VR shading: the mesh is left alone")
+    shading.set_mode(ball, 'SMOOTH')
+    check(shading.match_for_dyntopo(ball) and smooth_faces(ball) == n, "Smooth: the faces go smooth")
+    check(not shading.match_for_dyntopo(ball), "and it has nothing more to do")
+    shading.set_mode(ball, 'AUTO')
+    check(not shading.match_for_dyntopo(ball) and smooth_faces(ball) == n, "Auto: all smooth, all dyntopo can do")
+    shading.set_mode(ball, 'FLAT')
+    check(shading.match_for_dyntopo(ball) and smooth_faces(ball) == 0, "Flat: the faces go flat")
+
+    shading.set_mode(ball, 'SMOOTH')
+    menus.set_object_mode(ctx, ball, 'SCULPT')
+    check(smooth_faces(ball) == 0, "entering Sculpt without dyntopo changes nothing")
+    native.toggle_dyntopo(ctx)
+    check(ball.use_dynamic_topology_sculpting, "dyntopo is on")
+    menus.set_object_mode(ctx, ball, 'OBJECT')
+    rest.tick(ctx)
+    check(smooth_faces(ball) == len(ball.data.polygons), "turning it on from the panel made the faces smooth")
+    check(shading.mode(ball) == 'SMOOTH', "the modifier stays")
+
+    shading.set_mode(ball, 'FLAT')
+    menus.set_object_mode(ctx, ball, 'SCULPT')
+    check(ball.use_dynamic_topology_sculpting, "re-entering turns dyntopo back on")
+    menus.set_object_mode(ctx, ball, 'OBJECT')
+    rest.tick(ctx)
+    check(smooth_faces(ball) == 0, "and entering takes the current VR shading (Flat now)")
+    ball.data[rest.DYNTOPO] = False
+    menus.reset()
+
+
 def main():
     vr_sculpt.register()
     try:
         for t in (test_place, test_grab_select, test_panel, test_gizmos, test_look, test_render_guard, test_previews,
-                  test_world, test_material, test_undo_guard):
+                  test_world, test_material, test_undo_guard, test_hand_light, test_lines, test_dyntopo_shading):
             try:
                 t()
             except Exception:

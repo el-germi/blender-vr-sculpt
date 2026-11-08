@@ -1,7 +1,7 @@
 """One app timer for the things that update while VR runs, outside of any operator:
 tracking objects, desktop window captures, camera preview redraws, puppet bindings and takes, the
-weight heat map's geometry, the UV checker / stretch / island view, kit listings coming in from their background worker, and physics (the
-hands' colliders and spring bones, which also run while the timeline plays outside VR). Dyntopo
+weight heat map's geometry, the UV checker / stretch / island view, kit listings coming in from their background worker, the hand's
+light and lines, and physics (the hands' colliders and spring bones, which also run while the timeline plays outside VR). Dyntopo
 sessions (rest.py) are closed from here too, VR or not, however Sculpt Mode was left."""
 
 import time
@@ -34,9 +34,13 @@ def _tick():
             controllers.tick(context, False)  # Blender's controllers back as they were.
             camera.release_base_pose(context)  # And the base pose, if aiming a camera pinned it.
             physics.end_session(context)
+            lookdev.sync_hand_light(context, None)  # Gone with the session.
+            lookdev.sync_lines(context, None)
             return FAST if physics.tick(context, None) else IDLE  # Springs while the timeline plays.
         lookdev.guard_view(context)  # First: a failure further down mustn't leave Cycles drawing the VR view.
         ss = context.window_manager.xr_session_state
+        hand_light = lookdev.sync_hand_light(context, ss)
+        hand_light = lookdev.sync_lines(context, ss) or hand_light
         if settings.mode == 'SCULPT' and settings.engine == 'NATIVE':
             native.auto_texture(context, settings, bool(operators.active_hands))
         if settings.mode == 'MODEL':
@@ -60,6 +64,7 @@ def _tick():
                     region.tag_redraw()
         busy = (settings.tracking or camera.wanted(context) or desktop.interactive(context)
                 or settings.onion or settings.show_paths or puppet.active() or physics_busy or uv.busy(context)
+                or hand_light
                 or lookdev.shading(context).type == 'RENDERED')  # So guard_view catches an engine change at once.
         return FAST if busy else IDLE
     except Exception:
