@@ -20,10 +20,6 @@ from .props import BRUSH_ITEMS
 
 # The Python engine's brushes wear the pictures of Blender's brushes they work like.
 PYTHON_LOOKALIKES = {'DRAW': "Draw", 'SMOOTH': "Smooth", 'GRAB': "Grab", 'INFLATE': "Inflate/Deflate"}
-NATIVE_SHORT = {
-    "Draw": "Draw", "Clay Strips": "Clay", "Smooth": "Smooth",
-    "Inflate/Deflate": "Inflate", "Crease Sharp": "Crease", "Flatten/Contrast": "Flatten",
-}
 
 MODES = (('SCULPT', "Sculpt", "sculpt"), ('RETOPO', "Retopo", "retopo"),
          ('MODEL', "Model", "model"), ('DRAW', "Draw", "draw"),
@@ -199,8 +195,9 @@ _picker = None
 
 
 class Option:
-    def __init__(self, value, label, category=""):
+    def __init__(self, value, label, category="", image=None):
         self.value, self.label, self.category = value, label, category
+        self.image = image  # a picture before the label (a brush's preview), or None
 
 
 def open_picker(title, options, current, on_select):
@@ -283,10 +280,17 @@ def _picker_rows():
         out += _grid(shown, 2)
     else:
         options = [o for o in p["options"] if o.category == p["category"]]
-        cells = [vr_ui.button("opt_" + str(o.value), o.label, (lambda v=o.value: _pick(v)),
-                              active=o.value == p["current"]) for o in options]
-        shown, page, pages = _paged(cells, p["page"], PICKER_COLS * PICKER_ROWS)
-        out += _grid(shown, PICKER_COLS)
+        # Options with a picture (brushes) go two to a row, so their names fit beside it; each row is a
+        # segmented control of its own.
+        cols = 2 if any(o.image is not None for o in options) else PICKER_COLS
+        cells = [vr_ui.segment("opt_" + str(o.value), o.label, (lambda v=o.value: _pick(v)), o.value == p["current"],
+                               f"picker_{i // cols}", image=o.image) if o.image is not None else
+                 vr_ui.button("opt_" + str(o.value), o.label, (lambda v=o.value: _pick(v)),
+                              active=o.value == p["current"]) for i, o in enumerate(options)]
+        # One row more than a page fits where the pager would go: no second page for one or two options.
+        per_page = cols * (PICKER_ROWS + 1) if len(cells) <= cols * (PICKER_ROWS + 1) else cols * PICKER_ROWS
+        shown, page, pages = _paged(cells, p["page"], per_page)
+        out += _grid(shown, cols)
     if pages > 1:
         out.append(_pager("picker", page, pages, _set_page))
     return out
@@ -371,6 +375,31 @@ def _axes_row(text, prefix, states, toggle, here=None):
 
 # --- Sculpt ---------------------------------------------------------------------
 
+def open_brush_picker(context):
+    """Every native brush VR Sculpt can drive, by Blender's asset shelf catalogs, with their previews."""
+    brush = native.sculpt_brush(context)
+    options = [Option(n, native.SHORT[n], native.CATEGORY[n], image=native.brush_icon(n, siblings=native.CATALOG_NAMES))
+               for n in native.CATALOG_NAMES]
+    open_picker("Brushes", options, brush.name if brush else "", lambda n: native.pick_brush(context, n))
+
+
+def _native_brush_rows(context, settings, current):
+    """The quick buttons, four to a row: the six, the brush last picked from the list (Snake Hook until one is),
+    and More, which opens the list (lit when the brush in use is none of these)."""
+    picked = native.picked_brush(context)
+    names = list(native.NATIVE_BRUSHES)
+    if picked not in names:
+        names.insert(3, picked)
+    cells = [vr_ui.segment("brush_picked" if n == picked and n not in native.NATIVE_BRUSHES else "brush_" + n,
+                           native.SHORT[n], (lambda n=n: native.activate_brush(context, n)), n == current,
+                           "brushes_a" if i < 4 else "brushes_b", dot=hud.native_color(n),
+                           image=native.brush_icon(n, siblings=native.NATIVE_BRUSHES + (picked,)))
+             for i, n in enumerate(names)]
+    cells.append(vr_ui.button("brush_list", "More", lambda: open_brush_picker(context), icon="chevron_right",
+                              active=current not in names))
+    return [cells[:4], cells[4:]]
+
+
 def _sculpt_rows(context, settings):
     is_native = settings.engine == 'NATIVE'
     dyntopo = is_native and native.dyntopo_enabled(context)
@@ -378,12 +407,7 @@ def _sculpt_rows(context, settings):
     out = [_header(context, settings, "Sculpt", subtitle)]
     if is_native:
         brush = native.sculpt_brush(context)
-        current = brush.name if brush else ""
-        cells = [vr_ui.segment("brush_" + n, NATIVE_SHORT[n], (lambda n=n: native.activate_brush(context, n)),
-                               n == current, "brushes_a" if i < 3 else "brushes_b", dot=hud.NATIVE_COLORS.get(n),
-                               image=native.brush_icon(n))
-                 for i, n in enumerate(native.NATIVE_BRUSHES)]
-        out += [cells[:3], cells[3:]]
+        out += _native_brush_rows(context, settings, brush.name if brush else "")
     else:
         out.append(_segments("brush_", "brushes", [(i, n) for i, n, _d in BRUSH_ITEMS], settings.brush,
                              lambda v: setattr(settings, "brush", v), dots=hud.PYTHON_COLORS,

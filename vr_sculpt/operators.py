@@ -257,6 +257,8 @@ class VRSCULPT_OT_stroke(bpy.types.Operator):
             except RuntimeError as ex:
                 self.report({'WARNING'}, str(ex))
                 return {'CANCELLED'}
+            if self.stroke.drag:
+                self.smoother = None  # A grab (Snake Hook, Pose...): Smooth's lag would leave it behind the hand.
         else:
             invert = settings.left_inverts and off and settings.brush in {'DRAW', 'INFLATE'}
             self.stroke = brushes.Stroke(

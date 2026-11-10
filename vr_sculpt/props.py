@@ -576,6 +576,11 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         default='PYTHON',
     )
     brush: EnumProperty(name="Brush", items=BRUSH_ITEMS, default='DRAW')
+    native_picked: StringProperty(
+        name="Picked Brush",
+        description="The native brush last picked from the panel's brush list: a quick button of its own (Snake "
+                    "Hook until one is picked), and B cycles through it too",
+        default="")
     radius: FloatProperty(
         name="Radius",
         description="Brush radius in your hand's space (meters). Stays the same size when you scale the world",

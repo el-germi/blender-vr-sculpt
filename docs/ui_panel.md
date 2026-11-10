@@ -156,6 +156,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Feature | How |
 |---|---|
 | Brush (Draw, Smooth, Grab, Inflate / the 6 native ones) | segmented control with Blender's brush previews (a colored underline matches the tip ring; the Python engine's four in a row show only the pictures, named on hover); **B** next brush |
+| Every other native brush (Snake Hook, Pose, Grab, Mask, Paint, Cloth...) | native quick buttons are four to a row, thumbnails only like the Python ones: the six, the brush last picked (Snake Hook until one is) and **More** > picker by Blender's catalogs, with previews and names; the picked one joins the **B** cycle |
 | Radius | slider; **right stick click** cycles 1-16 cm |
 | Strength | slider |
 | Symmetry X / Y / Z | toggles |

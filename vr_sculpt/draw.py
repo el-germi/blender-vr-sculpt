@@ -129,7 +129,7 @@ def _draw_cursors(context, ss, settings, xr):
     native = settings.engine == 'NATIVE'
     sculpt_brush = context.tool_settings.sculpt.brush if native else None
     if native:
-        brush_color = hud.NATIVE_COLORS.get(sculpt_brush.name if sculpt_brush else "", (0.9, 0.9, 0.9))
+        brush_color = hud.native_color(sculpt_brush.name if sculpt_brush else "")
     else:
         brush_color = COLORS.get(settings.brush, (1.0, 1.0, 1.0))
 
