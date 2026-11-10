@@ -11,9 +11,10 @@ before changing a subsystem. `docs/ui_panel.md` maps the hand panel.
 
 ## Commands
 
-The Blender used here is
-`D:\Descargas D\BlenderLauncher\daily\blender-5.4.0-alpha+daily.3f4216e1bad1\blender.exe`
-(shown as `blender` below). Run everything from the repo root.
+The Blender used here is the newest daily in `D:\Descargas D\BlenderLauncher\daily\`
+(BlenderLauncher replaces it on updates; on 2026-11-08 it was
+`blender-5.4.0-alpha+daily.faa17d90727b\blender.exe`), shown as `blender` below. Run everything from the
+repo root.
 
 Build and install the extension (only needed for headset runs; tests import from source):
 

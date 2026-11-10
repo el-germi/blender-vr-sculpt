@@ -15,6 +15,9 @@ Findings from tests/native_probe*.py on 5.4.0 Alpha:
 - Directional brushes (Clay Strips...) do nothing with one-element strokes, so
   each call gets a zero-pressure element at the previous tip first.
 - One call takes ~0.5 ms and only updates the touched part of the mesh.
+- Drag brushes (Grab, Snake Hook, Pose...) move the mesh by the mouse's motion on screen between the
+  elements, unprojected at the stroke's depth: motion along the view is lost, and each call grabs anew
+  where it starts. So they get their own dabs (NativeStroke._drag_dab, tests/native_drag_probe*.py).
 """
 
 import time
@@ -26,9 +29,73 @@ from mathutils import Vector
 
 from . import brushes, rest, shading
 
-# Essentials brushes the "next brush" button cycles through in native mode.
+# Essentials brushes the "next brush" button cycles through in native mode (the panel's quick buttons).
 NATIVE_BRUSHES = ("Draw", "Clay Strips", "Smooth", "Inflate/Deflate", "Crease Sharp", "Flatten/Contrast")
 _ESSENTIALS = "brushes/essentials_brushes-mesh_sculpt.blend/Brush/"
+
+# Every essentials sculpt brush the panel's brush list offers: (name, short label), by Blender's own asset
+# shelf catalog. Left out because one short call per controller sample can't drive them (see
+# tests/native_drag_probe*.py): the cloth brushes that grab (Grab / Grab Planar / Grab Random Cloth,
+# Bend/Twist and Stretch/Move Cloth, the boundary cloth ones), Grab Silhouette (works from the desktop
+# view's silhouette), Twist (turns with the mouse around where the stroke began) and Boundary (its first
+# dab writes NaN positions; unusable() refuses it).
+CATALOG = (
+    ("Add & Subtract", (
+        ("Draw", "Draw"), ("Draw Sharp", "Sharp"), ("Clay", "Clay"), ("Clay Strips", "Strips"),
+        ("Clay Thumb", "Thumb"), ("Layer", "Layer"), ("Inflate/Deflate", "Inflate"), ("Blob", "Blob"),
+        ("Crease Sharp", "Crease"), ("Crease Polish", "Polish"))),
+    ("Contrast", (
+        ("Smooth", "Smooth"), ("Flatten/Contrast", "Flatten"), ("Fill/Deepen", "Fill"), ("Scrape/Fill", "Scrape"),
+        ("Scrape Multiplane", "Multiplane"), ("Plateau", "Plateau"), ("Trim", "Trim"))),
+    ("Transform", (
+        ("Snake Hook", "Snake Hook"), ("Elastic Snake Hook", "Elastic Hook"), ("Pull", "Pull"), ("Grab", "Grab"),
+        ("Grab 2D", "Grab 2D"), ("Elastic Grab", "Elastic Grab"), ("Pose", "Pose"), ("Thumb", "Thumb"),
+        ("Nudge", "Nudge"), ("Pinch/Magnify", "Pinch"), ("Relax Slide", "Slide"),
+        ("Relax Pinch", "Relax"), ("Scene Project", "Project"))),
+    ("Utilities", (
+        ("Mask", "Mask"), ("Face Set Paint", "Face Sets"), ("Density", "Density"),
+        ("Erase Multires Displacement", "Erase Multires"), ("Smear Multires Displacement", "Smear Multires"))),
+    ("Paint", (
+        ("Paint Hard", "Hard"), ("Paint Soft", "Soft"), ("Paint Square", "Square"),
+        ("Paint Hard Pressure", "Hard Pressure"), ("Paint Soft Pressure", "Soft Pressure"),
+        ("Paint Blend", "Blend"), ("Airbrush", "Airbrush"), ("Blend Hard", "Blend Hard"),
+        ("Blend Soft", "Blend Soft"), ("Blend Square", "Blend Square"), ("Blur", "Blur"), ("Smear", "Smear"),
+        ("Sharpen", "Sharpen"))),
+    ("Simulation", (
+        ("Drag Cloth", "Drag"), ("Push Cloth", "Push"), ("Pinch Point Cloth", "Pinch Point"),
+        ("Pinch Folds Cloth", "Pinch Folds"), ("Inflate Cloth", "Inflate"), ("Expand/Contract Cloth", "Expand"))),
+)
+CATALOG_NAMES = tuple(n for _cat, brushes_ in CATALOG for n, _short in brushes_)
+SHORT = {n: short for _cat, brushes_ in CATALOG for n, short in brushes_}
+CATEGORY = {n: cat for cat, brushes_ in CATALOG for n, _short in brushes_}
+
+# Brushes that move the mesh with the mouse (sculpt_brush_type), driven by NativeStroke._drag_dab.
+DRAG_TYPES = frozenset({'GRAB', 'SNAKE_HOOK', 'ELASTIC_DEFORM', 'THUMB', 'NUDGE', 'POSE'})
+DRAG_CLOTH = frozenset({'DRAG', 'PINCH_POINT'})  # cloth_deform_type of the cloth brushes that drag
+
+
+def unusable(brush, obj):
+    """Why brush can't sculpt obj now ("" if it can). A Multires brush on a mesh without Multires crashes
+    Blender 5.4 Alpha (do_displacement_eraser_brush), so these never get a dab."""
+    if brush is None:
+        return "No brush"
+    kind = brush.sculpt_brush_type
+    if kind in {'DISPLACEMENT_ERASER', 'DISPLACEMENT_SMEAR'} and not any(
+            m.type == 'MULTIRES' and m.show_viewport for m in obj.modifiers):
+        return f"{SHORT.get(brush.name, brush.name)} needs a Multires modifier"
+    if kind == 'SIMPLIFY' and not obj.use_dynamic_topology_sculpting:
+        return "Density needs dyntopo (More > Dyntopo)"
+    if kind == 'BOUNDARY':  # Driven a dab per sample, it breaks the mesh (NaN positions).
+        return f"{brush.name} doesn't work in VR yet"
+    return ""
+
+
+def is_drag(brush):
+    """Whether brush moves the mesh with the hand (Grab, Snake Hook, Pose...) rather than dabbing on it."""
+    if brush is None:
+        return False
+    kind = brush.sculpt_brush_type
+    return kind in DRAG_TYPES or (kind == 'CLOTH' and brush.cloth_deform_type in DRAG_CLOTH)
 
 
 # --- brush thumbnails -----------------------------------------------------------------
@@ -143,10 +210,10 @@ class AimedView:
         r = self.rv3d
         self.saved = (r.view_location.copy(), r.view_rotation.copy(), r.view_distance, r.view_perspective)
 
-    def look(self, eye, at):
+    def look(self, eye, at, ortho=False):
         r = self.rv3d
         d = at - eye
-        r.view_perspective = 'PERSP'
+        r.view_perspective = 'ORTHO' if ortho else 'PERSP'
         r.view_rotation = d.to_track_quat('-Z', 'Y')
         r.view_distance = d.length
         r.view_location = at
@@ -202,10 +269,34 @@ def activate_brush(context, name):
     return name
 
 
+def pick_brush(context, name):
+    """A brush from the panel's list: active now, and (not a quick button one) kept beside the quick buttons and
+    in the B cycle."""
+    activate_brush(context, name)
+    if name not in NATIVE_BRUSHES:
+        context.scene.vr_sculpt.native_picked = name
+    return name
+
+
+DEFAULT_PICKED = "Snake Hook"  # the seventh quick button until a brush is picked from the list
+
+
+def picked_brush(context):
+    """The brush last picked from the list (a quick button of its own), Snake Hook until one is."""
+    picked = context.scene.vr_sculpt.native_picked
+    return picked if picked in CATALOG_NAMES else DEFAULT_PICKED
+
+
+def cycle_names(context):
+    """What B cycles through: the quick buttons' brushes, the picked one included."""
+    picked = picked_brush(context)
+    return list(NATIVE_BRUSHES) + ([picked] if picked not in NATIVE_BRUSHES else [])
+
+
 def cycle_brush(context):
     brush = sculpt_brush(context)
     current = brush.name if brush else ""
-    names = list(NATIVE_BRUSHES)
+    names = cycle_names(context)
     nxt = names[(names.index(current) + 1) % len(names)] if current in names else names[0]
     return activate_brush(context, nxt)
 
@@ -436,6 +527,10 @@ class NativeStroke:
         self.window = context.window
         if largest_view3d(self.window) is None:
             raise RuntimeError("Native sculpt needs a 3D viewport in the desktop window")
+        why = unusable(sculpt_brush(context), obj)
+        if why:
+            _say(why)  # On the panel's header, where you look in the headset.
+            raise RuntimeError(why)
         self.tried_brush_tool = False
         self.diagnosed = False
         # Snapshot of positions to find the vertex nearest the tip.
@@ -452,6 +547,19 @@ class NativeStroke:
         self.dabs = 0
         self.dropped = 0
         self.touched = 0
+        # Drag brushes: the grabbed point (local), the vertex it is when it can be read back, and the surface
+        # normal there at the start (world). The point follows the vertex, or moves by the drag times the
+        # strength where Python can't see the sculpted mesh (dyntopo, Multires, a shape key).
+        brush = sculpt_brush(context)
+        self.drag = is_drag(brush)
+        self.anchor = None
+        self.anchor_vert = None
+        self.anchor_nbrs = []
+        self.anchor_normal = None
+        self.obj = obj
+        self.tracked = self.drag and _positions_live(obj)
+        self.follow = (get_strength(context) or 1.0) if self.drag and not self.tracked else 1.0
+        self.uses_pressure = self.drag and bool(brush.use_pressure_strength)
         # The locked brush size is in object space too, so undo the object's scale.
         self.size = _SceneSize(context, self.state.local_radius(radius_world))
 
@@ -494,6 +602,8 @@ class NativeStroke:
         return False
 
     def update(self, tip_world, pose_world=None, pressure=1.0):
+        if self.drag:
+            return self._drag_update(tip_world, pressure)
         t0 = time.perf_counter()
         st = self.state
         tip = st.to_local(tip_world)
@@ -562,3 +672,172 @@ class NativeStroke:
         st.last_dab_ms = (time.perf_counter() - t0) * 1000.0
         st.last_write_ms = 0.0
         return len(idx)
+
+    # --- drag brushes -------------------------------------------------------------
+    # Blender drags by the mouse's motion between a stroke's elements, on screen, unprojected at the
+    # stroke's depth, and each sculpt.brush_stroke call is a stroke of its own. So for each step of the tip:
+    # - the dab starts where the grabbed point is now, not at the tip: with a strength under 1 the
+    #   grabbed part lags, and grabbing anew at the tip would leave it a little further behind each time;
+    # - the view is orthographic (screen motion maps linearly to the drag) and looks across the step, so
+    #   all of it is on screen: along the surface normal it would be lost (pulling straight out);
+    # - the lead mouse is over the grabbed vertex, so its ray hits the mesh wherever the view looks from;
+    # - a step close to the start normal is two dabs at 45 degrees, so the view never looks along the surface
+    #   edge-on (an open sheet's edge pulled up).
+
+    def _drag_update(self, tip_world, pressure):
+        st = self.state
+        tip = st.to_local(tip_world)
+        r = st.local_radius(self.radius_world)
+        if self.anchor is None:
+            return self._grab(tip, r)
+        delta = tip - self.last_local
+        if np.linalg.norm(delta) < r * self.spacing:
+            return 0
+        self.last_local = tip
+        t0 = time.perf_counter()
+        done = 0
+        for part in self._drag_parts(delta):
+            done += self._drag_dab(part, pressure)
+        st.last_dab_ms = (time.perf_counter() - t0) * 1000.0
+        st.last_write_ms = 0.0
+        return done
+
+    def _grab(self, tip, r):
+        """First touch: take hold of the vertex nearest the tip (within the radius). Returns 0: no dab yet."""
+        st = self.state
+        idx, _w = st.select(tip, r)
+        if len(idx):
+            d = st.co[idx] - tip
+            k = int(idx[np.argmin(np.einsum("ij,ij->i", d, d))])
+        elif self.dyntopo and len(st.co):
+            # The surface may have grown away from the stale snapshot (an earlier stroke's strand): hold the
+            # tip itself, with the nearest snapshot normal.
+            k = int(np.argmin(np.einsum("ij,ij->i", st.co - tip, st.co - tip)))
+        else:
+            return 0
+        self.anchor = st.co[k].copy() if len(idx) else tip.copy()
+        self.anchor_vert = k if self.tracked and len(idx) else None
+        if self.anchor_vert is not None:
+            # Its edge neighbors: one read of the edge list and a compare, not a whole adjacency.
+            edges = self.obj.data.edges
+            ev = np.empty(len(edges) * 2, dtype=np.int32)
+            edges.foreach_get("vertices", ev)
+            ev = ev.reshape(-1, 2)
+            hit = (ev == k).any(axis=1)
+            self.anchor_nbrs = [int(i) for i in ev[hit].ravel() if i != k]
+        n = st.world_inv[:3, :3].T @ st.normals[k]
+        length = np.linalg.norm(n)
+        self.anchor_normal = n / length if length > 1e-12 else np.array((0.0, 0.0, 1.0))
+        self.last_local = tip
+        return 0
+
+    def _drag_parts(self, delta):
+        """The step as local vectors: itself, or two halves at 45 degrees to the start normal when it runs
+        close along it (a view across it would look at the surface edge-on)."""
+        m3 = self.state.world[:3, :3]
+        d = m3 @ delta
+        n = self.anchor_normal
+        length = np.linalg.norm(d)
+        if length < 1e-12:
+            return []
+        along = float(np.dot(d, n))
+        if 1.0 - (along / length) ** 2 >= 0.25:  # at least 30 degrees off the normal
+            return [delta]
+        dn = n * along
+        dt = d - dn
+        side = np.cross(n, dt) if np.linalg.norm(dt) > 1e-9 * length else _orthogonal(n)
+        side /= np.linalg.norm(side)
+        half = abs(along) * 0.5
+        inv3 = self.state.world_inv[:3, :3]
+        return [inv3 @ (dn * 0.5 + side * half), inv3 @ (dn * 0.5 + dt - side * half)]
+
+    def _drag_dab(self, part, pressure):
+        """One dab dragging the grabbed point by part (local). Returns 1 if it was sent, else 0."""
+        st = self.state
+        context = bpy.context
+        window = context.window or self.window
+        view = largest_view3d(window)
+        if view is None:
+            self.dropped += 1
+            return 0
+        area, region = view
+        m3, t = st.world[:3, :3], st.world[:3, 3]
+        a_w = Vector(m3 @ self.anchor + t)
+        step = Vector(m3 @ part)
+        n = Vector(self.anchor_normal)
+        m = step.normalized()
+        across = n - m * n.dot(m)
+        if across.length < 1e-3:
+            across = m.orthogonal()
+        across.normalize()
+        # The ray has to hit the mesh: through a point a little way from the grabbed vertex toward its neighbors,
+        # inside the faces around it (through the vertex itself it can slip past an open border). A held point
+        # that isn't a vertex (dyntopo) may float above the surface, so its ray goes through a point under it.
+        # Either stays within a fraction of the brush, and the view is wide enough for it: on a low-poly mesh
+        # (edges longer than the brush) a quarter of the way to the neighbors fell outside the view and the dab
+        # was dropped.
+        if self.anchor_vert is not None:
+            toward = Vector(m3 @ self._neighbor_mean() + t) - a_w
+            through = a_w + toward * min(0.25, 0.2 * self.radius_world / max(toward.length, 1e-12))
+        else:
+            through = a_w - n * self.radius_world * 0.5
+        eye = max(EYE_RADII * self.radius_world, 3.0 * step.length, 4.0 * (through - a_w).length,
+                  EYE_CLIPS * area.spaces.active.clip_start)
+        v = AimedView(area, region)
+        try:
+            v.look(a_w + across * eye, a_w, ortho=True)
+            lead, start, end = v.mouse(through), v.mouse(a_w), v.mouse(a_w + step)
+            if lead is None or start is None or end is None:
+                self.dropped += 1
+                return 0
+            mouse = (lead[0] + end[0] - start[0], lead[1] + end[1] - start[1])
+            base = {"name": "", "size": 50.0, "x_tilt": 0.0, "y_tilt": 0.0, "time": 0.0}
+            elems = [dict(base, location=tuple(self.anchor), mouse=lead, mouse_event=lead, pressure=0.0,
+                          is_start=True),
+                     dict(base, location=tuple(self.anchor + part), mouse=mouse, mouse_event=mouse,
+                          pressure=float(pressure), is_start=False)]
+            with context.temp_override(window=window, area=area, region=region):
+                if not self._can_stroke():
+                    self.dropped += 1
+                    return 0
+                bpy.ops.sculpt.brush_stroke('EXEC_DEFAULT', True, stroke=elems, mode='NORMAL')
+        finally:
+            v.restore()
+        if self.anchor_vert is not None:
+            try:
+                self.anchor = np.array(self.obj.data.vertices[self.anchor_vert].co, dtype=np.float64)
+            except (ReferenceError, IndexError):
+                self.anchor_vert = None
+                self.anchor = self.anchor + part
+        else:
+            follow = self.follow * (pressure if self.uses_pressure else 1.0)
+            self.anchor = self.anchor + part * follow
+        self.dabs += 1
+        self.touched = 1
+        return 1
+
+    def _neighbor_mean(self):
+        """Where the grabbed vertex's edge neighbors are now, on average (local); the vertex if it has none."""
+        verts = self.obj.data.vertices
+        pts = [verts[i].co for i in self.anchor_nbrs]
+        if not pts:
+            return self.anchor
+        return np.mean(np.array(pts, dtype=np.float64), axis=0)
+
+
+def _orthogonal(n):
+    """A unit vector perpendicular to n (numpy)."""
+    axis = np.array((1.0, 0.0, 0.0)) if abs(n[0]) < 0.9 else np.array((0.0, 1.0, 0.0))
+    o = np.cross(n, axis)
+    return o / np.linalg.norm(o)
+
+
+def _positions_live(obj):
+    """Whether Sculpt Mode writes its dabs straight to the mesh's positions, where a vertex can be read back:
+    not with dyntopo (a BMesh written at the end), Multires (its grids) or a shape key other than the basis."""
+    if obj.use_dynamic_topology_sculpting:
+        return False
+    if any(m.type == 'MULTIRES' and m.show_viewport for m in obj.modifiers):
+        return False
+    keys = obj.data.shape_keys
+    return keys is None or obj.active_shape_key_index == 0

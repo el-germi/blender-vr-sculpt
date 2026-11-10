@@ -137,7 +137,9 @@ def _trigger(s, info):
     mode = s.mode
     if mode == 'SCULPT':
         if s.engine == 'NATIVE':
-            return ("sculpt", NATIVE_LABELS.get(info.native_brush, info.native_brush or "Sculpt"))
+            from . import native
+            return ("sculpt", NATIVE_LABELS.get(info.native_brush, native.SHORT.get(info.native_brush,
+                                                                                    info.native_brush or "Sculpt")))
         return ("sculpt", s.brush.title())
     if mode == 'RETOPO':
         from .retopo import TRIGGER_HINTS

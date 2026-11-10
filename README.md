@@ -65,9 +65,21 @@ offset and display options; **VR Extras** has the grid, navigation, hands
     Draw, Smooth, Grab (follows controller rotation), Inflate. X / Y / Z
     symmetry, works on moved, rotated and scaled objects.
   - **Native (experimental)** (Sculpt Mode): drives Blender's real sculpt
-    brushes from the controller tip: Draw, Clay Strips, Smooth,
-    Inflate/Deflate, Crease Sharp, Flatten/Contrast. With **Dyntopo**
-    (Blender's dynamic topology) on, strokes add and remove detail as they go.
+    brushes from the controller tip. Draw, Clay Strips, Smooth,
+    Inflate/Deflate, Crease Sharp, Flatten/Contrast and Snake Hook are quick
+    buttons; **More** opens the rest of Blender's essentials (54 in all), by
+    its own catalogs (Add & Subtract, Contrast, Transform, Utilities, Paint,
+    Simulation). The one you pick takes Snake Hook's quick button and joins
+    the B cycle. The **grabbing brushes** follow your hand in 3D: Snake Hook pulls
+    strands straight out of the surface and curls them (hair, horns, tendrils),
+    Grab / Pull / Elastic Grab move the surface (at the brush strength, like on
+    the desktop), Pose bends a limb from its root, Thumb / Nudge / Drag Cloth
+    push it along. With **Dyntopo** (Blender's dynamic topology) on, strokes add
+    and remove detail as they go (Snake Hook + Dyntopo grows strands with
+    enough faces). Density needs Dyntopo and the Multires brushes need a
+    Multires modifier; without them the stroke is refused (Blender crashes
+    otherwise). Not offered: Twist, Boundary, Grab Silhouette and the cloth
+    brushes that grab, which need a whole desktop stroke at once.
   - **See it lit while you sculpt**: Solid / Material / Render sit on the
     Sculpt page, and **Light** puts a shadowless light on your other hand that
     lights only the selected mesh: move it and the highlights show every dent
@@ -663,6 +675,14 @@ With Triggers" is on. The setting applies when the VR session starts.
   the desktop view, so turning dyntopo on from VR switches it to Brush. It
   refuses a mesh with Multires. The Python engine has no dyntopo: a bmesh
   round trip alone takes ~20 ms on a 50k-vertex mesh, before any splitting.
+  The brush list is `native.CATALOG`; `native.unusable()` refuses a brush whose
+  requirement is missing before any dab. **Drag brushes** (`native.is_drag`:
+  Grab, Snake Hook, Elastic, Thumb, Nudge, Pose and the dragging cloth ones)
+  take hold of the vertex nearest the tip at the press, then each step of the
+  tip is a dab of its own from where that vertex is now (read back from the
+  mesh; with dyntopo, Multires or a shape key, moved by the step times the
+  strength), with the desktop view orthographic and looking across the step
+  (`NativeStroke._drag_dab`). They skip Smooth (it's a grab).
 - **Shading through dyntopo** ([shading.py](vr_sculpt/shading.py)). Dyntopo's
   sculpt mesh has no modifiers, so VR Shading doesn't show on it: it draws the
   mesh's own face shading, and new faces take it from the faces they split.
@@ -1278,6 +1298,44 @@ Found with the probes in [tests/](tests/):
   in the target viewport**.
 - **Directional brushes** (Clay Strips, ...) do nothing with one-element
   strokes. Each call gets a zero-pressure element at the previous tip first.
+- **Drag brushes** (Grab, Snake Hook, Pose, ...) move the mesh by the mouse's
+  motion between the elements on screen, unprojected at the stroke's depth
+  ([tests/native_drag_probe.py](tests/native_drag_probe.py)). With the view
+  along the surface normal, pulling straight out moves nothing, and a mouse
+  that only grazes the mesh (a view from the side) drops the dab. Each call is
+  a stroke of its own, so it grabs anew where it starts: Grab and Pull have a
+  strength of 0.4, and grabbing at the tip each time left the grabbed part
+  further behind every call until it stopped (4 cm of a 40 cm pull). What
+  works ([tests/native_drag_probe2.py](tests/native_drag_probe2.py),
+  [tests/native_brushes.py](tests/native_brushes.py)): start each call where
+  the grabbed vertex is now, use an orthographic view across the motion (the
+  screen motion is then exactly the drag), and put the lead mouse just inside
+  the faces around the vertex (through the vertex itself it can slip past an
+  open border; and no further than a fifth of the brush, with the view wide
+  enough for it: on a low-poly game mesh, edges longer than the brush put a
+  quarter of the way outside the view and half the dabs were dropped). A
+  step close to the start normal goes as two dabs at 45
+  degrees, so the view never looks at the surface edge-on. Snake Hook then
+  follows the hand exactly, Grab / Pull at their strength, Elastic Grab at
+  0.6 of it (its falloff), Drag Cloth at 1 / strength. With symmetry on and
+  the brush across the mirror plane, Blender's Symmetry Feather (on by
+  default) weakens the dab there: a strand pulled from the middle of a head
+  follows about two thirds of the hand, as on the desktop.
+- **A brush smaller than the mesh's edges** moves only the vertex it holds
+  (Snake Hook then stretches single triangles). Low-poly meshes need a radius
+  of two or three edge lengths, Elastic Grab / Elastic Snake Hook (they move a
+  soft region beyond the radius), or more vertices (Dyntopo, Remesh).
+- **Brushes that don't work this way**: Twist (a turn of the mouse around the
+  stroke's start), Grab Silhouette, and the cloth brushes that grab or bend
+  (their cloth is simulated over one stroke) do nothing; Boundary's first dab
+  writes NaN positions. The scrape brushes (Scrape/Fill, Multiplane, Trim) do
+  nothing with the tip 1 cm off the surface, unlike Flatten; they work with it
+  touching.
+- **Multires brushes crash Blender** (`do_displacement_eraser_brush`) on a mesh
+  without a Multires modifier: the stroke refuses them first.
+- `brush.asset_activate` switches the tool too (Paint, Mask, Face Sets have
+  their own); `wm.tool_set_by_id("builtin.brush")` afterwards switches the
+  brush back to the Draw tool's.
 - **XR action operators get a temporary context**: don't keep `context`
   across modal events. Use `bpy.context` each time.
 - Python `Event` objects have no `timer` attribute.
@@ -1502,7 +1560,13 @@ settings, so your preferences aren't touched) and checks all 42 entries.
 
 Windowed (opens Blender briefly, writes `tests/*_result.txt`):
 `native_engine.py`, `native_modal.py`, `native_transform.py`,
-`native_dyntopo.py` (grows a bump past the stale mesh snapshot). The
+`native_dyntopo.py` (grows a bump past the stale mesh snapshot),
+`native_brushes.py` (every brush of the panel's list changes the mesh, its
+mask, face sets or colors; the drag brushes follow the tip out of a ball,
+across it, along a limb and up an open sheet; the list, a pick and the B
+cycle on the panel; it ends with a `RESULT:` line). `brushes_preview.py`
+renders the native brush buttons and the brush list (`brushes_preview.png`).
+The
 `overlay_preview.py`, `panel_preview.py`, `hud_preview.py` and
 `tools_preview.py` scripts render the overlay to PNG, and `dyntopo_preview.py`
 the Sculpt page's dyntopo rows (`dyntopo_panels.png`); `probe_capture.py`

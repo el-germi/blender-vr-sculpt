@@ -29,6 +29,54 @@ NATIVE_INFO = {
     "Inflate/Deflate": "Swells the surface outward. Other hand: shrinks",
     "Crease Sharp": "Cuts a sharp groove. Other hand: pinches a ridge",
     "Flatten/Contrast": "Flattens toward an average plane. Other hand: adds contrast",
+    "Draw Sharp": "Draws thin crisp lines. Other hand: cuts them in",
+    "Clay": "Adds clay that fills dips first. Other hand: digs",
+    "Clay Thumb": "Smears clay along the stroke, like a thumb",
+    "Layer": "Raises the surface to one even height per stroke",
+    "Blob": "Pushes out rounded bulges",
+    "Crease Polish": "A softer groove that polishes as it goes",
+    "Fill/Deepen": "Fills dips up to the surface. Other hand: deepens them",
+    "Scrape/Fill": "Scrapes bumps down. Other hand: fills dips",
+    "Scrape Multiplane": "Scrapes two planes meeting in a ridge, for hard edges",
+    "Plateau": "Flattens bumps into a raised plateau",
+    "Trim": "Shaves the surface flat",
+    "Snake Hook": "Grab the surface and pull it out like taffy: strands, horns, hair",
+    "Elastic Snake Hook": "Pulls strands out with soft, elastic surroundings",
+    "Pull": "A gentler snake hook: the surface follows at the brush strength",
+    "Grab": "Grab the surface and move it with your hand",
+    "Grab 2D": "Grabs the surface and slides it along its own plane",
+    "Elastic Grab": "Grab and move, with the surroundings following elastically",
+    "Pose": "Grab the end of a limb and bend the whole limb from its root",
+    "Thumb": "Drags the surface along under the tip, like a thumb",
+    "Nudge": "Pushes the surface along the stroke",
+    "Pinch/Magnify": "Pulls the surface together into a crease. Other hand: spreads",
+    "Relax Slide": "Evens out the faces without changing the shape",
+    "Relax Pinch": "Tightens the faces toward edges without changing the shape",
+    "Scene Project": "Pushes the surface onto the other objects in the scene",
+    "Mask": "Paints a mask that protects the surface. Other hand: unmasks",
+    "Face Set Paint": "Paints face sets, to hide or work on parts",
+    "Density": "Simplifies the surface where you brush (needs dyntopo)",
+    "Erase Multires Displacement": "Erases the Multires detail where you brush",
+    "Smear Multires Displacement": "Smears the Multires detail along the stroke",
+    "Paint Hard": "Paints the color attribute with a hard edge",
+    "Paint Soft": "Paints the color attribute with a soft edge",
+    "Paint Square": "Paints the color attribute with a square tip",
+    "Paint Hard Pressure": "Paints harder the more you squeeze the trigger",
+    "Paint Soft Pressure": "Paints softer, more with a harder squeeze",
+    "Paint Blend": "Paints, blending into the colors already there",
+    "Airbrush": "Builds up color while you hold the trigger",
+    "Blend Hard": "Blends the colors under the tip, hard edge",
+    "Blend Soft": "Blends the colors under the tip, soft edge",
+    "Blend Square": "Blends the colors under the tip, square tip",
+    "Blur": "Blurs the color attribute",
+    "Smear": "Smears colors along the stroke",
+    "Sharpen": "Sharpens the color attribute",
+    "Drag Cloth": "Drags the surface like cloth, folding as it goes",
+    "Push Cloth": "Pushes the surface away like cloth",
+    "Pinch Point Cloth": "Pinches cloth toward the tip",
+    "Pinch Folds Cloth": "Pinches cloth into folds",
+    "Inflate Cloth": "Inflates the surface like cloth",
+    "Expand/Contract Cloth": "Stretches the cloth out. Other hand: gathers it in",
 }
 
 # Ring and card accent colors per native brush, so they're distinguishable at a glance.
@@ -39,7 +87,29 @@ NATIVE_COLORS = {
     "Inflate/Deflate": (0.7, 0.45, 1.0),
     "Crease Sharp": (1.0, 0.3, 0.45),
     "Flatten/Contrast": (0.45, 0.9, 0.45),
+    "Snake Hook": (1.0, 0.85, 0.3),
+    "Grab": (0.95, 0.9, 0.3),
+    "Pose": (1.0, 0.6, 0.85),
+    "Mask": (0.6, 0.6, 0.65),
 }
+# The other brushes take their catalog's color.
+CATEGORY_COLORS = {
+    "Add & Subtract": (1.0, 0.65, 0.35),
+    "Contrast": (0.45, 0.85, 0.6),
+    "Transform": (0.95, 0.85, 0.4),
+    "Utilities": (0.7, 0.7, 0.75),
+    "Paint": (1.0, 0.5, 0.75),
+    "Simulation": (0.5, 0.7, 1.0),
+}
+
+
+def native_color(name):
+    """The ring and card color of native brush name."""
+    color = NATIVE_COLORS.get(name)
+    if color is None:
+        from . import native
+        color = CATEGORY_COLORS.get(native.CATEGORY.get(name), (0.9, 0.9, 0.9))
+    return color
 
 MODEL_COLOR = (0.55, 0.9, 0.85)
 CUT_COLORS = {'DIFFERENCE': (1.0, 0.4, 0.35), 'UNION': (0.45, 0.9, 0.45), 'INTERSECT': (0.95, 0.75, 0.3)}
@@ -218,7 +288,7 @@ def card_content(settings, sculpt_brush):
         content = retopo.card_content(settings)
     elif settings.engine == 'NATIVE':
         name = sculpt_brush.name if sculpt_brush else "No brush"
-        content = (name, NATIVE_INFO.get(name, ""), NATIVE_COLORS.get(name, (0.9, 0.9, 0.9)), "sculpt")
+        content = (name, NATIVE_INFO.get(name, ""), native_color(name), "sculpt")
     else:
         title, desc = PYTHON_INFO.get(settings.brush, (settings.brush.title(), ""))
         content = (title, desc, PYTHON_COLORS.get(settings.brush, (1.0, 1.0, 1.0)), "sculpt")
