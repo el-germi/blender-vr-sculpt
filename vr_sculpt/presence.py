@@ -8,7 +8,9 @@ leaves a small ghost with the mode icon; pointing at the ghost brings the panel 
 is the left one, or the right one with Left Handed on (actions.main_index).
 
 Reveal modes (Settings > Reveal): WRIST (the watch check), LOOK (just look at the off hand) and
-ALWAYS (always shown, like before).
+ALWAYS (always shown, like before). In ALWAYS the off-hand stick click doesn't pin (the panel is
+up anyway) but puts it away, and brings it back: hidden like that, it acts as in the other modes when
+they're not revealing (the ghost, pointing at it shows it for a moment).
 
 While the off-hand trigger holds something (a grab, an inverted stroke, a selection...), the panel
 dims to HELD_ALPHA so you can see what that hand is doing behind it; it stays shown and pressable.
@@ -30,7 +32,9 @@ FADE_IN = 0.07  # time constants, seconds
 FADE_OUT = 0.14
 HELD_ALPHA = 0.2  # the panel's opacity while the off hand holds something
 
-_state = {"shown": False, "wrist": False, "gaze": False, "alpha": 0.0, "dim": 1.0, "until": 0.0, "time": None}
+# put_away: ALWAYS mode's panel hidden by the off-hand stick click.
+_state = {"shown": False, "wrist": False, "gaze": False, "alpha": 0.0, "dim": 1.0, "until": 0.0, "time": None,
+          "put_away": False}
 
 
 def wrist_turned(rot, hand, head, was=False, side=-1.0):
@@ -60,7 +64,7 @@ def looking_at(head, head_rot, target, was=False):
 def rule(settings, wrist, gaze):
     """Whether the panel wants to show from the pose alone (no pointing, pin aside)."""
     if settings.panel_reveal == 'ALWAYS':
-        return True
+        return not _state["put_away"]
     if settings.panel_reveal == 'LOOK':
         return gaze
     return wrist and gaze
@@ -89,7 +93,7 @@ def update(context, ss, using=False, now=None):
     if wants:
         s["until"] = now + (0.0 if pinned else LINGER)
     shown = settings.show_panel and (wants or now < s["until"])
-    if shown and not s["shown"] and not pinned and settings.panel_reveal != 'ALWAYS':
+    if shown and not s["shown"] and not pinned and not rule(settings, False, False):
         tick(context, ss, off, 0.12, 0.02)  # A tap on the off hand: the panel is there.
     s["shown"] = shown
     last = s["time"]
@@ -122,13 +126,35 @@ def dim():
 
 
 def reset():
-    _state.update(shown=False, wrist=False, gaze=False, alpha=0.0, dim=1.0, until=0.0, time=None)
+    _state.update(shown=False, wrist=False, gaze=False, alpha=0.0, dim=1.0, until=0.0, time=None,
+                  put_away=False)
+
+
+def put_away():
+    """Whether ALWAYS mode's panel is put away (stick_click)."""
+    return _state["put_away"]
 
 
 def toggle_pin(context):
     settings = context.scene.vr_sculpt
     settings.panel_pin = not settings.panel_pin
     if settings.panel_pin:
+        settings.show_panel = True
+
+
+def stick_click(context):
+    """The off-hand stick click: pin or unpin the panel; in ALWAYS mode (where it shows anyway), put
+    it away or bring it back."""
+    settings = context.scene.vr_sculpt
+    if settings.panel_reveal != 'ALWAYS':
+        toggle_pin(context)
+        return
+    away = not _state["put_away"] and settings.show_panel
+    _state["put_away"] = away
+    _state["until"] = 0.0  # Gone now, not after the linger.
+    if away:
+        settings.panel_pin = False
+    else:
         settings.show_panel = True
 
 

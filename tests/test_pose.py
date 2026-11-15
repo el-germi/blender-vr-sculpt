@@ -458,6 +458,61 @@ def test_puppet(rig, prop):
     puppet.end_session(ctx)
 
 
+def test_switch_rig(rig, body):
+    print("== off hand on another character poses its rig")
+    ctx = bpy.context
+    settings = ctx.scene.vr_sculpt
+    settings.pose_tool = 'FK'
+    pose.choose_rig(ctx, "")
+    ctx.view_layer.objects.active = body
+    pose.choose_rig(ctx, rig.name)
+    rig2 = rig.copy()
+    rig2.data = rig.data.copy()
+    rig2.location = (3.0, 0.0, 0.0)
+    ctx.scene.collection.objects.link(rig2)
+    body2 = body.copy()
+    body2.data = body.data.copy()
+    body2.location = (3.0, 0.0, 1.2)
+    body2.modifiers["Armature"].object = rig2
+    ctx.scene.collection.objects.link(body2)
+    ctx.view_layer.update()
+    try:
+        check(pose.pick(ctx, settings, at((3.0, 0.0, 1.2)), 1.0, off=False) is None and pose.rig(ctx) == rig,
+              "the main hand on another character does nothing")
+        h = pose.pick(ctx, settings, at((3.0, 0.0, 1.2)), 1.0, off=True)
+        check(isinstance(h, pose.SelectRig) and h.changed and pose.rig(ctx) == rig2 and rig.mode == 'OBJECT',
+              "the off hand on its mesh poses its rig")
+        check(pose._state["previous"] == body.name, "leaving Pose mode still goes back to the first object")
+        h = pose.pick(ctx, settings, at((3.01, 0.0, 1.25)), 1.0, off=True)
+        check(isinstance(h, pose.Grab), "the off hand on a bone of the posed rig grabs it")
+        h.finish(ctx)
+        check(pose.pick(ctx, settings, at((3.07, 0.07, 1.15)), 1.0, off=True) is None and pose.rig(ctx) == rig2,
+              "on the posed rig's own mesh, off a bone: nothing")
+        # The other rig's spine 8 cm from the posed one's: too close to tell a near miss from a switch.
+        rig.location = (3.0, 0.08, 0.0)
+        ctx.view_layer.update()
+        check(pose.pick(ctx, settings, at((3.0, 0.08, 1.38)), 1.0, off=True) is None and pose.rig(ctx) == rig2,
+              "another rig's bone within the gap of the posed rig: no switch")
+        rig.location = (3.0, 0.3, 0.0)
+        ctx.view_layer.update()
+        h = pose.pick(ctx, settings, at((3.0, 0.3, 1.38)), 1.0, off=True)
+        check(isinstance(h, pose.SelectRig) and pose.rig(ctx) == rig, "farther away, its bone picks it")
+        rig.location = (0.0, 0.0, 0.0)
+        pose.choose_rig(ctx, "")
+        check(pose.rig(ctx) is None, "no rig posed")
+        h = pose.pick(ctx, settings, at((3.0, 0.0, 1.2)), 1.0, off=True)
+        check(isinstance(h, pose.SelectRig) and pose.rig(ctx) == rig2, "with none posed, the off hand picks one")
+        pose.choose_rig(ctx, "")
+        h = pose.pick(ctx, settings, at((3.0, 0.0, 1.2)), 1.0, off=False)
+        check(isinstance(h, pose.Grab) and h.follow.bone_name is None and pose.rig(ctx) is None,
+              "the main hand still moves the object")
+        h.finish(ctx)
+    finally:
+        rig.location = (0.0, 0.0, 0.0)
+        bpy.data.objects.remove(body2)
+        bpy.data.objects.remove(rig2)
+
+
 def main():
     vr_sculpt.register()
     try:
@@ -475,6 +530,7 @@ def main():
         prop = test_objects(rig, body)
         test_drag_gate(rig, prop)
         test_puppet(rig, prop)
+        test_switch_rig(rig, body)
     except Exception:
         traceback.print_exc()
         failures.append("raised")

@@ -389,6 +389,24 @@ def test_presence():
     s.show_panel = True
     op.execute(ctx)
     check(not s.panel_pin, "left stick click again unpins it")
+    s.panel_reveal = 'ALWAYS'
+    presence.update(ctx, ss, now=10.0)
+    check(presence._state["shown"], "Always: shown")
+    s.panel_pin = True
+    op.execute(ctx)
+    presence.update(ctx, ss, now=10.05)
+    check(not presence._state["shown"] and presence.put_away() and not s.panel_pin,
+          "Always: left stick click puts it away at once (and drops a pin)")
+    presence.update(ctx, ss, now=12.0)
+    check(not presence._state["shown"], "it stays away")
+    presence.update(ctx, ss, using=True, now=12.1)
+    check(presence._state["shown"], "pointing at the ghost still brings it up")
+    presence.update(ctx, ss, now=13.0)
+    check(not presence._state["shown"], "and it goes again after")
+    op.execute(ctx)
+    presence.update(ctx, ss, now=13.1)
+    check(presence._state["shown"] and not presence.put_away(), "left stick click again: back for good")
+    s.panel_reveal = 'WRIST'
 
     # A hidden panel doesn't take presses: the trigger goes to the scene.
     operators.session_running = lambda context: True
@@ -609,6 +627,12 @@ def test_controller_hints():
     s.panel_pin = True
     check(label('left', 'stick_click') == "Unpin panel", "pinned: Unpin panel")
     s.panel_pin = False
+    s.panel_reveal = 'ALWAYS'
+    check(label('left', 'stick_click') == "Hide panel", "Reveal Always: Hide panel")
+    presence._state["put_away"] = True
+    check(label('left', 'stick_click') == "Show panel", "put away: Show panel")
+    presence._state["put_away"] = False
+    s.panel_reveal = 'WRIST'
     s.nav_mode = 'FLY'
     check(label('left', 'stick') == "Fly" and label('right', 'stick') == "Up, down, turn", "Fly sticks")
     s.nav_mode = 'WALK'

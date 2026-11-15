@@ -38,6 +38,7 @@ def _tick():
             lookdev.sync_lines(context, None)
             return FAST if physics.tick(context, None) else IDLE  # Springs while the timeline plays.
         lookdev.guard_view(context)  # First: a failure further down mustn't leave Cycles drawing the VR view.
+        camera.hold_base_pose(context)  # Nothing in the scene drags the viewer around.
         ss = context.window_manager.xr_session_state
         hand_light = lookdev.sync_hand_light(context, ss)
         hand_light = lookdev.sync_lines(context, ss) or hand_light

@@ -182,7 +182,7 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
     if settings.mode == 'PAINT':
         return paint.pick(context, settings, off, pose, tip_pose, scale, value)
     if settings.mode == 'POSE':
-        return pose_mode.pick(context, settings, tip_pose, scale)
+        return pose_mode.pick(context, settings, tip_pose, scale, off)
     if settings.mode == 'RIG':
         return rig.pick(context, settings, off, tip_pose, scale)
     if settings.mode == 'PHYSICS':
@@ -507,7 +507,7 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
 
 class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
     """Main-hand stick click: next brush radius (Pose: IK chain length; Rig: weight brush radius; Retopo: size;
-    Physics: hands on or off). Off-hand stick click: pin or unpin the hand panel"""
+    Physics: hands on or off). Off-hand stick click: pin or unpin the hand panel (Reveal Always: hide or show it)"""
     bl_idname = "vrsculpt.cycle_radius"
     bl_label = "VR Next Radius / Pin Panel"
     bl_options = {'INTERNAL'}
@@ -517,7 +517,7 @@ class VRSCULPT_OT_cycle_radius(bpy.types.Operator):
     def execute(self, context):
         settings = context.scene.vr_sculpt
         if self.off_hand:
-            presence.toggle_pin(context)
+            presence.stick_click(context)
             return {'FINISHED'}
         if settings.mode == 'POSE':
             settings.pose_chain = settings.pose_chain % 4 + 1

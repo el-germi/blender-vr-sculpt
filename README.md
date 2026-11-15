@@ -438,10 +438,13 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   - **Scene camera**: hold the trigger and the camera follows your controller
     (it looks where you point), with a live **camera preview** above your
     hand. Switch or add cameras and set the lens from the panel. The preview
-    can also be pinned next to the hand panel in every mode. If the VR
-    landmark is the scene camera (the stock add-on's default), you stay
-    where you are: the first aim or switch pins the base pose there, and
-    it's put back when the session ends.
+    can also be pinned next to the hand panel in every mode. Adding, aiming
+    or switching cameras never moves you: Blender places the VR viewer by
+    its landmark (the stock add-on's default is the scene camera, or the
+    world origin while there is none) and re-reads it every frame, so while
+    a session runs the base pose is pinned where it starts (a landmark you
+    pick on the desktop still takes you there once) and put back when the
+    session ends. You move by flying, walking and the grips.
   - **Light**: press in empty space and a light of the **New** type (Point,
     Sun, Spot, Area; B steps through them) appears at the tip, aimed where
     the controller points; keep holding to place and aim it. Press on a
@@ -538,7 +541,9 @@ offset and display options; **VR Extras** has the grid, navigation, hands
 - **Pose mode**: pose any armature with the controllers, no constraints
   added to the rig. Choosing Pose puts the active mesh's rig (or the active
   armature) in Pose Mode; the bones are drawn on top of everything, and the
-  one in reach of a tip lights up.
+  one in reach of a tip lights up. To pose another character, touch it (its
+  mesh or a bone) with the left trigger at least 10 cm from the posed rig's
+  bones, or with no rig posed: its rig goes into Pose Mode instead.
   - **FK**: grab a bone and it turns about its head so the grabbed point
     follows your hand; twist the controller to roll it. A free bone (the
     root, or one not connected to its parent) grabbed near its head moves
@@ -612,7 +617,9 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   tracking) and pickers open as a second level with a Back button. It shows
   when you turn your left wrist toward your face, like checking a watch, and
   fades when you turn it back; **Pin** (the pin icon, or a left stick click)
-  keeps it shown. Point at it with the right controller and pull the trigger.
+  keeps it shown. With Reveal set to Always, the left stick click hides it
+  instead (pointing at its ghost still shows it for a moment), and brings it
+  back. Point at it with the right controller and pull the trigger.
   While the left trigger holds something (a grab, an inverted stroke), the
   panel drops to 20% opacity so you can see what that hand is doing.
   The full map of where everything is: [docs/ui_panel.md](docs/ui_panel.md).
@@ -630,7 +637,7 @@ offset and display options; **VR Extras** has the grid, navigation, hands
 | B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Bones: end the chain. Weights: undo the last weight stroke | Switch FK / IK | Simulate / stop | Remove the last measurement / next camera / next light type / turn the picture to face you |
 | Left stick | Walk / fly (move) | Same | Same | Same | Same | Same | Same | Same |
 | Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same | Same | Same | Same |
-| Left stick click | Pin / unpin the hand panel | Same | Same | Same | Same | Same | Same | Same |
+| Left stick click | Pin / unpin the hand panel (Reveal Always: hide / show it) | Same | Same | Same | Same | Same | Same | Same |
 | Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Weights: next brush radius | Next IK chain length (1-4) | Hands on / off | Same |
 | Right trigger on a motion path key | Drag the key | Same | Same | Same | Same | Same | Same | Same |
 | Either trigger on a gizmo handle | | Move along / turn around / size along that axis; the outer ring sizes evenly | | | | | | Light, Refs: same as Model |
