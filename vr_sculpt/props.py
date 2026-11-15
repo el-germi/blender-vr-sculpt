@@ -172,6 +172,10 @@ class VRSculptSettings(bpy.types.PropertyGroup):
         default=2, min=1, max=8)
     pose_mirror: BoolProperty(
         name="Mirror Pose", description="Posing a .L/.R bone poses its counterpart the same way, mirrored across X")
+    pose_curl: BoolProperty(
+        name="Curl", default=True,
+        description="Pulling or pushing a grabbed bone along itself also scales it a little: Rigify's finger, "
+                    "toe, ear and tail masters close (push) or open (pull) their chain")
     pose_show_bones: BoolProperty(
         name="Show Bones", description="Draw the posed rig's bones on top of everything in VR", default=True)
     # Tools mode.

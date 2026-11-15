@@ -438,10 +438,13 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   - **Scene camera**: hold the trigger and the camera follows your controller
     (it looks where you point), with a live **camera preview** above your
     hand. Switch or add cameras and set the lens from the panel. The preview
-    can also be pinned next to the hand panel in every mode. If the VR
-    landmark is the scene camera (the stock add-on's default), you stay
-    where you are: the first aim or switch pins the base pose there, and
-    it's put back when the session ends.
+    can also be pinned next to the hand panel in every mode. Adding, aiming
+    or switching cameras never moves you: Blender places the VR viewer by
+    its landmark (the stock add-on's default is the scene camera, or the
+    world origin while there is none) and re-reads it every frame, so while
+    a session runs the base pose is pinned where it starts (a landmark you
+    pick on the desktop still takes you there once) and put back when the
+    session ends. You move by flying, walking and the grips.
   - **Light**: press in empty space and a light of the **New** type (Point,
     Sun, Spot, Area; B steps through them) appears at the tip, aimed where
     the controller points; keep holding to place and aim it. Press on a
@@ -538,15 +541,30 @@ offset and display options; **VR Extras** has the grid, navigation, hands
 - **Pose mode**: pose any armature with the controllers, no constraints
   added to the rig. Choosing Pose puts the active mesh's rig (or the active
   armature) in Pose Mode; the bones are drawn on top of everything, and the
-  one in reach of a tip lights up.
+  one in reach of a tip lights up. To pose another character, touch it (its
+  mesh or a bone) with the left trigger at least 10 cm from the posed rig's
+  bones, or with no rig posed: its rig goes into Pose Mode instead.
   - **FK**: grab a bone and it turns about its head so the grabbed point
-    follows your hand; twist the controller to roll it. A free bone (the
-    root, or one not connected to its parent) grabbed near its head moves
-    with your hand instead.
+    follows your hand; twist the controller to roll it. Turning the
+    controller in place turns the bone too (up to 25 cm from the joint in
+    full, less further out, where a wrist's tremor would swing the far end;
+    swinging your arm, which turns the wrist along, isn't counted twice, and
+    turns under 0.1 degrees are ignored so a held bone doesn't wander). A
+    free bone (the root, or one not connected to its parent) grabbed near
+    its head moves with your hand instead.
   - **IK**: grab a bone (a hand, a foot) and it follows your hand, position
     and rotation, while 1-6 parent bones bend to reach.
   - **Mirror X** poses the .L/.R counterpart the same way. Reset bone /
     Reset pose.
+  - **Curl** (on by default): pulling or pushing a grabbed bone along itself
+    also scales it along its length, gently (0.6 of the motion, in bone
+    lengths, past a 10% dead zone so a swing's wobble doesn't count; a bone
+    longer than 10 cm in your hands counts 10 cm as its length, so a long
+    ear master curls with a normal push). Only bones whose length a driver
+    reads are scaled: Rigify's finger, toe, ear and tail masters, which close
+    their chain when pushed in and open when pulled out. A curling grab holds
+    the bone by its far end, so pushing in doesn't pass its head, and always
+    turns it, even near its head (where a free bone would otherwise move).
   - **Limits**: bone rotation modes, rotation and location locks, and Limit
     Rotation / Limit Location constraints (Local Space) hold in FK, IK and
     moves. IK also holds the bones' IK limits and IK locks (Bone > Inverse
@@ -558,6 +576,43 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   - With Auto on, letting go keys the bones you moved. Key / Delete key, the
     timeline's key ticks, key jumps and interpolation work on the selected
     bones, and the selected keyed bones get motion paths.
+  - **Production rigs (Rigify)**: only the bones you'd see in Blender are
+    drawn and grabbed (bone collections and hidden bones respected, so no
+    ORG / MCH / DEF bones and no unused poles), as their custom shapes:
+    grab the ring around the wrist, the box around the hips. Rigify
+    metarigs are left out of the rig picker.
+    - Grabbing a control of a limb's inactive side switches the limb, in
+      place: an FK control of an arm in IK snaps the FK chain to the arm
+      and sets IK_FK to FK; the IK hand or foot (or the heel, toe or pole)
+      of a limb in FK snaps the IK controls to it and sets it to IK. With
+      Auto on, the switch is keyed with the bones. Going to FK is exact.
+      Going to IK keeps hands and feet in place, but Rigify's IK chains
+      stretch a little (IK Stretch), so the elbow or knee can move by a
+      centimeter or two; a rear paw (3-bone leg) lands its heel as close
+      as its IK can make it.
+    - The inactive side's controls are drawn where a switch would put them:
+      an IK arm's FK rings sit on the arm (Rigify leaves them where they
+      were last posed, which looks like a detached rig), and an FK arm's IK
+      hand sits on the hand. Grabbing one switches the limb, so nothing
+      jumps. A limb part way between IK and FK is drawn as it is.
+    - Bones that steer the rig's own IK (hand_ik, foot_ik, poles) are
+      moved with your hand in FK and IK alike: the rig solves the limb.
+    - A limb's settings gear (thigh_parent / upper_arm_parent: Rigify locks
+      it, nothing follows it) turns the limb from its root instead: thigh_fk
+      in FK, thigh_ik in IK (which only twists, swinging the knee). It turns
+      with the controller, wherever your hand goes.
+    - A tail's segments land under your hand even though each adds its
+      parent control's curl (their Copy Rotation is taken out of what's
+      written). The tail master, drawn as the ring at the tail's tip, curls
+      the tail so that ring follows your hand as far as the curl can take it.
+    - Tweak controls (the small spheres, which can only twist) are moved
+      wherever you grab them, so they bend and stretch the chain: pull a
+      tongue's tip tweak out of the mouth to stretch it.
+    - IK bends visible bones only, passing hidden helper bones that just
+      follow their parent (Rigify's MCH-hand_fk), so IK on an FK hand bends
+      the FK forearm and upper arm. It stops at a helper that is driven.
+    - Bind does the same: a bound IK hand moves the arm by the rig's IK, a
+      bound FK hand switches its arm to FK first.
   - Without a rig (Rig: Objects), the trigger moves the objects it touches,
     so props can be animated the same way.
 - **Puppeteering**: **Bind L / Bind R / Bind head** ties the active bone (or
@@ -612,7 +667,9 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   tracking) and pickers open as a second level with a Back button. It shows
   when you turn your left wrist toward your face, like checking a watch, and
   fades when you turn it back; **Pin** (the pin icon, or a left stick click)
-  keeps it shown. Point at it with the right controller and pull the trigger.
+  keeps it shown. With Reveal set to Always, the left stick click hides it
+  instead (pointing at its ghost still shows it for a moment), and brings it
+  back. Point at it with the right controller and pull the trigger.
   While the left trigger holds something (a grab, an inverted stroke), the
   panel drops to 20% opacity so you can see what that hand is doing.
   The full map of where everything is: [docs/ui_panel.md](docs/ui_panel.md).
@@ -630,7 +687,7 @@ offset and display options; **VR Extras** has the grid, navigation, hands
 | B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Bones: end the chain. Weights: undo the last weight stroke | Switch FK / IK | Simulate / stop | Remove the last measurement / next camera / next light type / turn the picture to face you |
 | Left stick | Walk / fly (move) | Same | Same | Same | Same | Same | Same | Same |
 | Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same | Same | Same | Same |
-| Left stick click | Pin / unpin the hand panel | Same | Same | Same | Same | Same | Same | Same |
+| Left stick click | Pin / unpin the hand panel (Reveal Always: hide / show it) | Same | Same | Same | Same | Same | Same | Same |
 | Right stick click | Next radius (1, 2, 4, 8, 16 cm) | Same | Same | Next paint radius | Weights: next brush radius | Next IK chain length (1-4) | Hands on / off | Same |
 | Right trigger on a motion path key | Drag the key | Same | Same | Same | Same | Same | Same | Same |
 | Either trigger on a gizmo handle | | Move along / turn around / size along that axis; the outer ring sizes evenly | | | | | | Light, Refs: same as Model |
@@ -953,8 +1010,74 @@ With Triggers" is on. The setting applies when the VR session starts.
   location for free bones) is set, in the bone's own rotation mode and locks.
   Mirror X writes the counterpart's local rotation as `(w, x, -y, -z)` and
   location as `(-x, y, z)`, like Blender's pose flip. In 5.x bone selection
-  is `PoseBone.select`. Onion ghosts change frames, which re-applies keys,
-  so the pose (and objects' transforms) are saved first and put back.
+  is `PoseBone.select`, and Pose Mode hiding is `PoseBone.hide` (Rigify
+  drives it to hide unused poles). Onion ghosts change frames, which
+  re-applies keys, so the pose (and objects' transforms) are saved first
+  and put back.
+  - Bones are drawn and picked from one `Geometry`: custom shapes placed as
+    Blender's draw code does (the shape-transform bone's pose matrix, then
+    the shape's translation, XYZ rotation and scale, times the bone's rest
+    length with Scale to Bone Length), octahedra for the rest. The pose
+    matrices come in with one `foreach_get("matrix")` (stored column by
+    column) and every line is transformed in one numpy pass (0.4-0.7 ms for
+    a Rigify human's 212 controls / 5,300 lines). Which bones show and
+    their shapes' local lines (`Layout`, 2-4 ms) are only rebuilt when a
+    check of the hide flags and collection visibility a few times a second
+    sees them change, or on a press.
+  - IK/FK switches ([limbs.py](vr_sculpt/limbs.py)) are found from the
+    rig's drivers, not bone names: bones with two Copy Transforms whose
+    second one's influence is driven by one custom property, the IK side
+    being the one inside IK constraints' chains (Rigify's ORG bones,
+    `IK_FK`, which drives `influence = 1 - IK_FK` through a Generator
+    modifier). The IK handle is the topmost of the visible bones the IK
+    target hangs from; a hidden bone placed by an IK of its own is passed
+    by following that IK's target (Rigify's rear paw: the heel rides an IK
+    aimed under foot_ik). Snapping to IK puts the chain's root control and
+    pole on the limb's pose, puts the handle where it sits on the limb's
+    end in the rest pose and moves it by the end's error (exact at once
+    when the end rides it rigidly), does the same for the controls riding
+    between them, then fits the bend plane with a secant search on one
+    angle (the pole about shoulder-to-end, or the twist of the root
+    control, or of its first visible parent). Every fit keeps the closest
+    placement it found. Each step re-evaluates the rig (about 4 ms on a
+    Rigify human). A custom property set from Python doesn't tag
+    the depsgraph, so the drivers only see the switch after
+    `obj.update_tag()`.
+  - The inactive side is drawn by `limbs.StandIn`, worked out per frame
+    from the limb's bones (no rig evaluation): FK controls get their limb
+    bone's matrix (what the snap writes); IK ones the snap's first guess
+    (chain root and toe on the limb, the pole off the elbow, the handle
+    where it sits on the limb's end at rest, the controls riding it moved
+    with it). Their matrices replace the bones' own in `Geometry` before
+    the numpy pass, so drawing and picking agree. Whether a limb is fully on
+    one side comes from the evaluated influence of its driven constraint.
+  - Curl bones are found from the drivers: a `SINGLE_PROP` variable on
+    `pose.bones["X"].scale.y` (Rigify's finger master drives each joint's
+    `MCH-*_drv` by `(1 - sy) * pi`) or a Transform Channel on its Y / average
+    scale. The pull is the change in the grabbed point's distance from the
+    head (a swing keeps it, so only pulling counts), in bone lengths; the
+    scale is keyed with location and Mirror X copies it.
+  - Turning the controller (`Follow._step`) works per update: the hand-held
+    point's move about the head (aim), then the controller's twist about the
+    grab, then its swing beyond the aim, by `1 - aim / swing` (all of it
+    when turning in place, none when the arm swings the wrist along), faded
+    by `(0.25 m / reach)^2` past 25 cm. The controller's orientation goes
+    through a 0.1 degree backlash first, so jitter never accumulates.
+  - A bone's own Copy Rotation / Copy Transforms in Local Space, mixed
+    Before or After Original (Rigify's tail segments), adds a turn
+    `basis_for` doesn't know about. `constraint_offset` measures it at the
+    grab (evaluated local rotation against the basis) and `_uncopy` takes it
+    out of each write; it's constant while the copied bone doesn't move.
+  - A bone drawn on another bone it moves (`custom_shape_transform`:
+    Rigify's tail master on tweak_tail.002) is turned by `pose.Drive`: the
+    drawn point's Jacobian over the bone's free axes is measured at the grab
+    (one rig evaluation per axis, about 12 ms each on a production rig; axes
+    that don't move the point are dropped, so a tail copying only X isn't
+    turned about Y / Z), then each headset frame takes a damped Gauss-Newton
+    step from where the last evaluation put the point and refines the
+    Jacobian (Broyden, from steps over 0.002 rad). A frame whose evaluation
+    hasn't caught up yet is skipped. If the drawn bone just rides the bone
+    rigidly, it's an ordinary swing.
 - **Puppeteering** ([puppet.py](vr_sculpt/puppet.py)): a binding is a
   `Follow` that never lets go, driven by a grip pose or the headset from the
   app timer. A take is keyed from a `frame_change_post` handler (playback
@@ -1592,6 +1715,9 @@ binding and painting (`rig_weights.png`).
 `pose_preview.py` enters Pose Mode the way VR does (no area), records a
 puppet take while the timeline really plays, and draws the Pose page and
 bones (`probe_pose.py` checked the pose API).
+`rigify_preview.py` generates a Rigify human and draws its bones as the
+headset does, with Blender's own bone overlay off: the controls as their
+widgets, one hovered, one selected (`rigify_preview.png`).
 `kit_preview.py` draws the Kit sheet (`kit_panels.png`) and a box dressed
 with dropped, stamped and cut starter parts (`kit_scene.png`).
 `uv_preview.py` draws the UV page and a seamed sphere with the checker,

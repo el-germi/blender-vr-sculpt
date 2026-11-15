@@ -53,7 +53,11 @@ def bind(context, ss, source):
         return None
     obj, pb = found
     settings = context.scene.vr_sculpt
-    kind = 'IK' if settings.pose_tool == 'IK' else 'RIGID'
+    kind = 'RIGID'
+    if pb is not None:
+        from . import limbs
+        limbs.prepare(context, obj, pb, settings.pose_mirror)  # A bound FK hand puts its arm in FK.
+        kind = pose.grab_kind(obj, pb, settings.pose_tool)
     follow = pose.Follow(obj, pb, source_pose(context, ss, source), kind, chain=settings.pose_chain,
                          mirror=settings.pose_mirror)
     _bindings[(obj.name, pb.name if pb else "")] = (source, follow)

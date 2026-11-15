@@ -134,6 +134,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Switch mode | **Rail** icon; or **Y** (next mode) |
 | Show the panel | Turn the back of the left hand toward your face and look at it (Reveal: Wrist); point at the ghost |
 | Keep it shown | **Pin** (header) or **left stick click**; again to unpin |
+| Hide it (Reveal: Always) | **left stick click**; again to bring it back |
 | Reveal mode (Wrist / Look / Always) | **gear** > Panel |
 | Hide the panel entirely | VR Authoring > Hand Panel > Show (desktop) |
 | Walk / Fly, move speed | **gear** > Move, Speed |
@@ -295,10 +296,10 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 
 | Feature | How |
 |---|---|
-| Rig (or objects, no rig) | **Rig** select > picker |
+| Rig (or objects, no rig) | **Rig** select > picker; or **left trigger** on another character, 10 cm or more from the posed rig |
 | FK / IK | segmented control; **B** |
 | IK chain | stepper (IK); **right stick click** |
-| Mirror X, show bones | toggles |
+| Mirror X, Curl (pull / push a finger, toe or ear master to close / open), show bones | toggles |
 | Reset bone, reset pose | *More* |
 | Bind L hand / R hand / Head, Unbind, Rec | *More*; they move up front while a binding or take exists |
 | Smooth takes on / off, over how many frames | beside the puppet rows |

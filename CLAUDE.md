@@ -28,7 +28,7 @@ The zip is named after `version` in `vr_sculpt/blender_manifest.toml`; use the c
 Background tests, one file per area (`test_brushes`, `test_modal`, `test_model`, `test_generic`,
 `test_draw`, `test_tools`, `test_paint`, `test_anim`, `test_pose`, `test_ik_limits`,
 `test_hard_surface`, `test_ui`, `test_rig`, `test_kit`, `test_physics`, `test_rest`, `test_uv`,
-`test_retopo`, `test_lookdev`, `test_smoothing`, `test_refs`, `test_gizmo`):
+`test_retopo`, `test_lookdev`, `test_smoothing`, `test_refs`, `test_gizmo`, `test_rigify`):
 
 ```bash
 blender --background --factory-startup --python tests/test_tools.py
@@ -153,7 +153,8 @@ selects / moves (`MoveObject`, `Deselect`) and the main one only creates.
 bmesh in Object Mode); `lookdev.py` for Tools' Light tool, the Look sheet (the XR session's own shading,
 not the desktop's), Model's Material page and Sculpt's hand light and PDR (paintless dent repair) lines (exist only while showing, synced by name from the live timer; the lines are a view layer material override); `paint.py` paints by temporarily aiming the largest desktop 3D view at each
 dab; `rig.py` for Rig (edit bones in Edit Mode, Bind via `parent_set` ARMATURE_AUTO, a numpy weight
-brush on vertex groups and a heat map drawn in VR); `pose.py` (FK/IK via CCD, limits) + `puppet.py` (bindings, recorded takes via
+brush on vertex groups and a heat map drawn in VR); `pose.py` (FK/IK via CCD, limits, bones drawn as their
+custom shapes) + `limbs.py` (rig-owned IK/FK switches such as Rigify's, found from drivers) + `puppet.py` (bindings, recorded takes via
 `frame_change_post`); `anim.py`, `paths.py`, `onion.py` for the timeline strip, motion paths and
 mesh onion skin (5.x slotted actions: F-curves come from the slot's channelbag via
 `bpy_extras.anim_utils`); `physics.py` for Physics (Blender's rigid body / cloth / collision data set from the panel (Soft is a

@@ -259,9 +259,29 @@ def test_camera():
               "moving and switching cameras leave it where it was")
         camera.release_base_pose(ctx)
         check(xs.base_pose_type == 'SCENE_CAMERA' and camera._held["type"] is None, "the session's end puts it back")
+        other.location = (-3.0, 4.0, 0.0)
+        ctx.view_layer.update()
         xs.base_pose_type, xs.base_pose_object = 'OBJECT', other
-        camera.AimCamera(ctx, pose).finish(ctx)
-        check(xs.base_pose_type == 'OBJECT', "placed by another object, aiming a camera changes nothing")
+        camera.hold_base_pose(ctx)
+        check(xs.base_pose_type == 'CUSTOM' and close(xs.base_pose_location, (-3, 4, 0)),
+              "placed by another object: pinned there (the live timer does this every tick)")
+        camera.release_base_pose(ctx)
+        check(xs.base_pose_type == 'OBJECT' and xs.base_pose_object == other, "and put back")
+        # No scene camera: Blender places you at the origin; the first camera made mustn't throw you to it.
+        xs.base_pose_type, xs.base_pose_object = 'SCENE_CAMERA', None
+        scene.camera = None
+        before = tuple(xs.base_pose_location)
+        camera.new_camera(ctx, Matrix.Translation((5.0, 5.0, 2.0)))
+        check(xs.base_pose_type == 'CUSTOM' and close(xs.base_pose_location, (0, 0, 0)) and
+              abs(xs.base_pose_angle) < 1e-9, "a first camera leaves you at the origin")
+        # A landmark picked during the session takes you there once, then holds.
+        xs.base_pose_type, xs.base_pose_object = 'OBJECT', other
+        camera.hold_base_pose(ctx)
+        check(xs.base_pose_type == 'CUSTOM' and close(xs.base_pose_location, (-3, 4, 0)),
+              "another landmark picked mid-session: pinned at it")
+        camera.release_base_pose(ctx)
+        check(xs.base_pose_type == 'OBJECT' and close(xs.base_pose_location, before),
+              "the session's end puts back the last landmark (and the Custom spot from before)")
     finally:
         operators.session_running = running
         camera.release_base_pose(ctx)
