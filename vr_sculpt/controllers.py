@@ -111,7 +111,11 @@ def hints(s, info):
     left['stick'] = ("walk", "Walk") if walk else ("fly", "Fly")
     right['stick'] = ("cursor", "Scroll") if info.ray_on_desktop else \
         (("reset", "Turn") if walk else ("fly", "Up, down, turn"))
-    left['stick_click'] = ("pinned", "Unpin panel") if s.panel_pin else ("pin", "Pin panel")
+    if s.panel_reveal == 'ALWAYS':
+        from . import presence
+        left['stick_click'] = ("pin", "Show panel") if presence.put_away() else ("close", "Hide panel")
+    else:
+        left['stick_click'] = ("pinned", "Unpin panel") if s.panel_pin else ("pin", "Pin panel")
     if mode == 'SCULPT':
         right['stick_click'] = ("plus", "Brush size")
     elif mode == 'RETOPO':

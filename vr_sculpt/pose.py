@@ -5,7 +5,9 @@ twisting the controller rolls it. A free bone (no parent, or not connected to it
 its head moves with the controller instead. IK: the grabbed bone follows the controller rigidly
 and up to pose_chain parent bones bend so its head gets there (CCD solved here, so it works on
 any rig without adding constraints). Without an armature in Pose Mode, the trigger moves the
-objects it touches, so props can be puppeteered too.
+objects it touches, so props can be puppeteered too. The off-hand trigger away from the posed
+rig's bones (SWITCH_GAP), or with none posed, on another character (its mesh or bones) poses that
+rig instead (rig_at).
 
 The same Follow class drives puppet bindings (puppet.py): a binding is a grab that never ends,
 driven by a controller's grip or the headset instead of the trigger.
@@ -33,6 +35,7 @@ from mathutils import Matrix, Quaternion, Vector
 from . import anim, primitives
 
 REACH = 0.02  # hand-space meters around a bone that still grab it
+SWITCH_GAP = 0.1  # hand-space meters from the posed rig's bones past which the off hand picks another rig
 MOVE_ZONE = 0.3  # share of a free bone's length, from its head, that moves it instead of turning it
 CCD_ITERATIONS = 12
 CCD_TOLERANCE = 1e-5
@@ -84,11 +87,53 @@ def use_rig(context, obj):
     from . import menus
     active = context.view_layer.objects.active
     if active is not None and active is not obj:
+        if _state["previous"] is None or not anim.posing(active):
+            _state["previous"] = active.name  # From one rig to the next, leaving still goes back to the first.
         menus.set_object_mode(context, active, 'OBJECT')
-        _state["previous"] = active.name
     if obj.visible_get():
         primitives.make_active(context, obj)
         menus.set_object_mode(context, obj, 'POSE')
+
+
+def rig_at(context, tip, scale):
+    """The rig other than the posed one that the tip is on, or None: the rig of the mesh it touches,
+    else one whose bone is within reach. None too while the tip is within SWITCH_GAP of the posed rig's
+    bones, or touches its mesh, so a near miss on a bone doesn't swap characters."""
+    from . import interactions
+    current = rig(context)
+    tip = Vector(tip)
+    others = [o for o in rigs(context) if o is not current and o.visible_get() and not o.hide_select]
+    found = find_rig(primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale))
+    if found is not None and found == current:
+        return None
+    if found not in others:
+        found, best = None, REACH * scale
+        for o in others:
+            for _pb, a, b in segments(o):
+                d = _closest(tip, a, b)[0]
+                if d < best:
+                    found, best = o, d
+    if found is None:
+        return None
+    if current is not None:
+        gap = SWITCH_GAP * scale
+        if any(_closest(tip, a, b)[0] < gap for _pb, a, b in segments(current)):
+            return None
+    return found
+
+
+class SelectRig:
+    """Off-hand trigger on another character in Pose mode: pose its rig."""
+
+    def __init__(self, context, obj):
+        use_rig(context, obj)
+        self.changed = True
+
+    def update(self, context, pose, tip_pose, value):
+        pass
+
+    def finish(self, context):
+        pass
 
 
 def leave(context):
@@ -590,14 +635,21 @@ class Grab:
             onion.mark_dirty()
 
 
-def pick(context, settings, tip_pose, scale):
-    """Trigger press in Pose mode: a Grab handler for the bone (or object) at the tip, or None."""
+def pick(context, settings, tip_pose, scale, off=False):
+    """Trigger press in Pose mode: a Grab handler for the bone (or object) at the tip, a SelectRig for
+    another character (off hand), or None."""
     from . import interactions
     tip = tip_pose.translation
     obj = rig(context)
     if obj is not None:
         hit = nearest_bone(context, tip, scale, obj)
-        return Grab(context, settings, obj, hit[0], hit[1], tip_pose) if hit is not None else None
+        if hit is not None:
+            return Grab(context, settings, obj, hit[0], hit[1], tip_pose)
+    other = rig_at(context, tip, scale) if off else None
+    if other is not None:
+        return SelectRig(context, other)
+    if obj is not None:
+        return None
     touched = primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale)
     return Grab(context, settings, touched, None, 0.0, tip_pose) if touched is not None else None
 

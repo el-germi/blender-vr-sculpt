@@ -57,43 +57,47 @@ def next_camera(context):
 # --- the VR base pose ------------------------------------------------------------
 #
 # Blender places the viewer relative to the session's base pose, worked out again every frame, and the
-# stock VR add-on's default landmark makes that the scene camera. Moving or switching the scene camera
-# then moves you with it: aiming it, the viewer follows the controller, which moves the camera again,
-# and you're thrown around. So before the camera tool moves or switches a camera you're placed by, the
-# base pose is pinned where it is (Custom, same spot and heading); it goes back as it was when the
-# session ends.
+# stock VR add-on's default landmark makes that the scene camera (with no scene camera, the world
+# origin). Adding, moving or switching the scene camera then moves you with it: making the first
+# camera throws you to it, and aiming one, the viewer follows the controller, which moves the camera
+# again. So while a session runs the base pose is pinned where it is (Custom, same spot and heading;
+# live.py checks every tick, so a landmark picked on the desktop still takes you there once); it goes
+# back as it was when the session ends. You move by navigating (navigation.py), which Blender keeps
+# apart from the base pose.
 
 _held = {"type": None}
 
 
-def _placed_by(context, obj):
-    """The object the base pose follows, if it's obj (any camera for None: the scene camera's)."""
+def _source(context):
+    """The object Blender places the viewer by now, the way it picks it: the Object landmark's object,
+    else the scene camera (also for an Object landmark with none set); None for the world origin."""
     xs = context.window_manager.xr_session_settings
-    if xs.base_pose_type == 'SCENE_CAMERA':
-        source = context.scene.camera
-    elif xs.base_pose_type == 'OBJECT':
-        source = xs.base_pose_object
-    else:
-        return None
-    return source if source is not None and (obj is None or obj == source) else None
+    if xs.base_pose_type == 'OBJECT' and xs.base_pose_object is not None:
+        return xs.base_pose_object
+    return context.scene.camera
 
 
-def hold_base_pose(context, obj=None):
-    """In VR, pin the base pose where it is if it follows obj (None: if it follows the scene camera)."""
+def hold_base_pose(context):
+    """In VR, pin the base pose where it is now, unless it already is a Custom pose."""
     from . import operators
     if not operators.session_running(context):
         return
-    source = _placed_by(context, obj)
-    if source is None:
-        return
     xs = context.window_manager.xr_session_settings
+    if xs.base_pose_type == 'CUSTOM':
+        return
     if _held["type"] is None:
-        _held.update(type=xs.base_pose_type, object=xs.base_pose_object, location=tuple(xs.base_pose_location),
-                     angle=xs.base_pose_angle)
-    mw = source.matrix_world
-    # Blender only keeps an object's turn about Z (it's leveled with the floor), like a Custom pose's angle.
-    xs.base_pose_location = mw.translation
-    xs.base_pose_angle = mw.to_euler('XYZ').z
+        _held.update(location=tuple(xs.base_pose_location), angle=xs.base_pose_angle)
+    # The landmark to go back to (a different one picked during the session wins).
+    _held.update(type=xs.base_pose_type, object=xs.base_pose_object)
+    source = _source(context)
+    if source is None:
+        location, angle = (0.0, 0.0, 0.0), 0.0  # Blender's own fallback: the origin, facing +Y.
+    else:
+        mw = source.matrix_world
+        # Blender only keeps an object's turn about Z (it's leveled with the floor), like a Custom pose's angle.
+        location, angle = mw.translation, mw.to_euler('XYZ').z
+    xs.base_pose_location = location
+    xs.base_pose_angle = angle
     xs.base_pose_type = 'CUSTOM'
 
 
@@ -116,7 +120,7 @@ class AimCamera:
     """Trigger handler: the scene camera follows the controller (it looks where the controller points)."""
 
     def __init__(self, context, pose):
-        hold_base_pose(context, context.scene.camera)
+        hold_base_pose(context)
         cam = context.scene.camera
         if cam is None:
             cam = new_camera(context, pose)
