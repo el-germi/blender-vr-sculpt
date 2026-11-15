@@ -1481,6 +1481,7 @@ def _pose_rows(context, settings):
         out.append([
             vr_ui.toggle("pose_mirror", "Mirror X", settings.pose_mirror, _toggle(settings, "pose_mirror"),
                          icon="mirror"),
+            vr_ui.toggle("pose_curl", "Curl", settings.pose_curl, _toggle(settings, "pose_curl"), icon="hands"),
             vr_ui.toggle("pose_bones", "Bones", settings.pose_show_bones, _toggle(settings, "pose_show_bones"),
                          icon="eye"),
         ])
