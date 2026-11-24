@@ -14,7 +14,7 @@ import os
 
 import bpy
 
-from . import (actions, anim, camera, catalog, desktop, generic, hardsurface, hud, kit, measure, native, paint,
+from . import (actions, anim, camera, catalog, curves, desktop, generic, hardsurface, hud, kit, measure, native, paint,
                physics, pose, presence, primitives, puppet, rest, retopo, rig, shading, strokes, symmetry, uv, vr_ui)
 from .props import BRUSH_ITEMS
 
@@ -356,11 +356,12 @@ def _pin(context, settings):
                              "Unpin" if settings.panel_pin else "Keep open", active=settings.panel_pin)
 
 
-def _segments(prefix, group, items, current, choose, icons=None, dots=None, images=None):
-    """A segmented control: items (value, label); ids prefix + value. images: {value: thumbnail}."""
+def _segments(prefix, group, items, current, choose, icons=None, dots=None, images=None, weights=None):
+    """A segmented control: items (value, label); ids prefix + value. images: {value: thumbnail}; weights:
+    {value: share of the row} (1 by default)."""
     return [vr_ui.segment(prefix + str(value), text, (lambda v=value: choose(v)), current == value, group,
                           icon=(icons or {}).get(value), dot=(dots or {}).get(value),
-                          image=(images or {}).get(value))
+                          image=(images or {}).get(value), weight=(weights or {}).get(value, 1.0))
             for value, text in items]
 
 
@@ -1138,24 +1139,35 @@ def _array_center_here(context, obj):
 
 # --- Draw -----------------------------------------------------------------------
 
-DRAW_TOOLS = (('DRAW', "Draw"), ('EDIT', "Edit"), ('ERASE', "Erase"))
+DRAW_TOOLS = (('DRAW', "Draw"), ('CURVE', "Curve"), ('EDIT', "Edit"), ('ERASE', "Erase"))
 DRAW_STYLES = (('TUBE', "Tube"), ('RIBBON', "Ribbon"), ('NOTE', "Note"), ('PENCIL', "Pencil"))
 
 
+def _set_draw(context, settings, attr, value):
+    """Color and width: for the next stroke, and the curve being built."""
+    setattr(settings, attr, value)
+    curves.restyle_active(context)
+
+
 def _draw_rows(context, settings):
+    icons = [vr_ui.icon_button("undo_stroke", "undo", lambda: _undo_stroke(context), "Undo stroke")]
+    if settings.draw_tool == 'CURVE' and curves.is_open(context):
+        icons.insert(0, vr_ui.icon_button("end_curve", "check", lambda: curves.end(context), "Finish curve"))
     out = [
-        _header(context, settings, "Draw", actions=[
-            vr_ui.icon_button("undo_stroke", "undo", lambda: _undo_stroke(context), "Undo stroke")]),
+        _header(context, settings, "Draw", actions=icons),
         _segments("tool_", "draw_tool", DRAW_TOOLS, settings.draw_tool, lambda v: setattr(settings, "draw_tool", v),
-                  icons={'DRAW': "pen", 'EDIT': "edit", 'ERASE': "eraser"}),
+                  icons={'DRAW': "pen", 'CURVE': "bezier", 'EDIT': "edit", 'ERASE': "eraser"},
+                  weights={'CURVE': 1.08, 'EDIT': 0.92}),  # "Curve" needs a little of short "Edit"'s room.
     ]
     if settings.draw_tool == 'DRAW':
         out.append(_segments("style_", "draw_style", DRAW_STYLES, settings.draw_style,
                              lambda v: setattr(settings, "draw_style", v)))  # Four: words only, as "New as".
-        out.append([vr_ui.swatch_button("color_" + ident, rgb, (lambda i=ident: setattr(settings, "draw_color", i)),
+    if settings.draw_tool in {'DRAW', 'CURVE'}:
+        out.append([vr_ui.swatch_button("color_" + ident, rgb,
+                                        (lambda i=ident: _set_draw(context, settings, "draw_color", i)),
                                         settings.draw_color == ident) for ident, _name, rgb in strokes.PALETTE])
     out.append([vr_ui.slider("draw_width", "Width", settings.draw_width, 0.001, 0.05,
-                             lambda v: setattr(settings, "draw_width", v), fmt=_meters)])
+                             lambda v: _set_draw(context, settings, "draw_width", v), fmt=_meters)])
     items = [(i.identifier, i.name) for i in settings.bl_rna.properties["draw_thickness"].enum_items]
     names = dict(items)
     more = [[vr_ui.select(

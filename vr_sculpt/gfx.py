@@ -390,6 +390,18 @@ def _edit(p):
     p.box(0.22, -0.76, 0.48, -0.48, fill=True)
 
 
+def _bezier(p):
+    """An arch through a point, with that point's handle bar across its top: the Curve tool."""
+    pts = [((1 - t) ** 3 * -0.85 + 3 * (1 - t) ** 2 * t * -0.75 + 3 * (1 - t) * t * t * -0.55 + t ** 3 * 0.0,
+            (1 - t) ** 3 * -0.75 + 3 * (1 - t) ** 2 * t * -0.1 + 3 * (1 - t) * t * t * 0.3 + t ** 3 * 0.3)
+           for t in (i / 10 for i in range(11))]
+    p.path(pts + [(-x, y) for x, y in reversed(pts[:-1])])
+    p.line(-0.62, 0.3, 0.62, 0.3, 0.07)
+    p.disc(-0.66, 0.3, 0.12)
+    p.disc(0.66, 0.3, 0.12)
+    p.box(-0.15, 0.15, 0.15, 0.45, fill=True)
+
+
 def _eraser(p):
     c, s = math.cos(math.radians(40)), math.sin(math.radians(40))
 
@@ -993,7 +1005,7 @@ ICONS = {
     "chevron_up": _chevron(math.pi / 2), "chevron_down": _chevron(-math.pi / 2), "undo": _undo, "redo": _redo,
     "trash": _trash, "duplicate": _duplicate, "plus": _plus, "minus": _minus, "close": _close, "check": _check,
     "eye": _eye, "grid": _grid, "magnet": _magnet, "surface": _surface, "angle": _angle, "mirror": _mirror,
-    "here": _here, "pen": _pen, "edit": _edit, "eraser": _eraser, "tube": _tube, "ribbon": _ribbon, "note": _note,
+    "here": _here, "pen": _pen, "bezier": _bezier, "edit": _edit, "eraser": _eraser, "tube": _tube, "ribbon": _ribbon, "note": _note,
     "pencil": _pencil, "image": _image, "gizmo_move": _gizmo_move, "gizmo_turn": _gizmo_turn,
     "gizmo_size": _gizmo_size, "gizmo_local": _gizmo_local, "eyedropper": _eyedropper, "swap": _swap, "spray": _spray,
     "contact": _contact, "record": _record,

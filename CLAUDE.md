@@ -28,7 +28,7 @@ The zip is named after `version` in `vr_sculpt/blender_manifest.toml`; use the c
 Background tests, one file per area (`test_brushes`, `test_modal`, `test_model`, `test_generic`,
 `test_draw`, `test_tools`, `test_paint`, `test_anim`, `test_pose`, `test_ik_limits`,
 `test_hard_surface`, `test_ui`, `test_rig`, `test_kit`, `test_physics`, `test_rest`, `test_uv`,
-`test_retopo`, `test_lookdev`, `test_smoothing`, `test_refs`, `test_gizmo`, `test_rigify`):
+`test_retopo`, `test_lookdev`, `test_smoothing`, `test_refs`, `test_gizmo`, `test_rigify`, `test_curves`):
 
 ```bash
 blender --background --factory-startup --python tests/test_tools.py
@@ -148,7 +148,8 @@ Pro models; it can't run during a VR session (SteamVR would end Blender's). In M
 selects / moves (`MoveObject`, `Deselect`) and the main one only creates.
 
 **Other modes**: `strokes.py` (mesh from stored samples, rotation-minimizing frames) +
-`drawing.py` for Draw, `pencil.py` for its Pencil style (Grease Pencil v3 strokes); `refs.py` for Tools' Refs
+`drawing.py` for Draw, `pencil.py` for its Pencil style (Grease Pencil v3 strokes), `curves.py` for its
+Curve tool and editing any Bezier curve (Object Mode `bezier_points`; insert / delete rebuild the spline); `refs.py` for Tools' Refs
 (image empties, drawn in VR since the headset skips empties); `retopo.py` for Retopo (quads traced onto a reference mesh's BVH, edited with
 bmesh in Object Mode); `lookdev.py` for Tools' Light tool, the Look sheet (the XR session's own shading,
 not the desktop's), Model's Material page and Sculpt's hand light and PDR (paintless dent repair) lines (exist only while showing, synced by name from the live timer; the lines are a view layer material override); `paint.py` paints by temporarily aiming the largest desktop 3D view at each

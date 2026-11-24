@@ -10,7 +10,7 @@ import time
 import numpy as np
 from mathutils import Vector
 
-from . import brushes, primitives, strokes
+from . import brushes, curves, primitives, strokes
 
 MIN_SPACING = 0.002  # hand-space meters between samples, at the thinnest
 EDIT_RADIUS = 0.04  # hand-space meters reached by the Edit tool
@@ -293,16 +293,24 @@ class EraseStrokes:
         from . import pencil
         if pencil.erase(context, sweep, self.margin):
             self.changed = True
+        if curves.erase(context, sweep, self.margin):
+            self.changed = True
 
     def finish(self, context):
         pass
 
 
-def pick(context, settings, tip_pose, value, scale):
-    """Handler for a Draw-mode trigger press."""
+def pick(context, settings, tip_pose, value, scale, off=False):
+    """Handler for a Draw-mode trigger press. off: the off hand's trigger."""
+    if settings.draw_tool == 'CURVE':
+        return curves.PlacePoint(context, settings, tip_pose, scale)
     if settings.draw_tool == 'ERASE':
         return EraseStrokes(context, settings, tip_pose, scale)
     if settings.draw_tool == 'EDIT':
+        # Curve points and handles first (they're small), then whichever is closer: a stroke or a curve.
+        handler = curves.pick_edit(context, off, tip_pose, scale)
+        if handler is not None:
+            return handler
         obj = strokes.nearest(context, tip_pose.translation, EDIT_RADIUS * scale)
         return ReshapeStroke(context, obj, tip_pose, scale) if obj is not None else None
     if settings.draw_style == 'NOTE':

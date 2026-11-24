@@ -367,6 +367,21 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   showing at this frame away. Mirror on X / Y / Z around the 3D cursor
   (editing one side updates the other), smoothing (below), 8 colors, and B
   to undo the last stroke.
+- **Bezier curves** (Draw's **Curve** tool): place points pen-style, one
+  press each; press and drag to pull the new point's handles out (the
+  outgoing one follows the tip, the other mirrors it). A line from the last
+  point shows the segment the next press adds. Press the first point to
+  close the curve, the last one (or B, or the panel's check icon) to finish
+  it. Curves are real Blender curve objects, bevelled to the Width, in the
+  chosen color (both also change the curve being built). The **Edit** tool
+  shows every Bezier curve's points and handles (yours or any other, in
+  Object Mode): grab a point (its handles come along and turn with your
+  wrist) or a handle (an aligned pair stays aligned; an auto pair becomes
+  aligned), press the curve between points to insert one there without
+  changing its shape, click a point to switch it between corner and smooth,
+  and press a point with the other hand to delete it. Erase removes the
+  curves it sweeps through (only the add-on's). The header undo / B undoes
+  the last point, then the one before.
 - **Smoothing, or none**: every stroke (Draw, Paint, Sculpt, weight painting,
   UV Fix, Retopo Strip and Relax) goes through one stabilizer. **Smooth**
   turns it on or off: off, strokes follow the controller exactly, shake and
@@ -680,11 +695,11 @@ offset and display options; **VR Extras** has the grid, navigation, hands
 
 | Input | Sculpt mode | Model mode | Draw mode | Paint mode | Rig mode | Pose mode | Physics mode | Tools mode |
 |---|---|---|---|---|---|---|---|---|
-| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Edit / Erase | Paint / pick color | Bones: place the next joint; on a joint, carry on from it (click) or move it (drag); on a bone, select it (click) or move it (drag). Weights: paint, or pick the touched bone | Grab a bone (FK / IK), or an object without a rig | Select an object (hold to move it) or a bone of the selected rig. Hands on: grab and throw a body or a spring bone, or Push / Pull: pull | Measure / aim the camera / Light: place a light, or grab one to move and aim it / Refs: place the chosen picture, or grab one |
-| Left trigger | Sculpt, inverted for Draw / Inflate (configurable). No mesh to sculpt: touch one to select it | Same as right | Same as right | Paint the second color. No mesh to paint: touch one to select it | Bones: delete the touched bone; in empty space, end the chain. Weights: the opposite brush | Same as right | Same as right; Push / Pull: push | Same as right; Light: select a light (hold to move it), in empty space nothing; Refs: grab a picture |
+| Right trigger | Sculpt | Drag in empty space: create. Inside an object: grab. New as Cut / Union / Intersect: drag on the selected object to add a cutter | Draw / Curve: add a point (drag: handles) / Edit / Erase | Paint / pick color | Bones: place the next joint; on a joint, carry on from it (click) or move it (drag); on a bone, select it (click) or move it (drag). Weights: paint, or pick the touched bone | Grab a bone (FK / IK), or an object without a rig | Select an object (hold to move it) or a bone of the selected rig. Hands on: grab and throw a body or a spring bone, or Push / Pull: pull | Measure / aim the camera / Light: place a light, or grab one to move and aim it / Refs: place the chosen picture, or grab one |
+| Left trigger | Sculpt, inverted for Draw / Inflate (configurable). No mesh to sculpt: touch one to select it | Same as right | Same as right; Edit: delete the curve point it presses | Paint the second color. No mesh to paint: touch one to select it | Bones: delete the touched bone; in empty space, end the chain. Weights: the opposite brush | Same as right | Same as right; Push / Pull: push | Same as right; Light: select a light (hold to move it), in empty space nothing; Refs: grab a picture |
 | Right trigger, pointing at the hand panel | Press buttons, drag sliders, step steppers (hold to repeat) | Same | Same | Same | Same | Same | Same | Same |
 | Y (left) | Next mode (Sculpt, Retopo, Model, Draw, Paint, Rig, Pose, Physics, Tools) | Same | Same | Same | Same | Same | Same | Same |
-| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke | Undo the last paint stroke | Bones: end the chain. Weights: undo the last weight stroke | Switch FK / IK | Simulate / stop | Remove the last measurement / next camera / next light type / turn the picture to face you |
+| B (right) | Next brush | Next primitive in the Add list | Undo the last stroke; with a curve open, finish it | Undo the last paint stroke | Bones: end the chain. Weights: undo the last weight stroke | Switch FK / IK | Simulate / stop | Remove the last measurement / next camera / next light type / turn the picture to face you |
 | Left stick | Walk / fly (move) | Same | Same | Same | Same | Same | Same | Same |
 | Right stick | Walk: snap turn. Fly: up/down, turn | Same | Same | Same | Same | Same | Same | Same |
 | Left stick click | Pin / unpin the hand panel (Reveal Always: hide / show it) | Same | Same | Same | Same | Same | Same | Same |
@@ -872,6 +887,13 @@ With Triggers" is on. The setting applies when the VR session starts.
   Pencil v3 strokes grown a point at a time (`add_points`, about 0.01 ms
   each) in the object's space; each stroke is fetched again before it's
   written, since growing one moves the points of the strokes after it.
+  Bezier curves ([curves.py](vr_sculpt/curves.py)) are edited in Object
+  Mode through `bezier_points`: Blender recomputes auto and vector handles
+  as a point's position is set, but doesn't keep an aligned pair in line or
+  move a point's handles with it, so the handlers do. RNA can't remove a
+  Bezier point, so inserting (a de Casteljau split, which keeps the shape)
+  and deleting rebuild the spline. The open curve is kept by name and let
+  go on undo; each placed point is a quick-undo entry.
 - **Smoothing** ([smoothing.py](vr_sculpt/smoothing.py)): the trigger
   operator passes the tip through a `Stabilizer` before a handler with
   `smooth = True` (or the sculpt stroke) sees it: a lazy string of the Lag
