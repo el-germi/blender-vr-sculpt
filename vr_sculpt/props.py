@@ -362,9 +362,13 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     draw_tool: EnumProperty(
         name="Tool",
         items=(
-            ('DRAW', "Draw", "Draw strokes"),
-            ('EDIT', "Edit", "Pull part of a stroke into a new shape"),
-            ('ERASE', "Erase", "Erase the strokes and notes the tip touches"),
+            # Numbered: Curve came later, and files store the number.
+            ('DRAW', "Draw", "Draw strokes", 0),
+            ('CURVE', "Curve", "Bezier curve: press to place points, drag to pull out their handles. Press the "
+                               "first point to close it, the last one to finish it", 3),
+            ('EDIT', "Edit", "Pull part of a stroke into a new shape; move, insert or delete curve points and "
+                             "handles", 1),
+            ('ERASE', "Erase", "Erase the strokes, curves and notes the tip touches", 2),
         ),
         default='DRAW',
     )

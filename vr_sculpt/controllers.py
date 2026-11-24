@@ -43,9 +43,9 @@ KEY_NAMES = {
 
 # What hints() needs besides the settings. Gathered by context_info() in VR; tests build it by hand.
 Info = namedtuple("Info", "ray_on_panel ray_on_desktop picker_open cut_target has_rig paint_ready native_brush "
-                          "primitive rig_bound kit_part playing gizmo_main gizmo_off needs_target",
+                          "primitive rig_bound kit_part playing gizmo_main gizmo_off needs_target curve_open",
                   defaults=(False, False, False, False, False, True, "", "Cube", True, False, False, None, None,
-                            False))
+                            False, False))
 
 NATIVE_LABELS = {"Draw": "Draw", "Clay Strips": "Clay", "Smooth": "Smooth", "Inflate/Deflate": "Inflate",
                  "Crease Sharp": "Crease", "Flatten/Contrast": "Flatten"}
@@ -89,6 +89,8 @@ def hints(s, info):
         right['top'] = hint_top()
     elif mode == 'MODEL':
         right['top'] = ("chevron_right", "Next shape")
+    elif mode == 'DRAW' and info.curve_open:
+        right['top'] = ("check", "End curve")
     elif mode in {'DRAW', 'PAINT'} or (mode == 'RIG' and s.rig_tool == 'WEIGHTS'):
         right['top'] = ("undo", "Undo stroke")
     elif mode == 'RIG':
@@ -175,6 +177,8 @@ def _trigger(s, info):
             return ("edit", "Edit stroke")
         if s.draw_tool == 'ERASE':
             return ("eraser", "Erase")
+        if s.draw_tool == 'CURVE':
+            return ("bezier", "Add point, drag: handles")
         return (s.draw_style.lower(), s.draw_style.title())
     if mode == 'PAINT':
         if not info.paint_ready:
@@ -231,6 +235,8 @@ def _left_trigger(s, info, right):
         return ("eyedropper", "Pick 2nd color")
     if mode == 'RIG' and s.rig_tool == 'BONES':
         return ("trash", "Delete bone")
+    if mode == 'DRAW' and s.draw_tool == 'EDIT':
+        return ("edit", "Edit; delete curve point")
     if mode == 'PHYSICS' and s.physics_hands and s.physics_tool == 'FORCE':
         return ("force", "Push")
     if mode == 'RIG' and right is not None:
@@ -241,8 +247,8 @@ def _left_trigger(s, info, right):
 
 def context_info(context, ss):
     """Info for hints() from the scene and the session."""
-    from . import (anim, desktop, gizmo, hardsurface, interactions, kit, menus, native, operators, paint, pose,
-                   presence, primitives, rig)
+    from . import (anim, curves, desktop, gizmo, hardsurface, interactions, kit, menus, native, operators, paint,
+                   pose, presence, primitives, rig)
     settings = context.scene.vr_sculpt
     main = actions.main_index(context)
     pointer = operators.controller_pose(ss.controller_aim_location_get(context, main),
@@ -272,6 +278,7 @@ def context_info(context, ss):
         gizmo_main=gizmo.hint(context, operators.brush_tip(pointer, offset), scale),
         gizmo_off=gizmo.hint(context, operators.brush_tip(off_pose, offset), scale),
         needs_target=operators.needs_target(context, settings),
+        curve_open=settings.mode == 'DRAW' and curves.is_open(context),
     )
 
 

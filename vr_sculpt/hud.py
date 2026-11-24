@@ -191,7 +191,10 @@ DRAW_INFO = {
     'RIBBON': ("Draw Ribbon", "Roll your wrist to twist the band. B undoes the last stroke"),
     'NOTE': ("Draw Note", "Annotation line, not geometry. B undoes the last note"),
     'PENCIL': ("Draw Pencil", "Grease Pencil, on the current frame. B undoes the last stroke"),
-    'EDIT': ("Edit Strokes", "Grab part of a stroke and pull it into shape (not Pencil strokes)"),
+    'CURVE': ("Bezier Curve", "Press to add a point, drag to pull its handles. First point closes, last point "
+                              "or B finishes"),
+    'EDIT': ("Edit Strokes", "Pull strokes into shape. Curves: move points and handles, press the curve to add "
+                             "a point, click a point for corner / smooth, other hand deletes"),
     'ERASE': ("Erase", "Sweep through strokes, notes and pencil lines to erase them"),
 }
 
@@ -217,8 +220,8 @@ def card_content(settings, sculpt_brush):
             title, desc = DRAW_INFO[style]
         else:
             title, desc = DRAW_INFO[tool]
-        color = strokes.COLORS.get(settings.draw_color, (1.0, 1.0, 1.0)) if tool == 'DRAW' else MODEL_COLOR
-        icon = {'EDIT': "edit", 'ERASE': "eraser"}.get(tool, style.lower())
+        color = strokes.COLORS.get(settings.draw_color, (1.0, 1.0, 1.0)) if tool in {'DRAW', 'CURVE'} else MODEL_COLOR
+        icon = {'EDIT': "edit", 'ERASE': "eraser", 'CURVE': "bezier"}.get(tool, style.lower())
         content = (title, desc, color, icon)
     elif settings.mode == 'PAINT':
         from . import paint
@@ -314,7 +317,7 @@ def status_size(context, settings):
     if mode == 'PAINT':
         return _cm(settings.paint_radius)
     if mode == 'DRAW':
-        return _cm(settings.draw_width) if settings.draw_tool == 'DRAW' else ""
+        return _cm(settings.draw_width) if settings.draw_tool in {'DRAW', 'CURVE'} else ""
     if mode == 'POSE':
         return f"chain {settings.pose_chain}" if settings.pose_tool == 'IK' else ""
     if mode == 'RIG':

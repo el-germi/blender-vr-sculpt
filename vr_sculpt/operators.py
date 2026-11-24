@@ -4,7 +4,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty
 from mathutils import Quaternion, Vector
 
-from . import (actions, brushes, camera, catalog, desktop, drawing, gizmo, interactions, kit, measure, menus,
+from . import (actions, brushes, camera, catalog, curves, desktop, drawing, gizmo, interactions, kit, measure, menus,
                native, paint, paths, physics, presence, primitives, refs, retopo, rig, shading, smoothing, snapping,
                strokes, symmetry, uv, vr_ui)
 from . import pose as pose_mode  # "pose" is the controller pose in the handlers below
@@ -34,6 +34,7 @@ def _on_data_swap(*_args):
     snapping.clear()
     brushes.forget_caches()
     strokes.forget_caches()
+    curves.forget()
     retopo.forget_caches()
     pose_mode.forget_caches()
     rig.forget_caches()
@@ -115,7 +116,8 @@ def _tip_engaged(context, settings, tip, scale):
     if settings.mode == 'MODEL':
         return primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale) is not None
     if settings.mode == 'DRAW' and settings.draw_tool in {'EDIT', 'ERASE'}:
-        return strokes.nearest(context, tip, drawing.EDIT_RADIUS * scale) is not None
+        return (strokes.nearest(context, tip, drawing.EDIT_RADIUS * scale) is not None
+                or curves.touching(context, tip, scale))
     if settings.mode == 'PAINT':
         if settings.paint_reach != 'CONTACT':
             return False
@@ -178,7 +180,7 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
     if settings.mode == 'RETOPO':
         return retopo.pick(context, settings, off, pose, tip_pose, scale, value)
     if settings.mode == 'DRAW':
-        return drawing.pick(context, settings, tip_pose, value, scale)
+        return drawing.pick(context, settings, tip_pose, value, scale, off)
     if settings.mode == 'PAINT':
         return paint.pick(context, settings, off, pose, tip_pose, scale, value)
     if settings.mode == 'POSE':
@@ -454,7 +456,8 @@ class VRSCULPT_OT_cycle_brush(bpy.types.Operator):
         elif settings.mode == 'RETOPO':
             retopo.cycle_tool(context)
         elif settings.mode == 'DRAW':
-            undo_last_stroke(context)
+            if not curves.end(context):  # With a curve open, B finishes it.
+                undo_last_stroke(context)
         elif settings.mode == 'PAINT':
             paint.undo_last(context)
         elif settings.mode == 'RIG':

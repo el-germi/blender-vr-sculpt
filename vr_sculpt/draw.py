@@ -8,7 +8,7 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
-from . import (actions, camera, controllers, desktop, drawing, gizmo, grid, hardsurface, hud, interactions, kit,
+from . import (actions, camera, controllers, curves, desktop, drawing, gizmo, grid, hardsurface, hud, interactions, kit,
                lookdev, measure, menus, native, onion, operators, paint, paths, physics, presence, primitives, puppet,
                refs, retopo, rig, shading, snapping, strokes, symmetry, uv, vr_ui)
 from . import pose as pose_mode  # "pose" is a controller pose below
@@ -147,7 +147,8 @@ def _draw_cursors(context, ss, settings, xr):
                 settings.draw_tool, strokes.COLORS.get(settings.draw_color, (1.0, 1.0, 1.0)))
             if settings.draw_tool in {'EDIT', 'ERASE'}:
                 reach = (drawing.EDIT_RADIUS if settings.draw_tool == 'EDIT' else drawing.ERASE_MARGIN) * scale
-                near = strokes.nearest(context, tip, reach)
+                # In Edit, a curve's point or handle in reach is taken first (curves.draw marks it).
+                near = None if settings.draw_tool == 'EDIT' and curves.touching(context, tip, scale) else                     strokes.nearest(context, tip, reach)
                 if near is not None:
                     _draw_bounds(shader, near, (*color, 0.9))
         elif model and settings.uv_tool != 'NONE':
@@ -239,6 +240,11 @@ def _draw_cursors(context, ss, settings, xr):
             uv.draw(shader, context, tips, scale)
     if sketch:
         _draw_mirror_planes(shader, drawing.mirror_bits(settings), context.scene.cursor.location, scale)
+        if settings.draw_tool in {'CURVE', 'EDIT'}:
+            tips = [operators.brush_tip(operators.controller_pose(ss.controller_aim_location_get(context, i),
+                                                                  ss.controller_aim_rotation_get(context, i)), offset)
+                    for i in range(2)]
+            curves.draw(shader, context, settings, tips, actions.main_index(context), scale)
     if rigging and settings.rig_tool == 'BONES' and settings.rig_mirror:
         arm = rig.target(context)
         if arm is not None:
