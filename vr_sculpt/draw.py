@@ -61,6 +61,19 @@ def draw_overlay(context, ss, xr=True):
     settings = getattr(context.scene, "vr_sculpt", None)
     if settings is None or not settings.enabled:
         return
+    try:
+        _draw_scene(context, ss, settings, xr)
+    finally:
+        # The panel last (over the rest), and even when something above failed: a bug in one mode's
+        # drawing mustn't leave the panel unseen and unpressable (presence.update runs from it).
+        gpu.state.blend_set('NONE')
+        gpu.state.depth_test_set('NONE')
+        if settings.show_cursor:
+            _draw_panel(context, ss, settings, xr)
+    controllers.draw_hints(context, ss, panel_alpha=presence.alpha())
+
+
+def _draw_scene(context, ss, settings, xr):
     scale = ss.viewer_scale
     poses = [operators.controller_pose(ss.controller_aim_location_get(context, i),
                                        ss.controller_aim_rotation_get(context, i)) for i in range(2)]
@@ -92,7 +105,6 @@ def draw_overlay(context, ss, xr=True):
         desktop.draw(context, ss, poses[1])
     if settings.show_cursor:
         _draw_cursors(context, ss, settings, xr)
-    controllers.draw_hints(context, ss, panel_alpha=presence.alpha())
 
 
 def _draw_cursors(context, ss, settings, xr):
@@ -270,7 +282,6 @@ def _draw_cursors(context, ss, settings, xr):
         # A viewfinder above the status: the controller is the camera.
         anchor = Vector(ss.controller_grip_location_get(context, actions.main_index(context))) + up * 0.075 * scale
         camera.draw_preview(hud.billboard(anchor, viewer, scale, up), context.scene)
-    _draw_panel(context, ss, settings, xr)
 
 
 def _draw_panel(context, ss, settings, xr):
