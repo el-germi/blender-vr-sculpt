@@ -425,6 +425,14 @@ def _ribbon(p):
     p.line(-0.85, 0.0, -0.85, 0.0)
 
 
+def _raw(p):
+    """A thin wave through dots: a bare curve and its points (Draw's Raw style)."""
+    pts = [(-0.8 + 1.6 * t / 16, 0.35 * math.sin(math.pi * t / 8)) for t in range(17)]
+    p.path(pts, w=0.07)
+    for x, y in pts[::4]:
+        p.disc(x, y, 0.13)
+
+
 def _note(p):
     p.path([(-0.7, -0.8), (-0.7, 0.8), (0.75, 0.8), (0.75, -0.3), (0.25, -0.8)], closed=True)
     p.line(-0.38, 0.38, 0.42, 0.38, 0.1)
@@ -1005,9 +1013,9 @@ ICONS = {
     "chevron_up": _chevron(math.pi / 2), "chevron_down": _chevron(-math.pi / 2), "undo": _undo, "redo": _redo,
     "trash": _trash, "duplicate": _duplicate, "plus": _plus, "minus": _minus, "close": _close, "check": _check,
     "eye": _eye, "grid": _grid, "magnet": _magnet, "surface": _surface, "angle": _angle, "mirror": _mirror,
-    "here": _here, "pen": _pen, "bezier": _bezier, "edit": _edit, "eraser": _eraser, "tube": _tube, "ribbon": _ribbon, "note": _note,
-    "pencil": _pencil, "image": _image, "gizmo_move": _gizmo_move, "gizmo_turn": _gizmo_turn,
-    "gizmo_size": _gizmo_size, "gizmo_local": _gizmo_local, "eyedropper": _eyedropper, "swap": _swap, "spray": _spray,
+    "here": _here, "pen": _pen, "bezier": _bezier, "edit": _edit, "eraser": _eraser, "tube": _tube, "ribbon": _ribbon,
+    "raw": _raw, "note": _note, "pencil": _pencil, "image": _image, "gizmo_move": _gizmo_move,
+    "gizmo_turn": _gizmo_turn, "gizmo_size": _gizmo_size, "gizmo_local": _gizmo_local, "eyedropper": _eyedropper, "swap": _swap, "spray": _spray,
     "contact": _contact, "record": _record,
     "play": _play, "stop": _stop, "frame_prev": _frame_prev, "frame_next": _frame_next, "key_prev": _key_prev,
     "key_next": _key_next, "key": _key, "key_delete": _key_delete, "range_start": _range_start,

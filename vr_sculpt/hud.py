@@ -189,6 +189,7 @@ def tool_color(settings, off=False):
 DRAW_INFO = {
     'TUBE': ("Draw Tube", "Round stroke mesh. B undoes the last stroke"),
     'RIBBON': ("Draw Ribbon", "Roll your wrist to twist the band. B undoes the last stroke"),
+    'RAW': ("Draw Raw Curve", "Just the curve, for hair or your own Geometry Nodes. B undoes the last stroke"),
     'NOTE': ("Draw Note", "Annotation line, not geometry. B undoes the last note"),
     'PENCIL': ("Draw Pencil", "Grease Pencil, on the current frame. B undoes the last stroke"),
     'CURVE': ("Bezier Curve", "Press to add a point, drag to pull its handles. First point closes, last point "

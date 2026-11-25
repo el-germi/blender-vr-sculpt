@@ -40,6 +40,8 @@ class VIEW3D_PT_vr_sculpt(bpy.types.Panel):
         if settings.mode == 'DRAW':
             col.prop(settings, "draw_tool")
             col.prop(settings, "draw_style")
+            if settings.draw_style in {'TUBE', 'RIBBON', 'RAW'}:
+                col.prop(settings, "draw_nodes")
             col.prop(settings, "draw_color")
             col.prop(settings, "draw_width")
             row = col.row(heading="Smooth")

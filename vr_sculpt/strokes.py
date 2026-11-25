@@ -1,9 +1,14 @@
-"""Freehand 3D strokes: samples in, tube or ribbon meshes out.
+"""Freehand 3D strokes: samples in, curves (and from them tubes or ribbons) out.
 
-A stroke object keeps its raw samples (positions, widths, the controller's side
-vector) in object space as an ID property, so its mesh can be rebuilt after
-editing, mirrored copies included. Geometry is built with numpy and written
-straight into the mesh, fast enough to rebuild every frame while drawing.
+A stroke is a Curves object: one Catmull-Rom curve through its samples (positions,
+half the width as `radius`, the frame normal as `custom_normal`), in object space.
+Its "VR Stroke" Geometry Nodes modifier makes the tube or ribbon, the taper and the
+mirrored copies, so the style can be changed afterwards (Raw: no mesh, just the
+curve) or the node group swapped for the user's own (settings.draw_nodes). The
+ID property keeps the rest (style, mirror axes and center, taper).
+
+Strokes from before 0.14 are meshes whose ID property holds all the samples; they
+stay meshes, rebuilt with numpy (build / write_mesh).
 
 "Note" strokes go to Blender's annotations instead (3D-space annotation strokes).
 """
@@ -308,60 +313,309 @@ def material(color_id):
     return mat
 
 
-def new_object(context, style, color_id, origin):
-    mesh = bpy.data.meshes.new("Stroke")
-    obj = bpy.data.objects.new("Stroke", mesh)
+# --- the stroke node group ------------------------------------------------------
+
+NODES = "VR Stroke"  # The node group, and the modifier's name on each stroke.
+NODES_TAG = "vrs_stroke_nodes"  # On our own group: its version (a newer add-on builds a new one).
+NODES_VERSION = 1
+MESH_STYLES = ('TUBE', 'RIBBON')  # Draw styles made as a Curves stroke; RAW too (no mesh).
+CURVE_STYLES = MESH_STYLES + ('RAW',)
+STYLE_NAMES = {'TUBE': "Tube", 'RIBBON': "Ribbon", 'RAW': "Raw"}  # The group's Style menu items.
+NORMAL_FREE = 2  # Curves `normal_mode`: 0 minimum twist, 1 Z up, 2 free (`custom_normal`).
+
+
+def _build_nodes():
+    """The VR Stroke group: Style (Tube / Ribbon / Raw), Tube Sides, Taper and Mirror X/Y/Z about Mirror
+    Center. Width comes from the curve's radius, the ribbon's roll from its normals."""
+    ng = bpy.data.node_groups.new(NODES, 'GeometryNodeTree')
+    ng[NODES_TAG] = NODES_VERSION
+    ng.is_modifier = True
+    itf = ng.interface
+    itf.new_socket("Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
+    itf.new_socket("Style", in_out='INPUT', socket_type='NodeSocketMenu')
+    sides = itf.new_socket("Tube Sides", in_out='INPUT', socket_type='NodeSocketInt')
+    sides.default_value, sides.min_value, sides.max_value = TUBE_SEGMENTS, 3, 64
+    taper = itf.new_socket("Taper", in_out='INPUT', socket_type='NodeSocketFloat')
+    taper.default_value, taper.min_value, taper.max_value = 0.0, 0.0, 0.5
+    taper.subtype = 'FACTOR'
+    taper.description = "Share of the length each end takes to ramp up to full width (0: no taper)"
+    for a in "XYZ":
+        itf.new_socket(f"Mirror {a}", in_out='INPUT', socket_type='NodeSocketBool')
+    itf.new_socket("Mirror Center", in_out='INPUT', socket_type='NodeSocketVector')
+    itf.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
+
+    nodes, links = ng.nodes, ng.links
+
+    def node(kind, x, y, **props):
+        n = nodes.new(kind)
+        n.location = (x, y)
+        for k, v in props.items():
+            setattr(n, k, v)
+        return n
+
+    def math(op, a, b, x, y, clamp=False):
+        n = node("ShaderNodeMath", x, y, operation=op, use_clamp=clamp)
+        for i, v in enumerate((a, b)):
+            if isinstance(v, (int, float)):
+                n.inputs[i].default_value = v
+            else:
+                links.new(v, n.inputs[i])
+        return n.outputs[0]
+
+    gi = node("NodeGroupInput", -1400, 0)
+    go = node("NodeGroupOutput", 1400, 0)
+
+    # Width along the stroke: the radius, times the taper's ramps at both ends (as taper_envelope).
+    f = node("GeometryNodeSplineParameter", -1200, -400).outputs["Factor"]
+    ends = math('MINIMUM', f, math('SUBTRACT', 1.0, f, -1000, -500), -800, -400)
+    ramp = math('MAXIMUM', math('MINIMUM', gi.outputs["Taper"], 0.5, -1000, -700), 1e-3, -800, -650)
+    x = math('DIVIDE', ends, ramp, -600, -450, clamp=True)
+    env = node("ShaderNodeMapRange", -400, -450, interpolation_type='SMOOTHSTEP')
+    links.new(x, env.inputs["Value"])
+    env.inputs["To Min"].default_value = TAPER_MIN
+    tapered = node("FunctionNodeCompare", -400, -700, data_type='FLOAT', operation='GREATER_THAN')
+    links.new(gi.outputs["Taper"], tapered.inputs["A"])
+    pick = node("GeometryNodeSwitch", -200, -500, input_type='FLOAT')
+    links.new(tapered.outputs[0], pick.inputs["Switch"])
+    pick.inputs["False"].default_value = 1.0
+    links.new(env.outputs["Result"], pick.inputs["True"])
+    width = math('MULTIPLY', node("GeometryNodeInputRadius", -200, -300).outputs[0], pick.outputs[0], 0, -350)
+
+    # Tube: a circle swept along the curve, capped, smooth.
+    circle = node("GeometryNodeCurvePrimitiveCircle", -200, 300, mode='RADIUS')
+    links.new(gi.outputs["Tube Sides"], circle.inputs["Resolution"])
+    circle.inputs["Radius"].default_value = 1.0
+    tube_mesh = node("GeometryNodeCurveToMesh", 200, 300)
+    links.new(gi.outputs["Geometry"], tube_mesh.inputs["Curve"])
+    links.new(circle.outputs["Curve"], tube_mesh.inputs["Profile Curve"])
+    links.new(width, tube_mesh.inputs["Scale"])
+    tube_mesh.inputs["Fill Caps"].default_value = True
+    tube_smooth = node("GeometryNodeSetShadeSmooth", 400, 300)
+    links.new(tube_mesh.outputs[0], tube_smooth.inputs["Mesh"])
+    tube_smooth.inputs["Shade Smooth"].default_value = True
+
+    # Ribbon: a line across the curve's normal, flat shaded.
+    line = node("GeometryNodeCurvePrimitiveLine", -200, 0)
+    line.inputs["Start"].default_value = (-1.0, 0.0, 0.0)
+    line.inputs["End"].default_value = (1.0, 0.0, 0.0)
+    ribbon_mesh = node("GeometryNodeCurveToMesh", 200, 0)
+    links.new(gi.outputs["Geometry"], ribbon_mesh.inputs["Curve"])
+    links.new(line.outputs["Curve"], ribbon_mesh.inputs["Profile Curve"])
+    links.new(width, ribbon_mesh.inputs["Scale"])
+    ribbon_flat = node("GeometryNodeSetShadeSmooth", 400, 0)
+    links.new(ribbon_mesh.outputs[0], ribbon_flat.inputs["Mesh"])
+    ribbon_flat.inputs["Shade Smooth"].default_value = False
+
+    menu = node("GeometryNodeMenuSwitch", 600, 100, data_type='GEOMETRY')
+    menu.enum_items.clear()
+    for style in CURVE_STYLES:
+        menu.enum_items.new(STYLE_NAMES[style])
+    links.new(gi.outputs["Style"], menu.inputs["Menu"])
+    links.new(tube_smooth.outputs[0], menu.inputs[STYLE_NAMES['TUBE']])
+    links.new(ribbon_flat.outputs[0], menu.inputs[STYLE_NAMES['RIBBON']])
+    links.new(gi.outputs["Geometry"], menu.inputs[STYLE_NAMES['RAW']])
+    itf.items_tree["Style"].default_value = STYLE_NAMES['TUBE']
+
+    # Mirrors, one axis at a time (as mirror_variants): the copy is reflected about the center, its faces
+    # flipped back outward.
+    geo = menu.outputs[0]
+    for k, a in enumerate("XYZ"):
+        x0 = 800 + k * 200
+        axis = [0.0, 0.0, 0.0]
+        axis[k] = 2.0
+        offset = node("ShaderNodeVectorMath", x0, -300, operation='MULTIPLY')
+        links.new(gi.outputs["Mirror Center"], offset.inputs[0])
+        offset.inputs[1].default_value = axis
+        reflect_ = node("GeometryNodeTransform", x0, -100)
+        links.new(geo, reflect_.inputs["Geometry"])
+        links.new(offset.outputs[0], reflect_.inputs["Translation"])
+        reflect_.inputs["Scale"].default_value = [-1.0 if i == k else 1.0 for i in range(3)]
+        flip = node("GeometryNodeFlipFaces", x0, 100)
+        links.new(reflect_.outputs[0], flip.inputs["Mesh"])
+        join = node("GeometryNodeJoinGeometry", x0, 250)
+        links.new(flip.outputs[0], join.inputs[0])
+        links.new(geo, join.inputs[0])
+        switch = node("GeometryNodeSwitch", x0, 400, input_type='GEOMETRY')
+        links.new(gi.outputs[f"Mirror {a}"], switch.inputs["Switch"])
+        links.new(geo, switch.inputs["False"])
+        links.new(join.outputs[0], switch.inputs["True"])
+        geo = switch.outputs[0]
+    links.new(geo, go.inputs[0])
+    return ng
+
+
+def nodes_group(settings=None):
+    """The node group new strokes get: the user's (settings.draw_nodes), else our VR Stroke group."""
+    ng = getattr(settings, "draw_nodes", None) if settings is not None else None
+    if ng is not None and ng.bl_idname == 'GeometryNodeTree':
+        return ng
+    for ng in bpy.data.node_groups:
+        if ng.get(NODES_TAG) == NODES_VERSION and ng.bl_idname == 'GeometryNodeTree':
+            return ng
+    return _build_nodes()
+
+
+def _modifier(obj):
+    mod = obj.modifiers.get(NODES)
+    return mod if mod is not None and mod.type == 'NODES' else None
+
+
+def set_inputs(obj, samples):
+    """The modifier's inputs from the stroke's settings, by name (a user's group may have any of them)."""
+    mod = _modifier(obj)
+    ng = mod.node_group if mod is not None else None
+    if ng is None:
+        return
+    sym = int(samples.get("sym", 0))
+    values = {"Style": STYLE_NAMES.get(samples["style"], STYLE_NAMES['TUBE']),
+              "Taper": float(samples.get("taper", 0.0)),
+              "Mirror X": bool(sym & 1), "Mirror Y": bool(sym & 2), "Mirror Z": bool(sym & 4),
+              "Mirror Center": [float(v) for v in samples["c"]]}
+    inputs = mod.properties.inputs
+    for item in ng.interface.items_tree:
+        if item.item_type != 'SOCKET' or item.in_out != 'INPUT' or item.name not in values:
+            continue
+        socket = getattr(inputs, item.identifier, None)
+        if socket is None:
+            continue
+        value = values[item.name]
+        try:
+            current = socket.value
+            if hasattr(current, "__len__") and not isinstance(current, str):
+                current = list(current)
+            if current != value:
+                socket.value = value
+        except (AttributeError, TypeError, ValueError):
+            pass
+
+
+# --- stroke objects ---------------------------------------------------------
+
+def new_object(context, style, color_id, origin, nodes=None):
+    """An empty stroke object at origin: a Curves stroke with the node group (nodes, else VR Stroke)."""
+    data = bpy.data.hair_curves.new("Stroke")
+    obj = bpy.data.objects.new("Stroke", data)
     collection(context).objects.link(obj)
     obj.location = origin
-    mesh.materials.append(material(color_id))
+    data.materials.append(material(color_id))
+    mod = obj.modifiers.new(NODES, 'NODES')
+    mod.node_group = nodes if nodes is not None else nodes_group()
     return obj
 
 
 def is_stroke(obj):
-    return obj is not None and obj.type == 'MESH' and PROP in obj
+    return obj is not None and obj.type in {'CURVES', 'MESH'} and PROP in obj
+
+
+def is_curve_stroke(obj):
+    return is_stroke(obj) and obj.type == 'CURVES'
 
 
 def save(obj, samples):
+    """Keep what the stroke was drawn with (a Curves stroke's samples are its points already)."""
     old = obj.get(PROP)
     version = (old.get("v", 0) + 1) if old is not None else 0
-    obj[PROP] = {
+    data = {
         "style": samples["style"], "sym": int(samples.get("sym", 0)),
         "c": [float(x) for x in samples["c"]],
-        "p": samples["p"].astype(float).ravel().tolist(),
-        "w": samples["w"].astype(float).tolist(),
-        "s": samples["s"].astype(float).ravel().tolist(),
         "taper": float(samples.get("taper", 0.0)),
         "v": version,
     }
+    if obj.type == 'MESH':
+        data["p"] = samples["p"].astype(float).ravel().tolist()
+        data["w"] = samples["w"].astype(float).tolist()
+        data["s"] = samples["s"].astype(float).ravel().tolist()
+    obj[PROP] = data
     _cache.pop(obj.name, None)
 
 
-_cache = {}
+_cache = {}  # object name -> (key, samples)
 
 
 def forget_caches():
     _cache.clear()
 
 
+def _attribute(cd, name, kind, domain):
+    attr = cd.attributes.get(name)
+    if attr is not None and (attr.data_type != kind or attr.domain != domain):
+        cd.attributes.remove(attr)
+        attr = None
+    return attr if attr is not None else cd.attributes.new(name, kind, domain)
+
+
+def _read(cd, name, width, default):
+    attr = cd.attributes.get(name)
+    n = len(cd.points)
+    if attr is None or attr.domain != 'POINT' or len(attr.data) != n:
+        return np.tile(np.asarray(default, dtype=np.float64), (n, 1)) if width > 1 else np.full(n, default, float)
+    out = np.empty(n * width, dtype=np.float32)
+    attr.data.foreach_get("vector" if width > 1 else "value", out)
+    return (out.reshape(-1, width) if width > 1 else out).astype(np.float64)
+
+
 def load(obj):
     data = obj[PROP]
     key = obj.name
+    meta = (data.get("v", 0), len(obj.data.points) if obj.type == 'CURVES' else -1)
     hit = _cache.get(key)
-    if hit is not None and hit[0] == data.get("v", 0):
+    if hit is not None and hit[0] == meta:
         return hit[1]
     samples = {
         "style": data["style"], "sym": int(data.get("sym", 0)),
         "c": np.array(data["c"].to_list() if hasattr(data["c"], "to_list") else data["c"], dtype=np.float64),
-        "p": np.array(data["p"].to_list(), dtype=np.float64).reshape(-1, 3),
-        "w": np.array(data["w"].to_list(), dtype=np.float64),
-        "s": np.array(data["s"].to_list(), dtype=np.float64).reshape(-1, 3),
         "taper": float(data.get("taper", 0.0)),
     }
-    _cache[key] = (data.get("v", 0), samples)
+    if obj.type == 'CURVES':
+        cd = obj.data
+        # One curve per stroke; a curve the user split or joined on the desktop reads as one run of points.
+        samples["p"] = _read(cd, "position", 3, (0.0, 0.0, 0.0))
+        samples["w"] = _read(cd, "radius", 1, 0.005) * 2.0
+        samples["s"] = _read(cd, "custom_normal", 3, (0.0, 0.0, 1.0))
+    else:
+        samples["p"] = np.array(data["p"].to_list(), dtype=np.float64).reshape(-1, 3)
+        samples["w"] = np.array(data["w"].to_list(), dtype=np.float64)
+        samples["s"] = np.array(data["s"].to_list(), dtype=np.float64).reshape(-1, 3)
+    _cache[key] = (meta, samples)
     return samples
 
 
+def write_curve(cd, samples, preview=False):
+    """The samples into a Curves datablock: one Catmull-Rom curve (SUBDIV points per segment; while
+    drawing a long one, only the samples)."""
+    p = np.asarray(samples["p"], dtype=np.float64)
+    n = len(p)
+    if n == 0:
+        if len(cd.curves):
+            cd.remove_curves()
+        return
+    if len(cd.curves) != 1:
+        if len(cd.curves):
+            cd.remove_curves()
+        cd.add_curves([n])
+    elif len(cd.points) != n:
+        cd.resize_curves([n])
+    cd.set_types(type='CATMULL_ROM')
+    cd.attributes["position"].data.foreach_set("vector", p.astype(np.float32).ravel())
+    radius = np.asarray(samples["w"], dtype=np.float64) / 2.0
+    _attribute(cd, "radius", 'FLOAT', 'POINT').data.foreach_set("value", radius.astype(np.float32))
+    normals = _normalize(np.asarray(samples["s"], dtype=np.float64).reshape(-1, 3))
+    _attribute(cd, "custom_normal", 'FLOAT_VECTOR', 'POINT').data.foreach_set(
+        "vector", normals.astype(np.float32).ravel())
+    _attribute(cd, "normal_mode", 'INT8', 'CURVE').data.foreach_set("value", [NORMAL_FREE])
+    resolution = 1 if preview and n > PREVIEW_SAMPLES else SUBDIV
+    _attribute(cd, "resolution", 'INT', 'CURVE').data.foreach_set("value", [resolution])
+    cd.update_tag()
+
+
 def rebuild(obj, samples, preview=False):
+    if obj.type == 'CURVES':
+        write_curve(obj.data, samples, preview)
+        if PROP not in obj:
+            # Only while it's drawn: afterwards the modifier is the user's to change (Edit keeps its Style).
+            set_inputs(obj, samples)
+        _cache.pop(obj.name, None)
+        return
     write_mesh(obj.data, *build(samples, preview), smooth=samples["style"] == 'TUBE')
 
 
@@ -370,6 +624,38 @@ def forget(obj):
     if is_stroke(obj):
         del obj[PROP]
         _cache.pop(obj.name, None)
+
+
+def to_mesh(context, obj):
+    """A Curves stroke as a plain mesh object in its place, mirrored copies included (to sculpt or paint
+    it). Returns the new object, or obj itself when it isn't a Curves stroke or makes no mesh."""
+    if not is_curve_stroke(obj):
+        return obj
+    depsgraph = context.evaluated_depsgraph_get()
+    geometry = obj.evaluated_get(depsgraph).evaluated_geometry()
+    shown = geometry.mesh  # (new_from_object can't take a Curves object; a copy of its result can.)
+    if shown is None or not len(shown.polygons):
+        return obj
+    mesh = shown.copy()
+    name, matrix, parent = obj.name, obj.matrix_world.copy(), obj.parent
+    collections = list(obj.users_collection)
+    if not len(mesh.materials):
+        for mat in obj.data.materials:
+            mesh.materials.append(mat)
+    was_active = context.view_layer.objects.active == obj
+    selected = obj.select_get()
+    delete(obj)
+    new = bpy.data.objects.new(name, mesh)
+    mesh.name = name
+    for coll in collections:
+        coll.objects.link(new)
+    new.parent = parent
+    new.matrix_world = matrix
+    if selected:
+        new.select_set(True)
+    if was_active:
+        context.view_layer.objects.active = new
+    return new
 
 
 def distance(obj, point_world):
@@ -401,11 +687,90 @@ def nearest(context, point_world, reach):
 
 
 def delete(obj):
-    mesh = obj.data
+    data = obj.data
     _cache.pop(obj.name, None)
     bpy.data.objects.remove(obj)
-    if mesh is not None and mesh.users == 0:
-        bpy.data.meshes.remove(mesh)
+    if data is not None and data.users == 0:
+        if isinstance(data, bpy.types.Curves):
+            bpy.data.hair_curves.remove(data)
+        elif isinstance(data, bpy.types.Mesh):
+            bpy.data.meshes.remove(data)
+
+
+RAW_LINE_WIDTH = 3.0  # Pixels: the headset draws a bare curve one pixel wide, too thin to see.
+
+
+def shows_raw(obj):
+    """Whether a Curves stroke shows just its curve: our group set to Raw, or no working modifier. (The
+    user's own group shows whatever it makes.)"""
+    mod = _modifier(obj)
+    if mod is None or not mod.show_viewport or mod.node_group is None:
+        return True
+    ng = mod.node_group
+    if ng.get(NODES_TAG) is None:
+        return False
+    item = ng.interface.items_tree.get("Style")
+    socket = getattr(mod.properties.inputs, item.identifier, None) if item is not None else None
+    return socket is not None and socket.value == STYLE_NAMES['RAW']
+
+
+def draw_raw(context):
+    """Raw strokes in the headset, mirrored copies included: a line a few pixels wide in their color."""
+    import gpu
+    from gpu_extras.batch import batch_for_shader
+    groups = {}
+    for obj in context.view_layer.objects:
+        if not is_curve_stroke(obj) or not obj.visible_get() or not shows_raw(obj):
+            continue
+        smp = load(obj)
+        if len(smp["p"]) < 2:
+            continue
+        pts, _ = catmull_rom(smp["p"], (), SUBDIV)
+        m = np.array(obj.matrix_world)
+        mats = obj.data.materials
+        color = tuple(mats[0].diffuse_color[:3]) if len(mats) and mats[0] is not None else (0.9, 0.9, 0.9)
+        for mask in mirror_variants(smp["sym"]):
+            q = reflect(pts, mask, smp["c"]) if mask else pts
+            w = q @ m[:3, :3].T + m[:3, 3]
+            groups.setdefault(color, []).append(np.stack([w[:-1], w[1:]], axis=1).reshape(-1, 3))
+    if not groups:
+        return
+    shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+    gpu.state.depth_test_set('LESS_EQUAL')
+    gpu.state.blend_set('ALPHA')
+    gpu.state.line_width_set(RAW_LINE_WIDTH)
+    for color, segs in groups.items():
+        batch = batch_for_shader(shader, 'LINES', {"pos": np.concatenate(segs).astype(np.float32)})
+        shader.uniform_float("color", (*color, 1.0))
+        batch.draw(shader)
+    gpu.state.line_width_set(1.0)
+    gpu.state.blend_set('NONE')
+    gpu.state.depth_test_set('NONE')
+
+
+@bpy.app.handlers.persistent
+def _on_depsgraph(scene, depsgraph):
+    """A Curves stroke edited on the desktop (its points moved without a new version): read it again."""
+    if not _cache:
+        return
+    changed = {u.id.original.name for u in depsgraph.updates
+               if isinstance(u.id, bpy.types.Curves) and u.is_updated_geometry}
+    if not changed:
+        return
+    for name in list(_cache):
+        obj = bpy.data.objects.get(name)
+        if obj is None or obj.type != 'CURVES' or obj.data.name in changed:
+            _cache.pop(name, None)
+
+
+def register():
+    if _on_depsgraph not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(_on_depsgraph)
+
+
+def unregister():
+    if _on_depsgraph in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(_on_depsgraph)
 
 
 # --- annotations (Note strokes) ---------------------------------------------

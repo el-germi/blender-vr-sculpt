@@ -53,6 +53,21 @@ def face_normals(mesh):
     return normals.reshape(n, 3), centers.reshape(n, 3)
 
 
+def shown_mesh(obj):
+    """The mesh a stroke shows (its modifier's result) as a new mesh datablock, or None."""
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    depsgraph.update()
+    geometry = obj.evaluated_get(depsgraph).evaluated_geometry()  # (Keep it: the mesh lives in it.)
+    mesh = geometry.mesh
+    return mesh.copy() if mesh is not None else None
+
+
+def modifier_input(obj, name):
+    mod = obj.modifiers[strokes.NODES]
+    item = mod.node_group.interface.items_tree[name]
+    return getattr(mod.properties.inputs, item.identifier).value
+
+
 def test_geometry():
     print("== geometry")
     p = np.array([[0, 0, 0], [1, 0, 0], [2, 1, 0], [3, 1, 1.0]])
@@ -152,7 +167,19 @@ def test_draw_and_undo():
     check(samples["w"][-1] > samples["w"][0] * 2, "harder trigger, wider stroke (pressure)")
     check(obj.users_collection[0].name == strokes.COLLECTION, "strokes go to the 'VR Strokes' collection")
     check(obj.data.materials[0].name == "VR Stroke Red", "stroke uses the chosen color's material")
-    check(len(obj.data.polygons) > 0 and not obj.data.validate(), "stroke mesh is built and valid")
+    check(obj.type == 'CURVES' and len(obj.data.curves) == 1 and len(obj.data.points) == len(samples["p"]),
+          "a stroke is a Curves object: one curve through its samples")
+    kind = obj.data.attributes.get("curve_type")
+    check(kind is None or kind.data[0].value == 0, "a smooth (Catmull-Rom, curve type 0) curve")
+    radius = np.array([r.value for r in obj.data.attributes["radius"].data])
+    check(np.allclose(radius * 2, samples["w"]), "its radius is half the stroke width")
+    mod = obj.modifiers.get(strokes.NODES)
+    check(mod is not None and mod.node_group is not None and mod.node_group.get(strokes.NODES_TAG),
+          "it has the VR Stroke Geometry Nodes modifier")
+    mesh = shown_mesh(obj)
+    check(mesh is not None and len(mesh.polygons) > 0 and not mesh.validate(), "the tube it shows is valid")
+    check(mesh is not None and mesh.materials and mesh.materials[0].name == "VR Stroke Red",
+          "the tube has the stroke's material")
 
     op, r = hold(ctx, ss, 1, [(1, 1, 1), (1.0005, 1, 1)])
     check(r != {'FINISHED'} and len([o for o in bpy.data.objects if strokes.is_stroke(o)]) == 1,
@@ -493,7 +520,7 @@ def test_taper():
     sym = max(abs(at(f) - at(1 - f)) for f in grid)
     check(abs(at(0.5) - 1.0) < 1e-6 and sym < 0.03, f"full width in the middle, symmetric (off by {sym:.3f})")
     check(0.45 < at(0.15) < 0.65, f"half way up the ramp at 15% of the length ({at(0.15):.2f})")
-    co = np.array([v.co[:] for v in obj.data.vertices])
+    co = np.array([v.co[:] for v in shown_mesh(obj).vertices])
     r = np.linalg.norm(co[:, 1:] - 0, axis=1)
     near_tip = r[np.abs(co[:, 0] - co[:, 0].min()) < 0.004].max()
     middle = r[np.abs(co[:, 0] - (co[:, 0].min() + co[:, 0].max()) / 2) < 0.004].max()
@@ -517,10 +544,20 @@ def test_sculpt_forgets_and_panel():
     hold(ctx, ss, 1, path((0, 0, 1), (0.3, 0, 1)))
     obj = next(o for o in bpy.data.objects if strokes.is_stroke(o))
     s.mode, s.engine, s.radius = 'SCULPT', 'PYTHON', 0.05
-    tm.primitives.make_active(bpy.context, obj)
+    bpy.context.view_layer.objects.active = None
+    name = obj.name
     tip = obj.matrix_world @ Vector(strokes.load(obj)["p"][5])
+    hold(ctx, ss, 0, [tuple(tip), tuple(tip)])  # The off hand picks what to sculpt.
+    new = bpy.data.objects.get(name)
+    check(new is not None and new.type == 'MESH' and not strokes.is_stroke(new) and len(new.data.polygons) > 0
+          and bpy.context.view_layer.objects.active == new,
+          "picking a stroke to sculpt turns it into the plain mesh it showed")
+    check(new is not None and new.data.materials and new.data.materials[0].name == "VR Stroke Red"
+          and new.users_collection[0].name == strokes.COLLECTION, "...keeping its material and collection")
+    before = np.array([v.co[:] for v in new.data.vertices])
     hold(ctx, ss, 1, path(tip, tip + Vector((0.01, 0.01, 0)), 5))
-    check(not strokes.is_stroke(obj), "sculpting a stroke turns it into a plain mesh")
+    after = np.array([v.co[:] for v in new.data.vertices])
+    check(len(after) == len(before) and not np.allclose(after, before), "...which then sculpts")
 
     s.mode = 'DRAW'
     widgets, _ = menus.layout(bpy.context)
@@ -544,6 +581,125 @@ def test_sculpt_forgets_and_panel():
     check(sw.swatch is not None and sw.active, "the chosen swatch is marked")
 
 
+def legacy_stroke(ctx):
+    """A mesh stroke as 0.13 and before made them: all its samples in the ID property."""
+    mesh = bpy.data.meshes.new("Stroke")
+    obj = bpy.data.objects.new("Stroke", mesh)
+    strokes.collection(ctx).objects.link(obj)
+    obj.location = (0, 1, 1)
+    smp = line_samples(n=30)
+    smp["taper"] = 0.0
+    strokes.save(obj, smp)
+    strokes.rebuild(obj, smp)
+    bpy.context.view_layer.update()
+    return obj
+
+
+def test_curve_strokes():
+    print("== curve strokes: Raw, style afterwards, own node groups, old mesh strokes")
+    clear()
+    ss, ctx, s = setup_trigger()
+    s.draw_thickness = 'FIXED'
+    s.draw_style = 'RAW'
+    hold(ctx, ss, 1, path((0, 0, 1), (0.3, 0, 1)))
+    raw = next(o for o in bpy.data.objects if strokes.is_stroke(o))
+    check(raw.type == 'CURVES' and modifier_input(raw, "Style") == "Raw" and shown_mesh(raw) is None,
+          "Raw draws just the curve: no mesh")
+    normals = np.array([n.vector[:] for n in raw.data.attributes["custom_normal"].data])
+    check(np.allclose(np.linalg.norm(normals, axis=1), 1.0, atol=1e-4)
+          and raw.data.attributes["normal_mode"].data[0].value == strokes.NORMAL_FREE,
+          "the curve keeps the stroke's frame normals (normal mode Free)")
+    mod = raw.modifiers[strokes.NODES]
+    item = mod.node_group.interface.items_tree["Style"]
+    getattr(mod.properties.inputs, item.identifier).value = "Ribbon"
+    mesh = shown_mesh(raw)
+    check(mesh is not None and len(mesh.polygons) > 0, "its modifier's Style makes it a ribbon afterwards")
+    s.draw_tool = 'EDIT'
+    grab = raw.matrix_world @ Vector(strokes.load(raw)["p"][8])
+    hold(ctx, ss, 1, [tuple(grab), tuple(grab + Vector((0, 0, 0.02)))])
+    check(modifier_input(raw, "Style") == "Ribbon", "Edit keeps the Style chosen in the modifier")
+    s.draw_tool = 'DRAW'
+
+    s.draw_style = 'TUBE'
+    hold(ctx, ss, 1, path((0, 0.3, 1), (0.3, 0.3, 1)))
+    groups = [g for g in bpy.data.node_groups if g.get(strokes.NODES_TAG)]
+    check(len(groups) == 1, f"every stroke shares one VR Stroke group ({len(groups)})")
+
+    # The user's own node group: new strokes get it, inputs it has are set by name.
+    own = bpy.data.node_groups.new("My Strands", 'GeometryNodeTree')
+    own.is_modifier = True
+    own.interface.new_socket("Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
+    own.interface.new_socket("Taper", in_out='INPUT', socket_type='NodeSocketFloat')
+    own.interface.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
+    gi, go = own.nodes.new("NodeGroupInput"), own.nodes.new("NodeGroupOutput")
+    own.links.new(gi.outputs[0], go.inputs[0])
+    s.draw_nodes = own
+    s.draw_thickness, s.draw_taper = 'TAPER', 0.25
+    hold(ctx, ss, 1, path((0, 0.6, 1), (0.3, 0.6, 1)))
+    mine = max((o for o in bpy.data.objects if strokes.is_stroke(o)),
+               key=lambda o: o.location.y)
+    check(mine.modifiers[strokes.NODES].node_group == own, "a stroke gets the Stroke Nodes group when one is set")
+    check(abs(modifier_input(mine, "Taper") - 0.25) < 1e-6, "...with its inputs set from the stroke (Taper)")
+    s.draw_nodes = None
+    s.draw_thickness = 'FIXED'
+
+    # Moved on the desktop: Edit starts from where the points are now.
+    tube = next(o for o in bpy.data.objects if strokes.is_stroke(o) and abs(o.location.y - 0.3) < 1e-6)
+    strokes.load(tube)  # cached
+    pos = tube.data.attributes["position"].data
+    pos[0].vector = (pos[0].vector[0], pos[0].vector[1], pos[0].vector[2] + 0.05)
+    tube.data.update_tag()
+    bpy.context.evaluated_depsgraph_get().update()
+    check(abs(strokes.load(tube)["p"][0][2] - 0.05) < 1e-6, "a point moved on the desktop is read again")
+
+    # Model mode: the off hand grabs a stroke like any object.
+    s.mode = 'MODEL'
+    bpy.context.view_layer.update()
+    start = tube.matrix_world.translation.copy()
+    grab = tube.matrix_world @ Vector(strokes.load(tube)["p"][10])
+    hold(ctx, ss, 0, path(grab, grab + Vector((0, 0, 0.1)), 6))
+    check((tube.matrix_world.translation - start).length > 0.05, "Model's off hand grabs and moves a stroke")
+    s.mode = 'DRAW'
+
+    # Strokes from before 0.14 (meshes) still load, edit and erase.
+    old = legacy_stroke(ctx)
+    check(strokes.is_stroke(old) and len(strokes.load(old)["p"]) == 30, "an old mesh stroke still loads")
+    before = strokes.load(old)["p"].copy()
+    s.draw_tool = 'EDIT'
+    grab = old.matrix_world @ Vector(before[15])
+    hold(ctx, ss, 1, [tuple(grab), tuple(grab + Vector((0, 0, 0.03)))])
+    after = strokes.load(old)["p"]
+    check(old.type == 'MESH' and after[15][2] - before[15][2] > 0.02 and len(old.data.polygons) > 0,
+          "...Edit reshapes it (it stays a mesh)")
+    s.draw_tool = 'ERASE'
+    hold(ctx, ss, 1, [tuple(grab + Vector((0, 0, 0.03))), tuple(grab + Vector((0, 0, 0.031)))])
+    check(bpy.data.objects.get("Stroke") is None or not any(o.type == 'MESH' and strokes.is_stroke(o)
+                                                            for o in bpy.data.objects), "...and Erase removes it")
+    s.draw_tool = 'DRAW'
+
+    # Panel: Raw is a style; Nodes picks the group.
+    widgets, _ = menus.layout(bpy.context)
+    check(vr_ui.find(widgets, "style_RAW") is not None, "Draw panel: Raw style")
+    menus.set_more('DRAW', True)
+    widgets, _ = menus.layout(bpy.context)
+    nodes = vr_ui.find(widgets, "draw_nodes")
+    check(nodes is not None and nodes.value_text == strokes.NODES, "More: Nodes shows VR Stroke by default")
+    nodes.on_press()
+    widgets, _ = menus.layout(bpy.context)
+    vr_ui.find(widgets, "opt_My Strands").on_press()
+    check(s.draw_nodes == own, "the Nodes picker sets the group")
+    widgets, _ = menus.layout(bpy.context)
+    vr_ui.find(widgets, "draw_nodes").on_press()
+    widgets, _ = menus.layout(bpy.context)
+    vr_ui.find(widgets, "opt_").on_press()
+    check(s.draw_nodes is None, "...and back to VR Stroke")
+    s.draw_style = 'NOTE'
+    widgets, _ = menus.layout(bpy.context)
+    check(vr_ui.find(widgets, "draw_nodes") is None, "Notes have no node group")
+    s.draw_style = 'TUBE'
+    menus.set_more('DRAW', False)
+
+
 def main():
     vr_sculpt.register()
     try:
@@ -555,6 +711,7 @@ def main():
         test_orientation()
         test_speed_thickness()
         test_taper()
+        test_curve_strokes()
         test_sculpt_forgets_and_panel()
     except Exception:
         traceback.print_exc()
