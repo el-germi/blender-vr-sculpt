@@ -719,6 +719,19 @@ def test_undo_guard(arm):
     physics.set_spring(arm, tail, False)
 
 
+def test_cross_module_names():
+    """physics.py reaches into Pose mode's module (pose_mode.X): every name it uses must still be there. The
+    headset drawing isn't run in background tests, so a rename in pose.py once broke it unseen (and, since the
+    overlay stopped there, the hand panel with it)."""
+    print("== names used from other modules")
+    import re
+    from vr_sculpt import pose
+    source = open(physics.__file__, encoding="utf-8").read()
+    used = sorted(set(re.findall(r"pose_mode\.(\w+)", source)))
+    missing = [n for n in used if not hasattr(pose, n)]
+    check(used and not missing, f"pose.py has every name physics.py uses ({len(used)}; missing {missing})")
+
+
 def main():
     vr_sculpt.register()
     try:
@@ -739,6 +752,7 @@ def main():
         test_hints_and_status()
         test_operator(box)
         test_undo_guard(arm)
+        test_cross_module_names()
     except Exception:
         traceback.print_exc()
         failures.append("raised")

@@ -1102,7 +1102,11 @@ def draw(context, tips, scale):
             if hit is not None:
                 hover.add(hit[1].name)
         active = arm.data.bones.active
-        for pb, coords in pose_mode._bone_lines(arm):
+        geo = pose_mode.geometry(arm)  # The bones as Pose mode draws them (custom shapes, controls only).
+        for k, pb in enumerate(geo.bones):
+            coords = geo.coords[geo.vowner == k]
+            if not len(coords):
+                continue
             if pb.name in hover:
                 color = pose_mode.HOVER_COLOR
             elif active is not None and pb.name == active.name:
@@ -1111,7 +1115,7 @@ def draw(context, tips, scale):
                 color = SPRING_COLOR
             else:
                 color = pose_mode.BONE_COLOR
-            groups.setdefault(color, []).extend(coords)
+            groups.setdefault(color, []).extend(coords.tolist())
     if settings.physics_hands:
         for i, tip in enumerate(tips):
             force = _hands["force"][i]
