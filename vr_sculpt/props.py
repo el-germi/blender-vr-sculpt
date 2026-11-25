@@ -375,14 +375,25 @@ class VRSculptSettings(bpy.types.PropertyGroup):
     draw_style: EnumProperty(
         name="Stroke",
         items=(
-            ('TUBE', "Tube", "Round tube mesh; trigger pressure sets the thickness"),
-            ('RIBBON', "Ribbon", "Flat band mesh that follows your wrist's roll"),
+            ('TUBE', "Tube", "Round tube: a curve its Geometry Nodes modifier sweeps a circle along; "
+                             "trigger pressure sets the thickness"),
+            ('RIBBON', "Ribbon", "Flat band that follows your wrist's roll: a curve its Geometry Nodes "
+                                 "modifier sweeps a line along"),
+            ('RAW', "Raw", "Just the curve (a Curves object with width and roll): for hair, scattering or your "
+                           "own Geometry Nodes. Its modifier's Style turns it into a tube or ribbon later"),
             ('NOTE', "Note", "Annotation line (not geometry), shown in the headset and on the desktop"),
             ('PENCIL', "Pencil", "Grease Pencil stroke: renders, and animates frame by frame (with Auto Keying, "
                                  "drawing on an unkeyed frame keys a new one)"),
         ),
         default='TUBE',
     )
+    draw_nodes: PointerProperty(
+        name="Stroke Nodes",
+        description="Geometry Nodes group new Tube, Ribbon and Raw strokes get as their modifier (empty: VR "
+                    "Stroke). It gets the curve with its radius and normals; inputs named Style, Taper, Mirror "
+                    "X/Y/Z or Mirror Center are set from the stroke",
+        type=bpy.types.NodeTree,
+        poll=lambda self, ng: ng.bl_idname == 'GeometryNodeTree')
     draw_color: EnumProperty(
         name="Color",
         items=[(ident, name, "") for ident, name, _rgb in PALETTE],

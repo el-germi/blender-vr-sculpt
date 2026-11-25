@@ -19,8 +19,8 @@ else:
 
 import bpy
 
-_modules = (props, primitives, physics, retopo, kit, uv, actions, operators, navigation, camera, lookdev, desktop,
-            onion, paint, puppet, controllers, live, draw, ui)
+_modules = (props, strokes, primitives, physics, retopo, kit, uv, actions, operators, navigation, camera, lookdev,
+            desktop, onion, paint, puppet, controllers, live, draw, ui)
 
 
 def register():

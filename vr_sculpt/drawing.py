@@ -91,7 +91,8 @@ class DrawStroke:
         self.scale = scale
         tip = tip_pose.translation
         self.origin = tip.copy()
-        self.obj = strokes.new_object(context, settings.draw_style, settings.draw_color, tip)
+        self.obj = strokes.new_object(context, settings.draw_style, settings.draw_color, tip,
+                                      strokes.nodes_group(settings))
         center = context.scene.cursor.location - self.origin
         self.samples = {
             "style": settings.draw_style, "sym": mirror_bits(settings), "c": np.array(center[:]),

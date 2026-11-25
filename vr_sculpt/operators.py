@@ -156,7 +156,10 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         if key is not None:
             return paths.KeyDrag(context, key[0], key[1], tip_pose.translation)
     if off and needs_target(context, settings):
-        obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale)
+        obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale,
+                                  curve_strokes=True)
+        if obj is not None and strokes.is_curve_stroke(obj):
+            obj = strokes.to_mesh(context, obj)  # A Curves stroke is sculpted / painted as the mesh it shows.
         if obj is not None and obj.type == 'MESH':
             return interactions.SelectTarget(context, obj)
     if settings.mode == 'MODEL' and settings.uv_tool != 'NONE':
@@ -170,7 +173,8 @@ def _pick_handler(context, settings, hand, pose, tip_pose, scale, value):
         if off:
             # The off-hand trigger selects what it touches (and moves it, held), or clears the selection in
             # empty space; the main one only makes things, so it never grabs by accident.
-            obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale)
+            obj = primitives.touching(context, tip_pose.translation, interactions.TOUCH_MARGIN * scale,
+                                      curve_strokes=True)
             if obj is None:
                 return interactions.Deselect(context)
             return interactions.MoveObject(context, obj, tip_pose, scale)

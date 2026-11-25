@@ -243,7 +243,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Feature | How |
 |---|---|
 | Draw / Curve / Edit / Erase | segmented control |
-| Tube / Ribbon / Note / Pencil (Grease Pencil, on the current frame) | segmented control, words only (with Draw) |
+| Tube / Ribbon / Raw (curves with a Geometry Nodes modifier) / Note / Pencil (Grease Pencil, on the current frame) | segmented control, words only (with Draw) |
 | Color | 8 swatches (with Draw and Curve; they also recolor the curve being built) |
 | Bezier curve: add a point; drag to pull its handles; first point closes, last point finishes | Curve tool, right trigger |
 | Finish the open curve | header check icon (with Curve); **B** |
@@ -252,6 +252,7 @@ Notation: **Rail > Mode** is a rail icon; *More* is that mode's More row;
 | Width | slider |
 | Undo stroke (a curve: its last point) | header undo icon; **B** (with no curve open) |
 | Thickness (pressure, speed, taper, fixed), taper length | *More* > Thickness picker |
+| Geometry Nodes group for new Tube / Ribbon / Raw strokes (VR Stroke, or the file's own) | *More* > Nodes picker |
 | Smooth on / off, Amount, Lag (every stroke's; also on Settings) | *More*: icon toggle and two sliders |
 | Mirror X / Y / Z, center at left hand | *More* > Mirror |
 

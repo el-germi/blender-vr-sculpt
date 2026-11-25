@@ -351,9 +351,18 @@ offset and display options; **VR Extras** has the grid, navigation, hands
   up too: with Extra Mesh Objects that's 42 entries (gears, pipe joints,
   gemstones, torus knots, rocks, ...). Their settings panels are built from
   the operators' own properties.
-- **Draw mode**: freehand 3D strokes that become real meshes, like Gravity
-  Sketch. Tube (round, never twists) and Ribbon (flat, follows your wrist's
-  roll) strokes, Note strokes that are Blender annotations, and **Pencil**
+- **Draw mode**: freehand 3D strokes, like Gravity Sketch. Tube (round,
+  never twists), Ribbon (flat, follows your wrist's roll) and **Raw** strokes
+  are Blender curves (a Curves object, with the width as its radius and the
+  roll as its normals) that a shared "VR Stroke" Geometry Nodes modifier
+  turns into a tube or ribbon, tapers and mirrors. Raw is just the curve, for
+  hair, scattering or your own node setups, and the modifier's Style changes
+  any stroke between the three afterwards. *More* > Nodes (or Stroke Nodes
+  in the sidebar) gives new strokes your own Geometry Nodes group instead;
+  its inputs named Style, Taper, Mirror X / Y / Z or Mirror Center are set
+  from the stroke. Picking a stroke to sculpt or paint turns it into the
+  mesh it shows. Strokes made before 0.14 stay meshes and still edit. Note
+  strokes are Blender annotations, and **Pencil**
   strokes that are real Grease Pencil: they render, take Grease Pencil
   modifiers, and go on the current frame, so with Auto Keying on (each
   unkeyed frame gets a key of its own) you can animate frame by frame from
@@ -876,13 +885,25 @@ With Triggers" is on. The setting applies when the VR session starts.
   of the meshes near a grabbed object on first use and keeps them for the
   grab.
 - **Draw mode** ([strokes.py](vr_sculpt/strokes.py), [drawing.py](vr_sculpt/drawing.py)):
-  each stroke object keeps its raw samples (position, width, the
-  controller's side vector) as an ID property in object space. The mesh is
-  rebuilt from them with numpy (Catmull-Rom smoothing, tube rings or ribbon
-  strips, mirrored copies) and written with `foreach_set`, so edits and
-  mirroring stay live. Long strokes rebuild a lighter preview while the
-  trigger is held (under 8 ms per frame for a 1200-sample mirrored tube) and
-  the full mesh on release. Notes are 3D annotation strokes, one layer per
+  a stroke is a Curves object with one Catmull-Rom curve through its
+  samples, in object space: position, half the width as `radius`, and the
+  frame normal (the controller's side vector, carried along without flips)
+  as `custom_normal` with normal mode Free, written with `foreach_set`
+  (`resize_curves` as it grows, about 0.2 ms a frame with the modifier's
+  evaluation). An ID property keeps the style, mirror axes and center and
+  taper. The "VR Stroke" node group (built from Python once per file,
+  tagged with a version) sweeps a circle or a line along the curve, scaled
+  by the radius times the taper ramps (from the spline parameter, as
+  `taper_envelope`), switches on a Style menu and joins reflected copies
+  per mirror axis with their faces flipped back. In 5.4 modifier inputs are
+  set through `mod.properties.inputs.<identifier>.value` (no ID properties
+  on the modifier), only while a stroke is drawn, so a Style changed in the
+  modifier survives Edit. A Curves object can't go through
+  `meshes.new_from_object`, so turning one into a mesh copies the evaluated
+  geometry's mesh. The headset draws a bare curve one pixel wide, so the
+  overlay draws Raw strokes as a 3-pixel line. Strokes from before 0.14 are
+  meshes with all their samples in the ID property, still rebuilt with
+  numpy. Notes are 3D annotation strokes, one layer per
   color. Pencil strokes ([pencil.py](vr_sculpt/pencil.py)) are Grease
   Pencil v3 strokes grown a point at a time (`add_points`, about 0.01 ms
   each) in the object's space; each stroke is fetched again before it's

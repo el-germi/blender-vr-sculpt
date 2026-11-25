@@ -207,12 +207,15 @@ def axis_scale(matrix):
     return Vector((m.col[0].length, m.col[1].length, m.col[2].length))
 
 
-def touching(context, point, margin):
+def touching(context, point, margin, curve_strokes=False):
     """The visible, selectable mesh object (or collection instance) whose bounds contain point (+margin),
-    smallest first, or None."""
+    smallest first, or None. curve_strokes: Draw's Curves strokes count too (they show a mesh)."""
+    from . import strokes
     best, best_vol = None, None
     for obj in context.view_layer.objects:
-        if obj is None or not (obj.type == 'MESH' or is_instance(obj)) or not obj.visible_get() or obj.hide_select:
+        if obj is None or not obj.visible_get() or obj.hide_select:
+            continue
+        if not (obj.type == 'MESH' or is_instance(obj) or (curve_strokes and strokes.is_curve_stroke(obj))):
             continue
         inv = obj.matrix_world.inverted_safe()
         p = inv @ Vector(point)

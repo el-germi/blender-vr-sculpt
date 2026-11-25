@@ -1140,7 +1140,7 @@ def _array_center_here(context, obj):
 # --- Draw -----------------------------------------------------------------------
 
 DRAW_TOOLS = (('DRAW', "Draw"), ('CURVE', "Curve"), ('EDIT', "Edit"), ('ERASE', "Erase"))
-DRAW_STYLES = (('TUBE', "Tube"), ('RIBBON', "Ribbon"), ('NOTE', "Note"), ('PENCIL', "Pencil"))
+DRAW_STYLES = (('TUBE', "Tube"), ('RIBBON', "Ribbon"), ('RAW', "Raw"), ('NOTE', "Note"), ('PENCIL', "Pencil"))
 
 
 def _set_draw(context, settings, attr, value):
@@ -1161,7 +1161,7 @@ def _draw_rows(context, settings):
     ]
     if settings.draw_tool == 'DRAW':
         out.append(_segments("style_", "draw_style", DRAW_STYLES, settings.draw_style,
-                             lambda v: setattr(settings, "draw_style", v)))  # Four: words only, as "New as".
+                             lambda v: setattr(settings, "draw_style", v)))  # Five: words only, as "New as".
     if settings.draw_tool in {'DRAW', 'CURVE'}:
         out.append([vr_ui.swatch_button("color_" + ident, rgb,
                                         (lambda i=ident: _set_draw(context, settings, "draw_color", i)),
@@ -1177,12 +1177,33 @@ def _draw_rows(context, settings):
     if settings.draw_thickness == 'TAPER':
         more.append([vr_ui.slider("draw_taper", "Taper length", settings.draw_taper, 0.05, 0.5,
                                   lambda v: setattr(settings, "draw_taper", v), fmt=_percent)])
+    if settings.draw_tool == 'DRAW' and settings.draw_style in strokes.CURVE_STYLES:
+        more.append([_stroke_nodes_select(settings)])
     more += _smooth_rows(settings)
     more.append([vr_ui.label("Mirror", fixed=LABEL_W)] + [
         vr_ui.toggle("mirror_" + a, a.upper(), getattr(settings, "mirror_" + a), _toggle(settings, "mirror_" + a))
         for a in "xyz"] + [vr_ui.icon_button("mirror_here", "here", lambda: _cursor_to_off_hand(context),
                                             "Center at other hand")])
     return _disclose('DRAW', out, more, "Thickness, smoothing, mirror")
+
+
+def _stroke_nodes_select(settings):
+    """Which Geometry Nodes group new strokes get: VR Stroke, or one of the file's modifier groups."""
+    current = settings.draw_nodes.name if settings.draw_nodes is not None else ""
+
+    def options():
+        out = [Option("", strokes.NODES)]
+        for ng in bpy.data.node_groups:
+            if (ng.bl_idname == 'GeometryNodeTree' and getattr(ng, "is_modifier", True)
+                    and ng.get(strokes.NODES_TAG) is None):
+                out.append(Option(ng.name, ng.name))
+        return out
+
+    def choose(name):
+        settings.draw_nodes = bpy.data.node_groups.get(name) if name else None
+
+    return vr_ui.select("draw_nodes", "Nodes", current or strokes.NODES,
+                        lambda: open_picker("Stroke Nodes", options(), current, choose))
 
 
 def _undo_stroke(context):

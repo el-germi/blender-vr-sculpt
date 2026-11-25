@@ -147,7 +147,8 @@ of script: it gets the runtime's controller models over OpenXR (its own instance
 Pro models; it can't run during a VR session (SteamVR would end Blender's). In Model mode the off-hand trigger
 selects / moves (`MoveObject`, `Deselect`) and the main one only creates.
 
-**Other modes**: `strokes.py` (mesh from stored samples, rotation-minimizing frames) +
+**Other modes**: `strokes.py` (Curves objects through the samples with rotation-minimizing frame normals; the
+"VR Stroke" Geometry Nodes modifier makes the tube / ribbon, taper and mirrors; pre-0.14 strokes are meshes) +
 `drawing.py` for Draw, `pencil.py` for its Pencil style (Grease Pencil v3 strokes), `curves.py` for its
 Curve tool and editing any Bezier curve (Object Mode `bezier_points`; insert / delete rebuild the spline); `refs.py` for Tools' Refs
 (image empties, drawn in VR since the headset skips empties); `retopo.py` for Retopo (quads traced onto a reference mesh's BVH, edited with

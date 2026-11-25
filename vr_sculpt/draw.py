@@ -76,6 +76,8 @@ def draw_overlay(context, ss, xr=True):
     lookdev.draw(context, ss, tips, scale)  # The Light tool's gizmos (the headset doesn't draw lights).
     refs.draw(context, ss, tips, scale, xr)  # Reference pictures (the headset doesn't draw empties).
     onion.draw(context)
+    if xr:
+        strokes.draw_raw(context)  # (The desktop draws a Raw stroke's curve itself.)
     if settings.show_paths and xr:  # The desktop view draws Blender's own paths.
         paths.draw(context, scale)
     if settings.mode == 'POSE' and settings.pose_show_bones:
@@ -162,7 +164,7 @@ def _draw_cursors(context, ss, settings, xr):
         elif model and idx == off:
             # The off-hand trigger selects: the ring is the selection's color, and what it would select is boxed.
             color = SELECT_COLOR
-            touched = primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale)
+            touched = primitives.touching(context, tip, interactions.TOUCH_MARGIN * scale, curve_strokes=True)
             if touched is not None:
                 _draw_bounds(shader, touched, (1.0, 0.85, 0.3, 0.9))
         elif model:
